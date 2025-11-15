@@ -1,0 +1,27 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build artifacts
+dist/
+coverage.out
+
+# Task runtime files
+.task/
+.taskenv
+
+# IDE/editor files
+.idea/
+.vscode/
+*.swp
+
+# Go modules
+vendor/
+
+# Local tooling
+.env
+.version
+node_modules/
