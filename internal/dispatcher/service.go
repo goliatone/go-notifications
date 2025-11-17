@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goliatone/go-notifications/internal/inbox"
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/domain"
@@ -21,6 +20,10 @@ import (
 )
 
 // Dependencies groups the repositories/services required by the dispatcher.
+type inboxDeliverer interface {
+	DeliverFromMessage(ctx context.Context, msg *domain.NotificationMessage) error
+}
+
 type Dependencies struct {
 	Definitions store.NotificationDefinitionRepository
 	Events      store.NotificationEventRepository
@@ -31,7 +34,7 @@ type Dependencies struct {
 	Logger      logger.Logger
 	Config      config.DispatcherConfig
 	Preferences *prefsvc.Service
-	Inbox       *inbox.Service
+	Inbox       inboxDeliverer
 }
 
 // Service expands events into rendered messages and routes them to adapters.
@@ -45,7 +48,7 @@ type Service struct {
 	logger      logger.Logger
 	cfg         config.DispatcherConfig
 	preferences *prefsvc.Service
-	inbox       *inbox.Service
+	inbox       inboxDeliverer
 }
 
 // DispatchOptions allow callers to override channels/locales.
