@@ -48,6 +48,8 @@ examples/web/
 │   ├── index.html       # Dashboard UI
 │   ├── app.js           # Frontend JavaScript
 │   └── styles.css       # Styling
+├── views/
+│   └── home.html        # go-template (Pongo2) view rendered by go-router
 └── data/
     ├── locales/         # i18n message catalogs
     └── templates/       # Notification templates
@@ -131,8 +133,9 @@ config.Config{
 ## Technology Stack
 
 - **Backend**: Go 1.24
-- **HTTP Framework**: Fiber v2
-- **WebSocket**: gofiber/contrib/websocket
+- **HTTP Router**: `github.com/goliatone/go-router` (Fiber adapter)
+- **Template Engine**: `github.com/goliatone/go-template` via go-router view helpers
+- **WebSocket**: go-router unified WebSocket context + in-process hub
 - **Database**: SQLite (in-memory)
 - **Storage**: Memory providers (for demo)
 - **Frontend**: Vanilla HTML/CSS/JavaScript
