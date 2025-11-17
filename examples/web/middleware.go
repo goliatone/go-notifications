@@ -1,7 +1,9 @@
 package main
 
 import (
-	"github.com/gofiber/fiber/v2"
+	"net/http"
+
+	"github.com/goliatone/go-router"
 )
 
 const (
@@ -9,39 +11,41 @@ const (
 	UserContextKey    = "user"
 )
 
-// AuthMiddleware checks for valid session.
-func (a *App) AuthMiddleware(c *fiber.Ctx) error {
-	sessionID := c.Cookies(SessionCookieName)
-	if sessionID == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
-	}
+// AuthMiddleware ensures the request is authenticated.
+func (a *App) AuthMiddleware() router.MiddlewareFunc {
+	return func(next router.HandlerFunc) router.HandlerFunc {
+		return func(c router.Context) error {
+			sessionID := c.Cookies(SessionCookieName)
+			if sessionID == "" {
+				return c.JSON(http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+			}
 
-	user := a.GetUserBySession(sessionID)
-	if user == nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "invalid session",
-		})
-	}
+			user := a.GetUserBySession(sessionID)
+			if user == nil {
+				return c.JSON(http.StatusUnauthorized, map[string]any{"error": "invalid session"})
+			}
 
-	c.Locals(UserContextKey, user)
-	return c.Next()
+			c.Locals(UserContextKey, user)
+			return next(c)
+		}
+	}
 }
 
-// AdminMiddleware checks if user is admin.
-func (a *App) AdminMiddleware(c *fiber.Ctx) error {
-	user := GetUser(c)
-	if user == nil || !user.IsAdmin {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "admin access required",
-		})
+// AdminMiddleware ensures the current user has admin privileges.
+func (a *App) AdminMiddleware() router.MiddlewareFunc {
+	return func(next router.HandlerFunc) router.HandlerFunc {
+		return func(c router.Context) error {
+			user := GetUser(c)
+			if user == nil || !user.IsAdmin {
+				return c.JSON(http.StatusForbidden, map[string]any{"error": "admin access required"})
+			}
+			return next(c)
+		}
 	}
-	return c.Next()
 }
 
 // GetUser retrieves the current user from context.
-func GetUser(c *fiber.Ctx) *DemoUser {
+func GetUser(c router.Context) *DemoUser {
 	user, ok := c.Locals(UserContextKey).(*DemoUser)
 	if !ok {
 		return nil
