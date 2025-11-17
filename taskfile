@@ -22,6 +22,10 @@ PATH=$(pwd)/node_modules/.bin:$PATH
 # This will make all scripts available in the ./src/bin directory
 PATH=$(pwd)/src/bin:$PATH
 
+GO_CACHE_DIR=${GO_CACHE_DIR:-$(pwd)/tmp/go-cache}
+mkdir -p "${GO_CACHE_DIR}"
+export GOCACHE=${GOCACHE:-${GO_CACHE_DIR}}
+
 
 #################################################
 # Development dependencies
@@ -146,11 +150,21 @@ function docs:lint {
 ##
 ## -----
 ##
+## samples
+##
+## Build sample commands (go-cms adapter demo)
+function samples {
+    go run ./cmd/examples/gocms
+}
+
+##
+## -----
+##
 ## ci
 ##
 ## Run linters, tests, and docs checks
 function ci {
-    lint && test && docs:lint
+    lint && test && docs:lint && samples
 }
 
 ##
