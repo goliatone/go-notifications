@@ -1,26 +1,66 @@
 # go-notifications
 
-Composable notification services for Go applications. This module follows the technical design defined in `docs/NTF_TDD.md` and ships:
+`go-notifications` is a self-contained module that handles definitions, templates, rendering, dispatch, preferences, inbox state, and persistence for notification workloads. It stays adapter first so hosts can plug in their own storage, queue, and channel providers.
 
-- Multi-channel dispatch powered by pluggable adapters
-- Template rendering + localization via go-template and go-i18n
-- Preferences, inbox state, and options layering driven by go-options
-- Adapter-oriented integrations so go-admin/go-cms remain optional
+## What the module provides
 
-## Status
+- Domain entities for definitions, templates, messages, deliveries, inbox entries, and preferences under `pkg/domain`.
+- Repository contracts in `pkg/interfaces` plus Bun and inmemory implementations in `internal/storage`.
+- Localization aware template pipeline (`pkg/templates`, `internal/templates`) backed by [go-template](https://github.com/goliatone/go-template) + [go-i18n](https://github.com/goliatone/go-i18n) and cache hooks.
+- Dispatcher, channel adapters, and delivery attempt tracking (`pkg/notifier`, `pkg/adapters`, `internal/dispatcher`).
+- Preference evaluation with [go-options](https://github.com/goliatone/go-options), inbox services, and realtime broadcaster bridges.
+- Command catalog (`pkg/commands`) so transports can call command handlers without touching `internal` packages.
+- Optional adapters (`adapters/gocms`, future `adapters/goadmin`) that translate external schemas into notification templates without adding direct dependencies.
 
-Architecture and implementation plans live in `docs/NTF_TDD.md` and `docs/NTF_TSK.md`. Phase 0 tasks bootstrap the repository layout, tooling, and configuration skeleton before services are implemented.
+## Using the module
 
-## Development
+```go
+import (
+    "context"
 
-Use the Taskfile targets once the Task CLI is installed:
+    "github.com/goliatone/go-notifications/pkg/notifier"
+    "github.com/goliatone/go-notifications/pkg/config"
+)
 
-```bash
-task lint
-task test
-task docs:lint
-task samples
-task ci
+func send(ctx context.Context) error {
+    cfg := config.Default()
+    mod, err := notifier.NewModule(cfg)
+    if err != nil {
+        return err
+    }
+    manager := mod.Manager()
+    return manager.Send(ctx, notifier.Event{
+        DefinitionCode: "welcome",
+        Recipients:     []string{"user@example.com"},
+        Context: map[string]any{
+            "Name": "Rosa",
+        },
+    })
+}
 ```
 
-See `CONTRIBUTING.md` for contribution guidelines.
+- `pkg/storage` builds Bun or in memory repositories depending on the configuration.
+- `pkg/templates.Service` manages template CRUD and rendering, adapters can call it through the exported interface
+- `pkg/commands.Registry` exposes typed command handlers so HTTP, CLI, or queue transports share execution paths
+- `adapters/gocms` includes helper structs to convert [go-cms](https://github.com/goliatone/go-cms) snapshots into `templates.TemplateInput` values, see `docs/NTF_ADAPTERS.md`
+
+## Documentation map
+
+- `docs/NTF_TDD.md`: complete technical design.
+- `docs/NTF_TEMPLATES.md`: template authoring, schema validation, and go-cms imports.
+- `docs/NTF_OPTIONS.md`, `docs/NTF_ENTITIES.md`, `docs/NTF_REALTIME.md`: supporting guides.
+- `docs/NTF_TSK.md`: implementation roadmap with progress for each phase.
+
+## Development workflow
+
+The repository includes a shell-based taskfile. Run tasks directly from the repo root:
+
+```bash
+./taskfile lint         # golangci-lint run ./...
+./taskfile test         # go test ./...
+./taskfile docs:lint    # markdownlint or markdownlint-cli2
+./taskfile samples      # go run ./cmd/examples/gocms
+./taskfile ci           # lint + test + docs + samples
+```
+
+`taskfile` sets `GOCACHE` to `tmp/go-cache` so repeated runs stay fast without touching the host-level Go cache. CI uses the same entry point via `.github/workflows/ci.yml`.
