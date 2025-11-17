@@ -5,6 +5,7 @@ go 1.24.0
 toolchain go1.24.10
 
 require (
+	github.com/goliatone/go-command v0.6.0
 	github.com/goliatone/go-config v0.6.0
 	github.com/goliatone/go-i18n v0.2.0
 	github.com/goliatone/go-options v0.4.0
@@ -20,6 +21,7 @@ require (
 
 require (
 	cel.dev/expr v0.24.0 // indirect
+	github.com/alecthomas/kong v1.11.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/dop251/goja v0.0.0-20251008123653-cf18d89f3cf6 // indirect
