@@ -66,3 +66,35 @@ func (r *InboxRepository) MarkRead(ctx context.Context, id uuid.UUID, read bool)
 	}
 	return r.base.update(ctx, item)
 }
+
+func (r *InboxRepository) Snooze(ctx context.Context, id uuid.UUID, until time.Time) error {
+	item, err := r.base.getByID(ctx, id, false)
+	if err != nil {
+		return err
+	}
+	item.SnoozedUntil = until.UTC()
+	return r.base.update(ctx, item)
+}
+
+func (r *InboxRepository) Dismiss(ctx context.Context, id uuid.UUID) error {
+	item, err := r.base.getByID(ctx, id, false)
+	if err != nil {
+		return err
+	}
+	item.DismissedAt = time.Now().UTC()
+	item.Unread = false
+	return r.base.update(ctx, item)
+}
+
+func (r *InboxRepository) CountUnread(ctx context.Context, userID string) (int, error) {
+	r.base.mu.RLock()
+	defer r.base.mu.RUnlock()
+
+	count := 0
+	for _, item := range r.base.records {
+		if item.UserID == userID && item.Unread && item.DismissedAt.IsZero() {
+			count++
+		}
+	}
+	return count, nil
+}

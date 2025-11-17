@@ -79,3 +79,36 @@ func (r *InboxRepository) MarkRead(ctx context.Context, id uuid.UUID, read bool)
 	}
 	return r.base.update(ctx, record)
 }
+
+func (r *InboxRepository) Snooze(ctx context.Context, id uuid.UUID, until time.Time) error {
+	_, err := r.base.db.
+		NewUpdate().
+		Model((*domain.InboxItem)(nil)).
+		Set("snoozed_until = ?", until.UTC()).
+		Where("id = ?", id).
+		Exec(ctx)
+	return mapError(err)
+}
+
+func (r *InboxRepository) Dismiss(ctx context.Context, id uuid.UUID) error {
+	now := time.Now().UTC()
+	_, err := r.base.db.
+		NewUpdate().
+		Model((*domain.InboxItem)(nil)).
+		Set("dismissed_at = ?", now).
+		Set("unread = ?", false).
+		Where("id = ?", id).
+		Exec(ctx)
+	return mapError(err)
+}
+
+func (r *InboxRepository) CountUnread(ctx context.Context, userID string) (int, error) {
+	count, err := r.base.db.
+		NewSelect().
+		Model((*domain.InboxItem)(nil)).
+		Where("user_id = ?", userID).
+		Where("unread = TRUE").
+		Where("dismissed_at IS NULL").
+		Count(ctx)
+	return count, mapError(err)
+}

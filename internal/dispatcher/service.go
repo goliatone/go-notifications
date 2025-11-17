@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/goliatone/go-notifications/internal/inbox"
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/domain"
@@ -30,6 +31,7 @@ type Dependencies struct {
 	Logger      logger.Logger
 	Config      config.DispatcherConfig
 	Preferences *prefsvc.Service
+	Inbox       *inbox.Service
 }
 
 // Service expands events into rendered messages and routes them to adapters.
@@ -43,6 +45,7 @@ type Service struct {
 	logger      logger.Logger
 	cfg         config.DispatcherConfig
 	preferences *prefsvc.Service
+	inbox       *inbox.Service
 }
 
 // DispatchOptions allow callers to override channels/locales.
@@ -88,6 +91,7 @@ func New(deps Dependencies) (*Service, error) {
 		logger:      deps.Logger,
 		cfg:         deps.Config,
 		preferences: deps.Preferences,
+		inbox:       deps.Inbox,
 	}, nil
 }
 
@@ -252,6 +256,13 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		Locale: renderResult.Locale,
 	}
 
+	if channelType == "inbox" && s.inbox != nil {
+		if err := s.handleInboxDelivery(ctx, message); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	if err := s.deliverWithRetries(ctx, messenger, message, sendMsg); err != nil {
 		return err
 	}
@@ -328,6 +339,20 @@ func cloneJSONMap(src domain.JSONMap) domain.JSONMap {
 		dst[k] = v
 	}
 	return dst
+}
+
+func (s *Service) handleInboxDelivery(ctx context.Context, message *domain.NotificationMessage) error {
+	if message == nil {
+		return errors.New("dispatcher: message is required for inbox delivery")
+	}
+	if err := s.inbox.DeliverFromMessage(ctx, message); err != nil {
+		return fmt.Errorf("dispatcher: inbox delivery failed: %w", err)
+	}
+	message.Status = domain.MessageStatusDelivered
+	if s.messages != nil {
+		_ = s.messages.Update(ctx, message)
+	}
+	return nil
 }
 
 func (s *Service) allowDelivery(ctx context.Context, event *domain.NotificationEvent, def *domain.NotificationDefinition, recipient, channel string) (bool, string, error) {

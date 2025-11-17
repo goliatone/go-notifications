@@ -13,12 +13,14 @@ import (
 
 type baseRepository[T any] struct {
 	repo    repository.Repository[*T]
+	db      *bun.DB
 	extract func(*T) *domain.RecordMeta
 }
 
 func newBaseRepository[T any](db *bun.DB, handlers repository.ModelHandlers[*T], extract func(*T) *domain.RecordMeta) baseRepository[T] {
 	return baseRepository[T]{
 		repo:    repository.MustNewRepository[*T](db, handlers),
+		db:      db,
 		extract: extract,
 	}
 }
