@@ -1,0 +1,93 @@
+{% set title = title or "Notification Center Demo" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/public/styles.css">
+</head>
+<body>
+    <div id="login-screen" class="screen">
+        <div class="login-container">
+            <h1>{{ title }}</h1>
+            <p>Select a demo user to login:</p>
+            <div class="user-list">
+                {% for user in demo_users %}
+                <button class="user-btn" data-email="{{ user.Email }}">
+                    <strong>{{ user.Name }}</strong> ({{ user.Locale|upper }}, {% if user.IsAdmin %}Admin{% else %}User{% endif %})
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div id="app-screen" class="screen" style="display: none;">
+        <nav class="navbar">
+            <div class="nav-left">
+                <h1>🔔 Notification Center</h1>
+            </div>
+            <div class="nav-right">
+                <span class="user-info">
+                    <span id="username"></span>
+                    <span class="locale-badge" id="locale-badge"></span>
+                </span>
+                <span class="badge" id="unread-count">0</span>
+                <button id="logout-btn" class="btn btn-secondary">Logout</button>
+            </div>
+        </nav>
+
+        <div class="container">
+            <aside class="sidebar">
+                <div class="card">
+                    <h2>Quick Actions</h2>
+                    <button id="test-notification-btn" class="btn btn-primary">Send Test Notification</button>
+                    <button id="mark-all-read-btn" class="btn btn-secondary">Mark All Read</button>
+                    <button id="refresh-btn" class="btn btn-secondary">Refresh Inbox</button>
+                </div>
+
+                <div class="card">
+                    <h2>Preferences</h2>
+                    <div id="preferences-list">
+                        <p class="text-muted">Loading preferences...</p>
+                    </div>
+                </div>
+
+                <div class="card" id="admin-panel" style="display: none;">
+                    <h2>Admin</h2>
+                    <button id="broadcast-btn" class="btn btn-warning">Broadcast Alert</button>
+                    <button id="view-stats-btn" class="btn btn-secondary">View Stats</button>
+                </div>
+            </aside>
+
+            <main class="inbox">
+                <div class="inbox-header">
+                    <h2>Inbox</h2>
+                    <div class="inbox-filters">
+                        <label>
+                            <input type="checkbox" id="unread-only"> Unread only
+                        </label>
+                    </div>
+                </div>
+                <div id="inbox-list">
+                    <p class="text-muted">Loading notifications...</p>
+                </div>
+                <div id="pagination"></div>
+            </main>
+        </div>
+
+        <div class="connection-status" id="connection-status">
+            <span id="ws-status">{% if ws_enabled %}⚪ Connecting...{% else %}⚪ WebSocket disabled{% endif %}</span>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <script>
+        window.demoConfig = {
+            wsEnabled: {% if ws_enabled %}true{% else %}false{% endif %}
+        }
+    </script>
+    <script src="/public/app.js"></script>
+</body>
+</html>
