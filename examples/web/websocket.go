@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofiber/contrib/websocket"
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
+	"github.com/goliatone/go-router"
 )
 
 type WebSocketHub struct {
@@ -24,7 +24,7 @@ type WebSocketHub struct {
 type WebSocketClient struct {
 	ID     string
 	UserID string
-	Conn   *websocket.Conn
+	Conn   router.WebSocketContext
 	Send   chan []byte
 	hub    *WebSocketHub
 }
@@ -90,7 +90,6 @@ func (h *WebSocketHub) Close() {
 }
 
 func (h *WebSocketHub) Broadcast(ctx context.Context, event broadcaster.Event) error {
-	// Extract user ID from payload if it's a map
 	userID := ""
 	if payload, ok := event.Payload.(map[string]any); ok {
 		if uid, ok := payload["user_id"].(string); ok {
@@ -98,10 +97,11 @@ func (h *WebSocketHub) Broadcast(ctx context.Context, event broadcaster.Event) e
 		}
 	}
 
+	payload, _ := event.Payload.(map[string]any)
 	msg := BroadcastMessage{
 		UserID:  userID,
 		Event:   event.Topic,
-		Payload: event.Payload.(map[string]any),
+		Payload: payload,
 	}
 
 	select {
@@ -110,7 +110,7 @@ func (h *WebSocketHub) Broadcast(ctx context.Context, event broadcaster.Event) e
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-time.After(5 * time.Second):
-		return nil
+		return context.DeadlineExceeded
 	}
 }
 
@@ -130,6 +130,29 @@ func (h *WebSocketHub) UnregisterClient(client *WebSocketClient) {
 	h.unregister <- client
 }
 
+func (a *App) HandleWebSocket(ws router.WebSocketContext) error {
+	if err := ws.WebSocketUpgrade(); err != nil {
+		return err
+	}
+
+	userID := userIDFromUpgradeData(ws)
+	if userID == "" {
+		return ws.CloseWithStatus(4001, "missing user identifier")
+	}
+
+	client := &WebSocketClient{
+		ID:     ws.ConnectionID(),
+		UserID: userID,
+		Conn:   ws,
+		Send:   make(chan []byte, 256),
+		hub:    a.WSHub,
+	}
+
+	a.WSHub.RegisterClient(client)
+	client.HandleConnection()
+	return nil
+}
+
 func (c *WebSocketClient) HandleConnection() {
 	defer func() {
 		c.hub.UnregisterClient(c)
@@ -141,14 +164,8 @@ func (c *WebSocketClient) HandleConnection() {
 }
 
 func (c *WebSocketClient) readPump() {
-	defer func() {
-		c.hub.UnregisterClient(c)
-		c.Conn.Close()
-	}()
-
 	for {
-		_, _, err := c.Conn.ReadMessage()
-		if err != nil {
+		if _, _, err := c.Conn.ReadMessage(); err != nil {
 			break
 		}
 	}
@@ -165,18 +182,24 @@ func (c *WebSocketClient) writePump() {
 		select {
 		case message, ok := <-c.Send:
 			if !ok {
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				c.Conn.CloseWithStatus(1000, "hub closed channel")
 				return
 			}
-
-			if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			if err := c.Conn.WriteMessage(router.TextMessage, message); err != nil {
 				return
 			}
-
 		case <-ticker.C:
-			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if err := c.Conn.WritePing(nil); err != nil {
 				return
 			}
 		}
 	}
+}
+
+func userIDFromUpgradeData(ws router.WebSocketContext) string {
+	value := router.GetUpgradeDataWithDefault(ws, "user_id", "")
+	if userID, ok := value.(string); ok {
+		return userID
+	}
+	return ""
 }

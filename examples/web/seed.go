@@ -209,41 +209,41 @@ func seedTemplates(ctx context.Context, app *App) error {
 
 func seedInboxItems(ctx context.Context, app *App) error {
 	// Create some sample inbox items for demo users
-// 	for email, user := range app.Users {
-// 		if email == "alice@example.com" {
-// 			// Create welcome message
-// 			_, err := app.Module.Inbox().Create(ctx, &domain.InboxItem{
-// 				UserID:    user.ID,
-// 				MessageID: uuid.New(),
-// 				Title:     "Welcome to Notification Center!",
-// 				Body:      "Welcome " + user.Name + "! Thanks for joining our notification center.",
-// 				Locale:    user.Locale,
-// 				Unread:    true,
-// 				Pinned:    false,
-// 				ActionURL: "",
-// 				Metadata:  domain.JSONMap{"category": "welcome"},
-// 			})
-// 			if err != nil {
-// 				// app.Logger.Error("failed to create inbox item", "error", err)
-// 			}
-// 
-// 			// Create a read notification
-// 			_, err = app.Module.Inbox().Create(ctx, &domain.InboxItem{
-// 				UserID:    user.ID,
-// 				MessageID: uuid.New(),
-// 				Title:     "System Update",
-// 				Body:      "System updated successfully",
-// 				Locale:    user.Locale,
-// 				Unread:    false,
-// 				Pinned:    false,
-// 				ReadAt:    time.Now().Add(-1 * time.Hour),
-// 				Metadata:  domain.JSONMap{"category": "system"},
-// 			})
-// 			if err != nil {
-// 				// app.Logger.Error("failed to create inbox item", "error", err)
-// 			}
-// 		}
-// 	}
-// 
+	// 	for email, user := range app.Users {
+	// 		if email == "alice@example.com" {
+	// 			// Create welcome message
+	// 			_, err := app.Module.Inbox().Create(ctx, &domain.InboxItem{
+	// 				UserID:    user.ID,
+	// 				MessageID: uuid.New(),
+	// 				Title:     "Welcome to Notification Center!",
+	// 				Body:      "Welcome " + user.Name + "! Thanks for joining our notification center.",
+	// 				Locale:    user.Locale,
+	// 				Unread:    true,
+	// 				Pinned:    false,
+	// 				ActionURL: "",
+	// 				Metadata:  domain.JSONMap{"category": "welcome"},
+	// 			})
+	// 			if err != nil {
+	// 				// app.Logger.Error("failed to create inbox item", "error", err)
+	// 			}
+	//
+	// 			// Create a read notification
+	// 			_, err = app.Module.Inbox().Create(ctx, &domain.InboxItem{
+	// 				UserID:    user.ID,
+	// 				MessageID: uuid.New(),
+	// 				Title:     "System Update",
+	// 				Body:      "System updated successfully",
+	// 				Locale:    user.Locale,
+	// 				Unread:    false,
+	// 				Pinned:    false,
+	// 				ReadAt:    time.Now().Add(-1 * time.Hour),
+	// 				Metadata:  domain.JSONMap{"category": "system"},
+	// 			})
+	// 			if err != nil {
+	// 				// app.Logger.Error("failed to create inbox item", "error", err)
+	// 			}
+	// 		}
+	// 	}
+	//
 	return nil
 }
