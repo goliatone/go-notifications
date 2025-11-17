@@ -6,12 +6,14 @@ import (
 	"testing"
 
 	i18n "github.com/goliatone/go-i18n"
+	"github.com/goliatone/go-notifications/internal/inbox"
 	"github.com/goliatone/go-notifications/internal/storage/memory"
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/adapters/console"
 	"github.com/goliatone/go-notifications/pkg/adapters/twilio"
 	"github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/domain"
+	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
 	"github.com/goliatone/go-notifications/pkg/interfaces/cache"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
@@ -27,6 +29,7 @@ func TestManagerSendMultiChannelSuccess(t *testing.T) {
 	attemptRepo := memory.NewDeliveryRepository()
 	tplRepo := memory.NewTemplateRepository()
 	prefRepo := memory.NewPreferenceRepository()
+	inboxRepo := memory.NewInboxRepository()
 
 	translator := newTestTranslator(t)
 	tplSvc, err := templates.New(templates.Dependencies{
@@ -70,6 +73,7 @@ func TestManagerSendMultiChannelSuccess(t *testing.T) {
 	registry := adapters.NewRegistry(console.New(&logger.Nop{}), twilio.New(&logger.Nop{}))
 
 	prefs := newPreferenceService(t, prefRepo)
+	inboxSvc := newInboxService(t, inboxRepo)
 
 	manager, err := New(Dependencies{
 		Definitions: defRepo,
@@ -85,6 +89,7 @@ func TestManagerSendMultiChannelSuccess(t *testing.T) {
 			MaxWorkers: 4,
 		},
 		Preferences: prefs,
+		Inbox:       inboxSvc,
 	})
 	if err != nil {
 		t.Fatalf("manager: %v", err)
@@ -143,6 +148,7 @@ func TestManagerSendRecordsFailures(t *testing.T) {
 	attemptRepo := memory.NewDeliveryRepository()
 	tplRepo := memory.NewTemplateRepository()
 	prefRepo := memory.NewPreferenceRepository()
+	inboxRepo := memory.NewInboxRepository()
 
 	translator := newTestTranslator(t)
 	tplSvc, err := templates.New(templates.Dependencies{
@@ -183,6 +189,7 @@ func TestManagerSendRecordsFailures(t *testing.T) {
 	registry := adapters.NewRegistry(failAdapter)
 
 	prefs := newPreferenceService(t, prefRepo)
+	inboxSvc := newInboxService(t, inboxRepo)
 
 	manager, err := New(Dependencies{
 		Definitions: defRepo,
@@ -198,6 +205,7 @@ func TestManagerSendRecordsFailures(t *testing.T) {
 			MaxWorkers: 1,
 		},
 		Preferences: prefs,
+		Inbox:       inboxSvc,
 	})
 	if err != nil {
 		t.Fatalf("manager: %v", err)
@@ -234,6 +242,7 @@ func TestManagerSkipsBlockedPreferences(t *testing.T) {
 	attemptRepo := memory.NewDeliveryRepository()
 	tplRepo := memory.NewTemplateRepository()
 	prefRepo := memory.NewPreferenceRepository()
+	inboxRepo := memory.NewInboxRepository()
 
 	translator := newTestTranslator(t)
 	tplSvc, err := templates.New(templates.Dependencies{
@@ -266,6 +275,7 @@ func TestManagerSkipsBlockedPreferences(t *testing.T) {
 	}
 
 	prefs := newPreferenceService(t, prefRepo)
+	inboxSvc := newInboxService(t, inboxRepo)
 	enabled := boolPtr(false)
 	if _, err := prefs.Upsert(ctx, prefsvc.PreferenceInput{
 		SubjectType:    "user",
@@ -293,6 +303,7 @@ func TestManagerSkipsBlockedPreferences(t *testing.T) {
 			MaxWorkers: 1,
 		},
 		Preferences: prefs,
+		Inbox:       inboxSvc,
 	})
 	if err != nil {
 		t.Fatalf("manager: %v", err)
@@ -328,6 +339,19 @@ func newPreferenceService(t *testing.T, repo *memory.PreferenceRepository) *pref
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func newInboxService(t *testing.T, repo *memory.InboxRepository) *inbox.Service {
+	t.Helper()
+	svc, err := inbox.NewService(inbox.Dependencies{
+		Repository:  repo,
+		Broadcaster: &broadcaster.Nop{},
+		Logger:      &logger.Nop{},
+	})
+	if err != nil {
+		t.Fatalf("inbox service: %v", err)
+	}
+	return svc
+}
 
 // Helpers --------------------------------------------------------------------
 
