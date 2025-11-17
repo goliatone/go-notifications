@@ -19,6 +19,7 @@ Use the Taskfile targets once the Task CLI is installed:
 task lint
 task test
 task docs:lint
+task samples
 task ci
 ```
 
