@@ -35,6 +35,10 @@ type Manager struct {
 }
 
 // Dependencies bundles repositories/adapters required by the manager.
+type inboxDeliverer interface {
+	DeliverFromMessage(ctx context.Context, msg *domain.NotificationMessage) error
+}
+
 type Dependencies struct {
 	Definitions store.NotificationDefinitionRepository
 	Events      store.NotificationEventRepository
@@ -45,6 +49,7 @@ type Dependencies struct {
 	Logger      logger.Logger
 	Config      config.DispatcherConfig
 	Preferences *prefsvc.Service
+	Inbox       inboxDeliverer
 }
 
 var (
@@ -52,27 +57,36 @@ var (
 )
 
 // New constructs the notifier manager along with the dispatcher service.
+
 func New(deps Dependencies) (*Manager, error) {
+	return NewWithDispatcher(deps, nil)
+}
+
+// NewWithDispatcher allows callers to provide a pre-built dispatcher instance.
+func NewWithDispatcher(deps Dependencies, dispatcherSvc *dispatcher.Service) (*Manager, error) {
 	if deps.Events == nil {
 		return nil, ErrMissingEventsRepository
 	}
 	if deps.Logger == nil {
 		deps.Logger = &logger.Nop{}
 	}
-
-	dispatcherSvc, err := dispatcher.New(dispatcher.Dependencies{
-		Definitions: deps.Definitions,
-		Events:      deps.Events,
-		Messages:    deps.Messages,
-		Attempts:    deps.Attempts,
-		Templates:   deps.Templates,
-		Registry:    deps.Adapters,
-		Logger:      deps.Logger,
-		Config:      deps.Config,
-		Preferences: deps.Preferences,
-	})
-	if err != nil {
-		return nil, err
+	if dispatcherSvc == nil {
+		var err error
+		dispatcherSvc, err = dispatcher.New(dispatcher.Dependencies{
+			Definitions: deps.Definitions,
+			Events:      deps.Events,
+			Messages:    deps.Messages,
+			Attempts:    deps.Attempts,
+			Templates:   deps.Templates,
+			Registry:    deps.Adapters,
+			Logger:      deps.Logger,
+			Config:      deps.Config,
+			Preferences: deps.Preferences,
+			Inbox:       deps.Inbox,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &Manager{
