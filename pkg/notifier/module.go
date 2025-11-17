@@ -133,3 +133,12 @@ func (m *Module) Config() config.Config {
 	}
 	return m.container.Config
 }
+
+// Container returns the internal DI container.
+// This is exposed for advanced use cases like direct storage access.
+func (m *Module) Container() *di.Container {
+	if m == nil {
+		return nil
+	}
+	return m.container
+}
