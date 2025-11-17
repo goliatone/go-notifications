@@ -77,4 +77,7 @@ type InboxRepository interface {
 	Repository[domain.InboxItem]
 	ListByUser(ctx context.Context, userID string, opts ListOptions) (ListResult[domain.InboxItem], error)
 	MarkRead(ctx context.Context, id uuid.UUID, read bool) error
+	Snooze(ctx context.Context, id uuid.UUID, until time.Time) error
+	Dismiss(ctx context.Context, id uuid.UUID) error
+	CountUnread(ctx context.Context, userID string) (int, error)
 }
