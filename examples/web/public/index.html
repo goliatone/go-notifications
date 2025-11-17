@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notification Center Demo</title>
+    <link rel="stylesheet" href="/public/styles.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen">
+        <div class="login-container">
+            <h1>Notification Center Demo</h1>
+            <p>Select a demo user to login:</p>
+            <div class="user-list">
+                <button class="user-btn" data-email="alice@example.com">
+                    <strong>Alice</strong> (English, Admin)
+                </button>
+                <button class="user-btn" data-email="bob@example.com">
+                    <strong>Bob</strong> (English, User)
+                </button>
+                <button class="user-btn" data-email="carlos@example.com">
+                    <strong>Carlos</strong> (Spanish, User)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App Screen -->
+    <div id="app-screen" class="screen" style="display: none;">
+        <!-- Header -->
+        <nav class="navbar">
+            <div class="nav-left">
+                <h1>🔔 Notification Center</h1>
+            </div>
+            <div class="nav-right">
+                <span class="user-info">
+                    <span id="username"></span>
+                    <span class="locale-badge" id="locale-badge"></span>
+                </span>
+                <span class="badge" id="unread-count">0</span>
+                <button id="logout-btn" class="btn btn-secondary">Logout</button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="container">
+            <!-- Sidebar: Preferences & Actions -->
+            <aside class="sidebar">
+                <div class="card">
+                    <h2>Quick Actions</h2>
+                    <button id="test-notification-btn" class="btn btn-primary">Send Test Notification</button>
+                    <button id="mark-all-read-btn" class="btn btn-secondary">Mark All Read</button>
+                    <button id="refresh-btn" class="btn btn-secondary">Refresh Inbox</button>
+                </div>
+
+                <div class="card">
+                    <h2>Preferences</h2>
+                    <div id="preferences-list">
+                        <p class="text-muted">Loading preferences...</p>
+                    </div>
+                </div>
+
+                <!-- Admin Panel -->
+                <div class="card" id="admin-panel" style="display: none;">
+                    <h2>Admin</h2>
+                    <button id="broadcast-btn" class="btn btn-warning">Broadcast Alert</button>
+                    <button id="view-stats-btn" class="btn btn-secondary">View Stats</button>
+                </div>
+            </aside>
+
+            <!-- Main: Inbox -->
+            <main class="inbox">
+                <div class="inbox-header">
+                    <h2>Inbox</h2>
+                    <div class="inbox-filters">
+                        <label>
+                            <input type="checkbox" id="unread-only"> Unread only
+                        </label>
+                    </div>
+                </div>
+                <div id="inbox-list">
+                    <p class="text-muted">Loading notifications...</p>
+                </div>
+                <div id="pagination"></div>
+            </main>
+        </div>
+
+        <!-- Connection Status -->
+        <div class="connection-status" id="connection-status">
+            <span id="ws-status">⚪ Connecting...</span>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <script src="/public/app.js"></script>
+</body>
+</html>

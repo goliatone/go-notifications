@@ -1,0 +1,203 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"log"
+
+	i18n "github.com/goliatone/go-i18n"
+	"github.com/goliatone/go-notifications/examples/web/config"
+	"github.com/goliatone/go-notifications/internal/commands"
+	"github.com/goliatone/go-notifications/pkg/adapters"
+	"github.com/goliatone/go-notifications/pkg/adapters/console"
+	notifierconfig "github.com/goliatone/go-notifications/pkg/config"
+	"github.com/goliatone/go-notifications/pkg/domain"
+	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
+	"github.com/goliatone/go-notifications/pkg/notifier"
+	"github.com/goliatone/go-notifications/pkg/storage"
+	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/sqlitedialect"
+	"github.com/uptrace/bun/driver/sqliteshim"
+)
+
+// DemoUser represents a user in the demo application.
+type DemoUser struct {
+	ID       string
+	Name     string
+	Email    string
+	Locale   string
+	TenantID string
+	IsAdmin  bool
+}
+
+// App holds the application state and dependencies.
+type App struct {
+	Config     config.Config
+	Module     *notifier.Module
+	Catalog    *commands.Catalog
+	DB         *bun.DB
+	Logger     logger.Logger
+	WSHub      *WebSocketHub
+	Users      map[string]*DemoUser
+	Sessions   map[string]*DemoUser
+	Translator i18n.Translator
+}
+
+// NewApp creates and initializes the application.
+func NewApp(ctx context.Context, cfg config.Config) (*App, error) {
+	lgr := &logger.Nop{}
+
+	// Setup database
+	sqldb, err := sql.Open(sqliteshim.ShimName, cfg.Persistence.DSN)
+	if err != nil {
+		return nil, err
+	}
+	db := bun.NewDB(sqldb, sqlitedialect.New())
+
+	// Initialize storage providers
+	providers := storage.NewMemoryProviders()
+
+	// Setup i18n translator
+	translator, err := setupTranslator(cfg.Locales)
+	if err != nil {
+		return nil, err
+	}
+
+	// Setup adapters
+	consoleAdapter := console.New(lgr)
+
+	// Setup WebSocket hub if enabled
+	var wsHub *WebSocketHub
+	if cfg.Features.EnableWebSocket {
+		wsHub = NewWebSocketHub(lgr)
+		go wsHub.Run()
+	}
+
+	// Initialize notification module
+	module, err := notifier.NewModule(notifier.ModuleOptions{
+		Config:      notifierConfig(),
+		Storage:     providers,
+		Logger:      lgr,
+		Translator:  translator,
+		Broadcaster: wsHub,
+		Adapters:    []adapters.Messenger{consoleAdapter},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	app := &App{
+		Config:     cfg,
+		Module:     module,
+		Catalog:    module.Commands().Catalog,
+		DB:         db,
+		Logger:     lgr,
+		WSHub:      wsHub,
+		Users:      make(map[string]*DemoUser),
+		Sessions:   make(map[string]*DemoUser),
+		Translator: translator,
+	}
+
+	// Initialize demo users
+	app.initDemoUsers()
+
+	// Seed data
+	if err := SeedData(ctx, app); err != nil {
+		return nil, err
+	}
+
+	return app, nil
+}
+
+func (a *App) initDemoUsers() {
+	users := []DemoUser{
+		{
+			ID:       uuid.New().String(),
+			Name:     "Alice",
+			Email:    "alice@example.com",
+			Locale:   "en",
+			TenantID: "tenant-1",
+			IsAdmin:  true,
+		},
+		{
+			ID:       uuid.New().String(),
+			Name:     "Bob",
+			Email:    "bob@example.com",
+			Locale:   "en",
+			TenantID: "tenant-1",
+			IsAdmin:  false,
+		},
+		{
+			ID:       uuid.New().String(),
+			Name:     "Carlos",
+			Email:    "carlos@example.com",
+			Locale:   "es",
+			TenantID: "tenant-1",
+			IsAdmin:  false,
+		},
+	}
+
+	for i := range users {
+		a.Users[users[i].Email] = &users[i]
+	}
+}
+
+// GetUserByEmail returns a user by email.
+func (a *App) GetUserByEmail(email string) *DemoUser {
+	return a.Users[email]
+}
+
+// CreateSession creates a new session for a user.
+func (a *App) CreateSession(user *DemoUser) string {
+	sessionID := uuid.New().String()
+	a.Sessions[sessionID] = user
+	return sessionID
+}
+
+// GetUserBySession returns a user by session ID.
+func (a *App) GetUserBySession(sessionID string) *DemoUser {
+	return a.Sessions[sessionID]
+}
+
+// DeleteSession removes a session.
+func (a *App) DeleteSession(sessionID string) {
+	delete(a.Sessions, sessionID)
+}
+
+// Close cleans up resources.
+func (a *App) Close() error {
+	if a.WSHub != nil {
+		a.WSHub.Close()
+	}
+	if a.DB != nil {
+		return a.DB.Close()
+	}
+	return nil
+}
+
+func notifierConfig() notifierconfig.Config {
+	return notifierconfig.Config{
+		Localization: notifierconfig.LocalizationConfig{
+			DefaultLocale: "en",
+		},
+		Dispatcher: notifierconfig.DispatcherConfig{
+			MaxRetries: 3,
+			MaxWorkers: 4,
+		},
+	}
+}
+
+func setupTranslator(locales []string) (i18n.Translator, error) {
+	// For demo purposes, use a simple translator
+	// In production, you would load message catalogs and use go-i18n properly
+	return &NoopTranslator{}, nil
+}
+
+// NoopTranslator is a simple translator for demo purposes
+type NoopTranslator struct{}
+
+func (n *NoopTranslator) Translate(ctx context.Context, key string, params map[string]any, locale string) (string, error) {
+	// Just return the key for now
+	return key, nil
+}
