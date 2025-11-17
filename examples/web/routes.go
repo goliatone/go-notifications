@@ -1,36 +1,24 @@
 package main
 
 import (
-	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/google/uuid"
+	"github.com/goliatone/go-router"
 )
 
 // SetupRoutes configures all HTTP routes.
-func (a *App) SetupRoutes(app *fiber.App) {
-	// Middleware
-	app.Use(logger.New())
-	app.Use(cors.New())
+func (a *App) SetupRoutes(r router.Router[*fiber.App]) {
+	// Static assets for JS/CSS.
+	r.Static("/public", "./public")
 
-	// Public routes
-	app.Post("/auth/login", a.Login)
-	app.Post("/auth/logout", a.Logout)
+	r.Get("/", a.renderHome())
+	r.Post("/auth/login", a.Login)
+	r.Post("/auth/logout", a.Logout)
 
-	// Static files
-	app.Static("/public", "./examples/web/public")
-	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendFile("./examples/web/public/index.html")
-	})
+	api := r.Group("/api")
+	api.Use(a.AuthMiddleware())
 
-	// API routes (protected)
-	api := app.Group("/api", a.AuthMiddleware)
-
-	// User info
 	api.Get("/user", a.CurrentUser)
 
-	// Inbox
 	api.Get("/inbox", a.ListInbox)
 	api.Post("/inbox/:id/read", a.MarkRead)
 	api.Post("/inbox/:id/unread", a.MarkUnread)
@@ -38,46 +26,38 @@ func (a *App) SetupRoutes(app *fiber.App) {
 	api.Post("/inbox/:id/snooze", a.SnoozeNotification)
 	api.Get("/inbox/stats", a.InboxStats)
 
-	// Preferences
 	api.Get("/preferences", a.GetPreferences)
 	api.Put("/preferences", a.UpdatePreferences)
 
-	// Notifications
 	api.Post("/notify/test", a.SendTestNotification)
 	api.Post("/notify/event", a.EnqueueEvent)
 
-	// Admin routes
-	admin := app.Group("/admin", a.AuthMiddleware, a.AdminMiddleware)
+	admin := r.Group("/admin")
+	admin.Use(a.AuthMiddleware(), a.AdminMiddleware())
+
 	admin.Post("/definitions", a.CreateDefinition)
 	admin.Get("/definitions", a.ListDefinitions)
 	admin.Post("/templates", a.CreateTemplate)
 	admin.Get("/templates", a.ListTemplates)
 	admin.Post("/broadcast", a.BroadcastNotification)
 	admin.Get("/stats", a.DeliveryStats)
-
-	// WebSocket
-	if a.Config.Features.EnableWebSocket && a.WSHub != nil {
-		app.Get("/ws", websocket.New(a.HandleWebSocket))
-	}
 }
 
-// HandleWebSocket handles WebSocket connections.
-func (a *App) HandleWebSocket(c *websocket.Conn) {
-	// Get user from query params (in production, use proper auth)
-	userID := c.Query("user_id")
-	if userID == "" {
-		c.Close()
-		return
+func (a *App) renderHome() router.HandlerFunc {
+	return func(c router.Context) error {
+		users := make([]*DemoUser, 0, len(a.Users))
+		for _, user := range a.Users {
+			users = append(users, user)
+		}
+		return c.Render("home", router.ViewContext{
+			"title":        "Notification Center Demo",
+			"description":  "Test the go-notifications module end-to-end",
+			"demo_users":   users,
+			"ws_enabled":   a.Config.Features.EnableWebSocket,
+			"feature_set":  a.Config.Features,
+			"server_host":  a.Config.Server.Host,
+			"server_port":  a.Config.Server.Port,
+			"default_user": "alice@example.com",
+		})
 	}
-
-	client := &WebSocketClient{
-		ID:     uuid.New().String(),
-		UserID: userID,
-		Conn:   c,
-		Send:   make(chan []byte, 256),
-		hub:    a.WSHub,
-	}
-
-	a.WSHub.RegisterClient(client)
-	client.HandleConnection()
 }
