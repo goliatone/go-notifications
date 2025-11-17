@@ -99,6 +99,62 @@ function dev:cover {
 
 ##
 ## ########################################
+##           Testing & Linting
+## ########################################
+
+##
+## -----
+##
+## test
+##
+## Run Go unit tests
+function test {
+    go test ./...
+}
+
+##
+## -----
+##
+## lint
+##
+## Run Go linters via golangci-lint
+function lint {
+    golangci-lint run ./...
+}
+
+##
+## -----
+##
+## docs:lint
+##
+## Lint Markdown docs using markdownlint (CLI or npx)
+## Uses DOCS_LINT_GLOB environment variable or defaults to **/*.md
+function docs:lint {
+    local docs_glob="${DOCS_LINT_GLOB:-**/*.md}"
+
+    set -euo pipefail
+    if command -v markdownlint >/dev/null 2>&1; then
+        markdownlint $docs_glob
+    elif command -v npx >/dev/null 2>&1; then
+        npx --yes markdownlint-cli2 "$docs_glob"
+    else
+        echo "markdownlint (or npx) is required for docs:lint" >&2
+        exit 1
+    fi
+}
+
+##
+## -----
+##
+## ci
+##
+## Run linters, tests, and docs checks
+function ci {
+    lint && test && docs:lint
+}
+
+##
+## ########################################
 ##           Version Management
 ## ########################################
 
