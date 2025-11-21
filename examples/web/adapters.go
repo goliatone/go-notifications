@@ -13,6 +13,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/adapters/twilio"
 	"github.com/goliatone/go-notifications/pkg/adapters/whatsapp"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
+	"github.com/goliatone/go-notifications/pkg/secrets"
 )
 
 // AdapterRegistry holds information about configured adapters.
@@ -24,7 +25,7 @@ type AdapterRegistry struct {
 }
 
 // BuildAdapters detects and builds all configured adapters.
-func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry {
+func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig, dir *Directory, resolver secrets.Resolver, logs *DeliveryLogStore) *AdapterRegistry {
 	registry := &AdapterRegistry{
 		Adapters:        make([]adapters.Messenger, 0),
 		EnabledAdapters: make([]string, 0),
@@ -32,20 +33,33 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 		AdapterConfig:   cfg,
 	}
 
+	wrap := func(m adapters.Messenger) adapters.Messenger {
+		if dir == nil {
+			return m
+		}
+		return ResolvingMessenger{
+			inner:     m,
+			directory: dir,
+			secrets:   resolver,
+			logs:      logs,
+			logger:    lgr,
+		}
+	}
+
 	// Console adapter is always enabled
-	consoleAdapter := console.New(lgr)
+	consoleAdapter := wrap(console.New(lgr))
 	registry.Adapters = append(registry.Adapters, consoleAdapter)
 	registry.EnabledAdapters = append(registry.EnabledAdapters, "console")
 	registry.addChannels("console", "email", "email:console")
 
 	// Slack
 	if cfg.Slack.IsConfigured() {
-		slackAdapter := slack.New(lgr, slack.WithConfig(slack.Config{
+		slackAdapter := wrap(slack.New(lgr, slack.WithConfig(slack.Config{
 			Token:   cfg.Slack.Token,
 			Channel: cfg.Slack.Channel,
 			BaseURL: "https://slack.com/api",
 			Timeout: config.DefaultAdapterTimeout,
-		}))
+		})))
 		registry.Adapters = append(registry.Adapters, slackAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "slack")
 		registry.addChannels("chat", "slack", "chat:slack")
@@ -53,12 +67,12 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 
 	// Telegram
 	if cfg.Telegram.IsConfigured() {
-		telegramAdapter := telegram.New(lgr, telegram.WithConfig(telegram.Config{
+		telegramAdapter := wrap(telegram.New(lgr, telegram.WithConfig(telegram.Config{
 			Token:   cfg.Telegram.BotToken,
 			ChatID:  cfg.Telegram.ChatID,
 			BaseURL: "https://api.telegram.org",
 			Timeout: config.DefaultAdapterTimeout,
-		}))
+		})))
 		registry.Adapters = append(registry.Adapters, telegramAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "telegram")
 		registry.addChannels("chat", "chat:telegram", "telegram")
@@ -66,12 +80,12 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 
 	// Twilio (SMS)
 	if cfg.Twilio.IsConfigured() {
-		twilioAdapter := twilio.New(lgr, twilio.WithConfig(twilio.Config{
+		twilioAdapter := wrap(twilio.New(lgr, twilio.WithConfig(twilio.Config{
 			AccountSID: cfg.Twilio.AccountSID,
 			AuthToken:  cfg.Twilio.AuthToken,
 			From:       cfg.Twilio.FromPhone,
 			Timeout:    config.DefaultAdapterTimeout,
-		}))
+		})))
 		registry.Adapters = append(registry.Adapters, twilioAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "twilio")
 		registry.addChannels("sms", "sms:twilio")
@@ -83,11 +97,11 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 		if cfg.SendGrid.FromName != "" {
 			fromEmail = cfg.SendGrid.FromName + " <" + cfg.SendGrid.FromEmail + ">"
 		}
-		sendgridAdapter := sendgrid.New(lgr,
+		sendgridAdapter := wrap(sendgrid.New(lgr,
 			sendgrid.WithAPIKey(cfg.SendGrid.APIKey),
 			sendgrid.WithFrom(fromEmail),
 			sendgrid.WithTimeout(30),
-		)
+		))
 		registry.Adapters = append(registry.Adapters, sendgridAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "sendgrid")
 		registry.addChannels("email", "email:sendgrid")
@@ -99,12 +113,12 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 		if cfg.Mailgun.FromName != "" {
 			fromEmail = cfg.Mailgun.FromName + " <" + cfg.Mailgun.FromEmail + ">"
 		}
-		mailgunAdapter := mailgun.New(lgr, mailgun.WithConfig(mailgun.Config{
+		mailgunAdapter := wrap(mailgun.New(lgr, mailgun.WithConfig(mailgun.Config{
 			APIKey:     cfg.Mailgun.APIKey,
 			Domain:     cfg.Mailgun.Domain,
 			From:       fromEmail,
 			TimeoutSec: 30,
-		}))
+		})))
 		registry.Adapters = append(registry.Adapters, mailgunAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "mailgun")
 		registry.addChannels("email", "email:mailgun")
@@ -112,11 +126,11 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 
 	// WhatsApp
 	if cfg.WhatsApp.IsConfigured() {
-		whatsappAdapter := whatsapp.New(lgr, whatsapp.WithConfig(whatsapp.Config{
+		whatsappAdapter := wrap(whatsapp.New(lgr, whatsapp.WithConfig(whatsapp.Config{
 			Token:         cfg.WhatsApp.AuthToken,
 			PhoneNumberID: cfg.WhatsApp.FromPhone,
 			Timeout:       config.DefaultAdapterTimeout,
-		}))
+		})))
 		registry.Adapters = append(registry.Adapters, whatsappAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "whatsapp")
 		registry.addChannels("whatsapp", "whatsapp:whatsapp")
@@ -151,6 +165,25 @@ func (r *AdapterRegistry) GetAvailableChannels() []string {
 	channels := []string{"in-app"}
 	channels = append(channels, r.EnabledChannels...)
 	return uniqueStrings(channels)
+}
+
+// ProvidersForChannel returns adapter names that can deliver the given channel.
+func (r *AdapterRegistry) ProvidersForChannel(channel string) []string {
+	if r == nil {
+		return nil
+	}
+	base, _ := adapters.ParseChannel(channel)
+	providers := make([]string, 0)
+	for _, adapter := range r.Adapters {
+		caps := adapter.Capabilities()
+		for _, ch := range caps.Channels {
+			if candidate, _ := adapters.ParseChannel(ch); candidate == base {
+				providers = append(providers, adapter.Name())
+				break
+			}
+		}
+	}
+	return uniqueStrings(providers)
 }
 
 func contains(slice []string, item string) bool {
