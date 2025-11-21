@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/goliatone/go-notifications/examples/web/config"
 	"github.com/goliatone/go-notifications/pkg/adapters"
@@ -44,6 +43,7 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 		slackAdapter := slack.New(lgr, slack.WithConfig(slack.Config{
 			Token:   cfg.Slack.Token,
 			Channel: cfg.Slack.Channel,
+			BaseURL: "https://slack.com/api",
 			Timeout: config.DefaultAdapterTimeout,
 		}))
 		registry.Adapters = append(registry.Adapters, slackAdapter)
@@ -54,9 +54,9 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 	// Telegram
 	if cfg.Telegram.IsConfigured() {
 		telegramAdapter := telegram.New(lgr, telegram.WithConfig(telegram.Config{
-			BotToken: cfg.Telegram.BotToken,
-			ChatID:   cfg.Telegram.ChatID,
-			Timeout:  config.DefaultAdapterTimeout,
+			Token:   cfg.Telegram.BotToken,
+			BaseURL: "https://api.telegram.org",
+			Timeout: config.DefaultAdapterTimeout,
 		}))
 		registry.Adapters = append(registry.Adapters, telegramAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "telegram")
@@ -68,7 +68,7 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 		twilioAdapter := twilio.New(lgr, twilio.WithConfig(twilio.Config{
 			AccountSID: cfg.Twilio.AccountSID,
 			AuthToken:  cfg.Twilio.AuthToken,
-			FromPhone:  cfg.Twilio.FromPhone,
+			From:       cfg.Twilio.FromPhone,
 			Timeout:    config.DefaultAdapterTimeout,
 		}))
 		registry.Adapters = append(registry.Adapters, twilioAdapter)
@@ -78,12 +78,15 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 
 	// SendGrid (Email)
 	if cfg.SendGrid.IsConfigured() {
-		sendgridAdapter := sendgrid.New(lgr, sendgrid.WithConfig(sendgrid.Config{
-			APIKey:    cfg.SendGrid.APIKey,
-			FromEmail: cfg.SendGrid.FromEmail,
-			FromName:  cfg.SendGrid.FromName,
-			Timeout:   config.DefaultAdapterTimeout,
-		}))
+		fromEmail := cfg.SendGrid.FromEmail
+		if cfg.SendGrid.FromName != "" {
+			fromEmail = cfg.SendGrid.FromName + " <" + cfg.SendGrid.FromEmail + ">"
+		}
+		sendgridAdapter := sendgrid.New(lgr,
+			sendgrid.WithAPIKey(cfg.SendGrid.APIKey),
+			sendgrid.WithFrom(fromEmail),
+			sendgrid.WithTimeout(30),
+		)
 		registry.Adapters = append(registry.Adapters, sendgridAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "sendgrid")
 		registry.addChannels("email")
@@ -91,12 +94,15 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 
 	// Mailgun (Email)
 	if cfg.Mailgun.IsConfigured() {
+		fromEmail := cfg.Mailgun.FromEmail
+		if cfg.Mailgun.FromName != "" {
+			fromEmail = cfg.Mailgun.FromName + " <" + cfg.Mailgun.FromEmail + ">"
+		}
 		mailgunAdapter := mailgun.New(lgr, mailgun.WithConfig(mailgun.Config{
-			APIKey:    cfg.Mailgun.APIKey,
-			Domain:    cfg.Mailgun.Domain,
-			FromEmail: cfg.Mailgun.FromEmail,
-			FromName:  cfg.Mailgun.FromName,
-			Timeout:   config.DefaultAdapterTimeout,
+			APIKey:     cfg.Mailgun.APIKey,
+			Domain:     cfg.Mailgun.Domain,
+			From:       fromEmail,
+			TimeoutSec: 30,
 		}))
 		registry.Adapters = append(registry.Adapters, mailgunAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "mailgun")
@@ -106,10 +112,9 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 	// WhatsApp
 	if cfg.WhatsApp.IsConfigured() {
 		whatsappAdapter := whatsapp.New(lgr, whatsapp.WithConfig(whatsapp.Config{
-			AccountSID: cfg.WhatsApp.AccountSID,
-			AuthToken:  cfg.WhatsApp.AuthToken,
-			FromPhone:  cfg.WhatsApp.FromPhone,
-			Timeout:    config.DefaultAdapterTimeout,
+			Token:         cfg.WhatsApp.AuthToken,
+			PhoneNumberID: cfg.WhatsApp.FromPhone,
+			Timeout:       config.DefaultAdapterTimeout,
 		}))
 		registry.Adapters = append(registry.Adapters, whatsappAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "whatsapp")
