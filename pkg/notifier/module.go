@@ -13,6 +13,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/queue"
 	"github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/storage"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
@@ -28,6 +29,7 @@ type ModuleOptions struct {
 	Queue       queue.Queue
 	Broadcaster broadcaster.Broadcaster
 	Adapters    []adapters.Messenger
+	Secrets     secrets.Resolver
 }
 
 // Module bundles the container and exposes high-level accessors.
@@ -48,6 +50,7 @@ func NewModule(opts ModuleOptions) (*Module, error) {
 		Queue:       opts.Queue,
 		Broadcaster: opts.Broadcaster,
 		Adapters:    opts.Adapters,
+		Secrets:     opts.Secrets,
 	})
 	if err != nil {
 		return nil, err
