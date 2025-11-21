@@ -509,6 +509,14 @@ func (a *App) SendToUser(c router.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"success": true})
 }
 
+// GetAvailableChannels returns the list of configured notification channels.
+func (a *App) GetAvailableChannels(c router.Context) error {
+	return c.JSON(http.StatusOK, map[string]any{
+		"channels": a.AdapterRegistry.GetAvailableChannels(),
+		"adapters": a.AdapterRegistry.EnabledAdapters,
+	})
+}
+
 // DeliveryStats returns delivery statistics (admin only).
 func (a *App) DeliveryStats(c router.Context) error {
 	result, err := a.Module.Container().Storage.DeliveryAttempts.List(c.Context(), store.ListOptions{Limit: 10000, Offset: 0})
