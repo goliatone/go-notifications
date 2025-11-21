@@ -35,6 +35,7 @@ type Config struct {
 	Timeout             time.Duration
 	SkipTLSVerify       bool
 	PlainOnly           bool // Force text/plain when HTML is provided.
+	DryRun              bool // When true or missing credentials, log only.
 }
 
 func WithName(name string) Option {
@@ -96,8 +97,13 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	if strings.TrimSpace(a.cfg.AccountSID) == "" || strings.TrimSpace(a.cfg.AuthToken) == "" {
-		return fmt.Errorf("twilio: account SID/Auth token required")
+	if a.cfg.DryRun || strings.TrimSpace(a.cfg.AccountSID) == "" || strings.TrimSpace(a.cfg.AuthToken) == "" {
+		a.base.LogSuccess(a.name, msg)
+		a.base.Logger().Info("[twilio:during-dry-run] send skipped (dry-run or missing credentials)",
+			logger.Field{Key: "to", Value: msg.To},
+			logger.Field{Key: "channel", Value: msg.Channel},
+		)
+		return nil
 	}
 	to := strings.TrimSpace(msg.To)
 	if to == "" {
