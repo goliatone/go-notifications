@@ -116,8 +116,12 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	mw := multipart.NewWriter(pw)
 
 	go func() {
-		defer pw.Close()
-		defer mw.Close()
+		defer func() {
+			_ = pw.Close()
+		}()
+		defer func() {
+			_ = mw.Close()
+		}()
 
 		_ = mw.WriteField("from", from)
 		_ = mw.WriteField("to", to)
@@ -185,8 +189,10 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if err != nil {
 		return fmt.Errorf("mailgun: request failed: %w", err)
 	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("mailgun: unexpected status %d", resp.StatusCode)
