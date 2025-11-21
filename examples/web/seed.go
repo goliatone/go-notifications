@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/goliatone/go-notifications/internal/commands"
 	internalprefs "github.com/goliatone/go-notifications/internal/preferences"
+	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
+	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
 
@@ -16,6 +20,12 @@ func SeedData(ctx context.Context, app *App) error {
 		return err
 	}
 	if err := seedTemplates(ctx, app); err != nil {
+		return err
+	}
+	if err := seedContacts(ctx, app); err != nil {
+		return err
+	}
+	if err := seedSecrets(ctx, app); err != nil {
 		return err
 	}
 	if err := seedPreferences(ctx, app); err != nil {
@@ -392,6 +402,88 @@ func seedTemplates(ctx context.Context, app *App) error {
 	return nil
 }
 
+func seedContacts(ctx context.Context, app *App) error {
+	if app.Directory == nil {
+		return errors.New("seed: directory not configured")
+	}
+	phoneBook := map[string]string{
+		"alice@example.com":  "+15555550100",
+		"bob@example.com":    "+15555550200",
+		"carlos@example.com": "+15555550300",
+	}
+	slackBook := map[string]string{
+		"alice@example.com":  "U01ALICE",
+		"bob@example.com":    "U02BOB",
+		"carlos@example.com": "U03CARLOS",
+	}
+	telegramBook := map[string]string{
+		"alice@example.com":  "10001",
+		"bob@example.com":    "10002",
+		"carlos@example.com": "10003",
+	}
+
+	for email, user := range app.Users {
+		contact := demoContact{
+			UserID:          user.ID,
+			DisplayName:     user.Name,
+			Email:           email,
+			Phone:           phoneBook[email],
+			SlackID:         slackBook[email],
+			TelegramChatID:  telegramBook[email],
+			PreferredLocale: user.Locale,
+			TenantID:        user.TenantID,
+		}
+		if err := app.Directory.UpsertContact(ctx, contact); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func seedSecrets(ctx context.Context, app *App) error {
+	if app.Directory == nil {
+		return errors.New("seed: directory not configured")
+	}
+	defaults := []struct {
+		ref   secrets.Reference
+		value string
+	}{
+		{secrets.Reference{Scope: secrets.ScopeSystem, SubjectID: "default", Channel: "chat", Provider: "slack", Key: "default"}, "xoxb-system-demo-token"},
+		{secrets.Reference{Scope: secrets.ScopeSystem, SubjectID: "default", Channel: "chat", Provider: "telegram", Key: "default"}, "telegram-system-demo-token"},
+		{secrets.Reference{Scope: secrets.ScopeSystem, SubjectID: "default", Channel: "email", Provider: "sendgrid", Key: "api_key"}, "SG.system-demo-key"},
+		{secrets.Reference{Scope: secrets.ScopeSystem, SubjectID: "default", Channel: "email", Provider: "sendgrid", Key: "from"}, "notifications@example.com"},
+		{secrets.Reference{Scope: secrets.ScopeSystem, SubjectID: "default", Channel: "sms", Provider: "twilio", Key: "auth_token"}, "twilio-demo-token"},
+		{secrets.Reference{Scope: secrets.ScopeSystem, SubjectID: "default", Channel: "sms", Provider: "twilio", Key: "from"}, "+15555550100"},
+	}
+
+	for _, entry := range defaults {
+		if _, err := app.Directory.PutSecret(entry.ref, []byte(entry.value)); err != nil {
+			return fmt.Errorf("seed: default secret %s/%s/%s: %w", entry.ref.Channel, entry.ref.Provider, entry.ref.Key, err)
+		}
+	}
+
+	// Per-user chat tokens to demonstrate scoped resolution.
+	for _, user := range app.Users {
+		token := fmt.Sprintf("xoxb-%s-token", strings.ToLower(user.Name))
+		telegramToken := fmt.Sprintf("telegram-%s-token", strings.ToLower(user.Name))
+		entries := []struct {
+			ref   secrets.Reference
+			value string
+		}{
+			{secrets.Reference{Scope: secrets.ScopeUser, SubjectID: user.ID, Channel: "chat", Provider: "slack", Key: "token"}, token},
+			{secrets.Reference{Scope: secrets.ScopeUser, SubjectID: user.ID, Channel: "chat", Provider: "slack", Key: "default"}, token},
+			{secrets.Reference{Scope: secrets.ScopeUser, SubjectID: user.ID, Channel: "chat", Provider: "telegram", Key: "token"}, telegramToken},
+			{secrets.Reference{Scope: secrets.ScopeUser, SubjectID: user.ID, Channel: "chat", Provider: "telegram", Key: "default"}, telegramToken},
+		}
+		for _, entry := range entries {
+			if _, err := app.Directory.PutSecret(entry.ref, []byte(entry.value)); err != nil {
+				return fmt.Errorf("seed: user secret %s/%s/%s: %w", entry.ref.Channel, entry.ref.Provider, entry.ref.Key, err)
+			}
+		}
+	}
+	return nil
+}
+
 func seedPreferences(ctx context.Context, app *App) error {
 	// Seed some sample preferences for Bob (disable email for system_alert)
 	bobUser := app.Users["bob@example.com"]
@@ -422,6 +514,43 @@ func seedPreferences(ctx context.Context, app *App) error {
 		})
 		if err != nil {
 			// app.Logger.Error("failed to create preference", "error", err)
+		}
+	}
+
+	// Provider overrides for chat channel on test notification
+	if bobUser != nil {
+		provider := "slack"
+		_, err := app.Module.Preferences().Upsert(ctx, internalprefs.PreferenceInput{
+			SubjectType:    "user",
+			SubjectID:      bobUser.ID,
+			DefinitionCode: "test_notification",
+			Channel:        "chat",
+			Rules: domain.JSONMap{
+				"channels": map[string]any{
+					"chat": map[string]any{"provider": provider},
+				},
+			},
+		})
+		if err != nil {
+			// app.Logger.Error("failed to set provider preference", "error", err)
+		}
+	}
+
+	if carlosUser != nil {
+		provider := "telegram"
+		_, err := app.Module.Preferences().Upsert(ctx, internalprefs.PreferenceInput{
+			SubjectType:    "user",
+			SubjectID:      carlosUser.ID,
+			DefinitionCode: "test_notification",
+			Channel:        "chat",
+			Rules: domain.JSONMap{
+				"channels": map[string]any{
+					"chat": map[string]any{"provider": provider},
+				},
+			},
+		})
+		if err != nil {
+			// app.Logger.Error("failed to set provider preference", "error", err)
 		}
 	}
 
