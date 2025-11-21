@@ -216,7 +216,7 @@ func (s *Service) emit(ctx context.Context, topic string, item *domain.InboxItem
 			"user_id":    item.UserID,
 			"title":      item.Title,
 			"unread":     item.Unread,
-			"dismissed":  item.DismissedAt.IsZero() == false,
+			"dismissed":  !item.DismissedAt.IsZero(),
 			"snoozed_at": item.SnoozedUntil,
 		},
 	}
