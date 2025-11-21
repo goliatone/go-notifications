@@ -40,6 +40,7 @@ class NotificationCenter {
             console.log('Showing admin panel and loading users')
             document.getElementById('admin-panel').style.display = 'block'
             this.loadUsers()
+            this.loadAvailableChannels()
         }
     }
 
@@ -419,6 +420,24 @@ class NotificationCenter {
             textarea.value = '' // Clear the message
         } catch (e) {
             this.showToast('Failed to send notification: ' + e.message, 'error')
+        }
+    }
+
+    async loadAvailableChannels() {
+        try {
+            const resp = await fetch('/api/channels')
+            if (!resp.ok) throw new Error('Failed to load channels')
+            const data = await resp.json()
+
+            const container = document.getElementById('active-adapters')
+            if (container) {
+                const adapterBadges = data.adapters.map(a =>
+                    `<span style="display: inline-block; background: #3498db; color: white; padding: 2px 8px; border-radius: 3px; margin: 2px; font-size: 11px;">${a}</span>`
+                ).join('')
+                container.innerHTML = adapterBadges || 'None'
+            }
+        } catch (e) {
+            console.error('Failed to load available channels:', e)
         }
     }
 
