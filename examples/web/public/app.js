@@ -264,6 +264,7 @@ class NotificationCenter {
 
             const data = await resp.json()
             this.renderPreferences(data.preferences || [])
+            this.loadLastDeliveries()
         } catch (e) {
             console.error('Failed to load preferences:', e)
             document.getElementById('preferences-list').innerHTML =
@@ -279,32 +280,99 @@ class NotificationCenter {
             return
         }
 
-        list.innerHTML = preferences.map(pref => `
+        list.innerHTML = preferences.map(pref => {
+            const providers = pref.providers || []
+            const selectedProvider = pref.provider || ''
+            const providerSelect = providers.length > 0 ? `
+                <select class="provider-select" onchange="app.changeProvider('${pref.definition_code}', '${pref.channel}', this.value)">
+                    <option value="">Auto</option>
+                    ${providers.map(p => `<option value="${p}" ${selectedProvider === p ? 'selected' : ''}>${p}</option>`).join('')}
+                </select>
+            ` : '<span class="text-muted">Default provider</span>'
+
+            const providerBadge = selectedProvider
+                ? `<span class="chip chip-soft">via ${this.escapeHtml(selectedProvider)}</span>`
+                : ''
+
+            return `
             <div class="preference-item">
                 <div class="preference-label">
                     <div style="font-weight: 500;">${this.escapeHtml(pref.definition_name)}</div>
-                    <div style="font-size: 12px; color: #7f8c8d;">${pref.channel}</div>
+                    <div class="pref-meta">
+                        <span class="chip">${this.escapeHtml(pref.channel)}</span>
+                        ${providerBadge}
+                    </div>
                 </div>
-                <label class="toggle">
-                    <input type="checkbox"
-                           ${pref.enabled ? 'checked' : ''}
-                           onchange="app.togglePreference('${pref.definition_code}', '${pref.channel}', this.checked)">
-                    <span class="toggle-slider"></span>
-                </label>
+                <div class="preference-actions">
+                    ${providerSelect}
+                    <label class="toggle">
+                        <input type="checkbox"
+                               ${pref.enabled ? 'checked' : ''}
+                               onchange="app.togglePreference('${pref.definition_code}', '${pref.channel}', this.checked, '${selectedProvider}')">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+            `
+        }).join('')
+    }
+
+    async loadLastDeliveries() {
+        try {
+            const resp = await fetch('/api/deliveries/last')
+            if (!resp.ok) throw new Error('Failed to load deliveries')
+            const data = await resp.json()
+            this.renderLastDeliveries(data.deliveries || [])
+        } catch (e) {
+            console.error('Failed to load deliveries:', e)
+            this.renderLastDeliveries([])
+        }
+    }
+
+    renderLastDeliveries(deliveries) {
+        const container = document.getElementById('last-deliveries')
+        if (!container) return
+        if (!deliveries || deliveries.length === 0) {
+            container.innerHTML = '<p class="text-muted">No deliveries yet</p>'
+            return
+        }
+        container.innerHTML = deliveries.map(d => `
+            <div class="delivery-row">
+                <div>
+                    <div class="delivery-title">${this.escapeHtml(d.definition_code || 'notification')}</div>
+                    <div class="delivery-meta">
+                        <span class="chip">${this.escapeHtml(d.channel)}</span>
+                        <span class="chip chip-soft">${this.escapeHtml(d.provider)}</span>
+                    </div>
+                    <div class="delivery-dest text-muted">${this.escapeHtml(d.address)}</div>
+                </div>
+                <div class="delivery-status ${d.status === 'succeeded' ? 'status-ok' : 'status-failed'}">
+                    ${d.status || 'unknown'}
+                </div>
             </div>
         `).join('')
     }
 
-    async togglePreference(definitionCode, channel, enabled) {
+    async togglePreference(definitionCode, channel, enabled, provider) {
+        return this.updatePreference(definitionCode, channel, enabled, provider)
+    }
+
+    async updatePreference(definitionCode, channel, enabled, provider) {
         try {
+            const payload = {
+                definition_code: definitionCode,
+                channel: channel,
+            }
+            if (enabled !== undefined && enabled !== null) {
+                payload.enabled = enabled
+            }
+            if (provider !== undefined) {
+                payload.provider = provider
+            }
             await fetch('/api/preferences', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    definition_code: definitionCode,
-                    channel: channel,
-                    enabled: enabled
-                })
+                body: JSON.stringify(payload)
             })
             this.showToast('Preference updated', 'info')
         } catch (e) {
@@ -312,10 +380,15 @@ class NotificationCenter {
         }
     }
 
+    changeProvider(definitionCode, channel, provider) {
+        this.updatePreference(definitionCode, channel, null, provider)
+    }
+
     async sendTestNotification() {
         try {
             await fetch('/api/notify/test', { method: 'POST' })
             this.showToast('Test notification sent!', 'info')
+            this.loadLastDeliveries()
         } catch (e) {
             this.showToast('Failed to send test notification', 'error')
         }
@@ -338,6 +411,7 @@ class NotificationCenter {
                 })
             })
             this.showToast('Alert broadcasted to all users!', 'info')
+            this.loadLastDeliveries()
         } catch (e) {
             this.showToast('Failed to broadcast alert', 'error')
         }
@@ -418,6 +492,7 @@ class NotificationCenter {
 
             this.showToast('Notification sent!', 'info')
             textarea.value = '' // Clear the message
+            this.loadLastDeliveries()
         } catch (e) {
             this.showToast('Failed to send notification: ' + e.message, 'error')
         }
