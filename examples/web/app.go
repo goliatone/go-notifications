@@ -7,8 +7,6 @@ import (
 	i18n "github.com/goliatone/go-i18n"
 	"github.com/goliatone/go-notifications/examples/web/config"
 	"github.com/goliatone/go-notifications/internal/commands"
-	"github.com/goliatone/go-notifications/pkg/adapters"
-	"github.com/goliatone/go-notifications/pkg/adapters/console"
 	notifierconfig "github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/notifier"
@@ -29,15 +27,16 @@ type DemoUser struct {
 }
 
 type App struct {
-	Config     config.Config
-	Module     *notifier.Module
-	Catalog    *commands.Catalog
-	DB         *bun.DB
-	Logger     logger.Logger
-	WSHub      *WebSocketHub
-	Users      map[string]*DemoUser
-	Sessions   map[string]*DemoUser
-	Translator i18n.Translator
+	Config          config.Config
+	Module          *notifier.Module
+	Catalog         *commands.Catalog
+	DB              *bun.DB
+	Logger          logger.Logger
+	WSHub           *WebSocketHub
+	Users           map[string]*DemoUser
+	Sessions        map[string]*DemoUser
+	Translator      i18n.Translator
+	AdapterRegistry *AdapterRegistry
 }
 
 func NewApp(ctx context.Context, cfg config.Config) (*App, error) {
@@ -53,7 +52,10 @@ func NewApp(ctx context.Context, cfg config.Config) (*App, error) {
 
 	translator := &NoopTranslator{}
 
-	consoleAdapter := console.New(lgr)
+	// Build adapters based on environment configuration
+	adapterCfg := config.LoadAdapterConfig()
+	adapterRegistry := BuildAdapters(lgr, adapterCfg)
+	adapterRegistry.LogEnabledAdapters(lgr)
 
 	var wsHub *WebSocketHub
 	if cfg.Features.EnableWebSocket {
@@ -67,22 +69,23 @@ func NewApp(ctx context.Context, cfg config.Config) (*App, error) {
 		Logger:      lgr,
 		Translator:  translator,
 		Broadcaster: wsHub,
-		Adapters:    []adapters.Messenger{consoleAdapter},
+		Adapters:    adapterRegistry.Adapters,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	app := &App{
-		Config:     cfg,
-		Module:     module,
-		Catalog:    module.Commands().Catalog,
-		DB:         db,
-		Logger:     lgr,
-		WSHub:      wsHub,
-		Users:      make(map[string]*DemoUser),
-		Sessions:   make(map[string]*DemoUser),
-		Translator: translator,
+		Config:          cfg,
+		Module:          module,
+		Catalog:         module.Commands().Catalog,
+		DB:              db,
+		Logger:          lgr,
+		WSHub:           wsHub,
+		Users:           make(map[string]*DemoUser),
+		Sessions:        make(map[string]*DemoUser),
+		Translator:      translator,
+		AdapterRegistry: adapterRegistry,
 	}
 
 	app.initDemoUsers()
