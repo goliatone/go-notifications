@@ -26,6 +26,7 @@ func (a *App) SetupRoutes(r router.Router[*fiber.App]) {
 	api.Post("/inbox/:id/unread", a.MarkUnread)
 	api.Post("/inbox/:id/dismiss", a.DismissNotification)
 	api.Post("/inbox/:id/snooze", a.SnoozeNotification)
+	api.Post("/inbox/mark-all-read", a.MarkAllRead)
 	api.Get("/inbox/stats", a.InboxStats)
 
 	api.Get("/preferences", a.GetPreferences)
@@ -43,6 +44,8 @@ func (a *App) SetupRoutes(r router.Router[*fiber.App]) {
 	admin.Get("/templates", a.ListTemplates)
 	admin.Post("/broadcast", a.BroadcastNotification)
 	admin.Get("/stats", a.DeliveryStats)
+	admin.Get("/users", a.ListUsers)
+	admin.Post("/send-to-user", a.SendToUser)
 }
 
 func (a *App) renderHome() router.HandlerFunc {
