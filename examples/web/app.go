@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 
 	i18n "github.com/goliatone/go-i18n"
 	"github.com/goliatone/go-notifications/examples/web/config"
@@ -13,8 +12,6 @@ import (
 	"github.com/goliatone/go-notifications/pkg/storage"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 )
 
 type DemoUser struct {
@@ -33,6 +30,8 @@ type App struct {
 	DB              *bun.DB
 	Logger          logger.Logger
 	WSHub           *WebSocketHub
+	Directory       *Directory
+	DeliveryLogs    *DeliveryLogStore
 	Users           map[string]*DemoUser
 	Sessions        map[string]*DemoUser
 	Translator      i18n.Translator
@@ -42,19 +41,26 @@ type App struct {
 func NewApp(ctx context.Context, cfg config.Config) (*App, error) {
 	lgr := newStdLogger()
 
-	sqldb, err := sql.Open(sqliteshim.ShimName, cfg.Persistence.DSN)
+	db, err := openDatabase(ctx, cfg.Persistence, lgr)
 	if err != nil {
 		return nil, err
 	}
-	db := bun.NewDB(sqldb, sqlitedialect.New())
 
-	providers := storage.NewMemoryProviders()
+	providers := storage.NewBunProviders(db)
 
 	translator := &NoopTranslator{}
 
+	secretProvider, secretResolver, err := buildSecretsProvider(db, lgr)
+	if err != nil {
+		return nil, err
+	}
+
+	directory := NewDirectory(db, secretProvider, secretResolver, lgr)
+	deliveryLogs := NewDeliveryLogStore(db, lgr)
+
 	// Build adapters based on environment configuration
 	adapterCfg := config.LoadAdapterConfig()
-	adapterRegistry := BuildAdapters(lgr, adapterCfg)
+	adapterRegistry := BuildAdapters(lgr, adapterCfg, directory, secretResolver, deliveryLogs)
 	adapterRegistry.LogEnabledAdapters(lgr)
 
 	var wsHub *WebSocketHub
@@ -70,6 +76,7 @@ func NewApp(ctx context.Context, cfg config.Config) (*App, error) {
 		Translator:  translator,
 		Broadcaster: wsHub,
 		Adapters:    adapterRegistry.Adapters,
+		Secrets:     secretResolver,
 	})
 	if err != nil {
 		return nil, err
@@ -82,6 +89,8 @@ func NewApp(ctx context.Context, cfg config.Config) (*App, error) {
 		DB:              db,
 		Logger:          lgr,
 		WSHub:           wsHub,
+		Directory:       directory,
+		DeliveryLogs:    deliveryLogs,
 		Users:           make(map[string]*DemoUser),
 		Sessions:        make(map[string]*DemoUser),
 		Translator:      translator,
