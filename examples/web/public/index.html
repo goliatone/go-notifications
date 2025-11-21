@@ -66,6 +66,15 @@
                     <h2>Admin</h2>
                     <button id="broadcast-btn" class="btn btn-warning">Broadcast Alert</button>
                     <button id="view-stats-btn" class="btn btn-secondary">View Stats</button>
+
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ecf0f1;">
+                        <h3 style="font-size: 16px; margin-bottom: 10px;">Send to User</h3>
+                        <select id="user-select" class="form-select" style="width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Select user...</option>
+                        </select>
+                        <textarea id="user-message" placeholder="Enter message..." style="width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; resize: vertical; min-height: 60px;"></textarea>
+                        <button id="send-to-user-btn" class="btn btn-primary">Send Notification</button>
+                    </div>
                 </div>
             </aside>
 
