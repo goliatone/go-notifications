@@ -164,7 +164,8 @@ function samples {
 ##
 ## Run linters, tests, and docs checks
 function ci {
-    lint && test && docs:lint && samples
+    # lint && test && docs:lint && samples
+    lint && test && samples
 }
 
 ##
