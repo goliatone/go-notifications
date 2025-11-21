@@ -35,7 +35,9 @@ class NotificationCenter {
         document.getElementById('username').textContent = this.currentUser.name
         document.getElementById('locale-badge').textContent = this.currentUser.locale
 
+        console.log('Current user admin status:', this.currentUser.admin)
         if (this.currentUser.admin) {
+            console.log('Showing admin panel and loading users')
             document.getElementById('admin-panel').style.display = 'block'
             this.loadUsers()
         }
@@ -352,12 +354,17 @@ class NotificationCenter {
 
     async loadUsers() {
         try {
+            console.log('Loading users...')
             const resp = await fetch('/admin/users')
             if (!resp.ok) throw new Error('Failed to load users')
             const data = await resp.json()
+            console.log('Users loaded:', data.users)
 
             const select = document.getElementById('user-select')
-            if (!select) return
+            if (!select) {
+                console.error('user-select element not found!')
+                return
+            }
 
             // Clear and populate
             select.innerHTML = '<option value="">Select user...</option>'
@@ -370,6 +377,7 @@ class NotificationCenter {
                     select.appendChild(option)
                 }
             })
+            console.log('User dropdown populated with', select.options.length - 1, 'users')
         } catch (e) {
             console.error('Failed to load users:', e)
             this.showToast('Failed to load users', 'error')
