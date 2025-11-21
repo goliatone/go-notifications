@@ -32,14 +32,14 @@ type QuietHoursWindow struct {
 
 // PreferenceInput captures persistence fields for CRUD operations.
 type PreferenceInput struct {
-	SubjectType    string
-	SubjectID      string
-	DefinitionCode string
-	Channel        string
-	Enabled        *bool
-	Locale         *string
-	QuietHours     *QuietHoursWindow
-	Rules          domain.JSONMap
+	SubjectType    string             `json:"subject_type"`
+	SubjectID      string             `json:"subject_id"`
+	DefinitionCode string             `json:"definition_code"`
+	Channel        string             `json:"channel"`
+	Enabled        *bool              `json:"enabled,omitempty"`
+	Locale         *string            `json:"locale,omitempty"`
+	QuietHours     *QuietHoursWindow  `json:"quiet_hours,omitempty"`
+	Rules          domain.JSONMap     `json:"rules,omitempty"`
 }
 
 // EvaluationRequest defines the scoped lookup performed before dispatch.
