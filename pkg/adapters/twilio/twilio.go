@@ -97,7 +97,20 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	if a.cfg.DryRun || strings.TrimSpace(a.cfg.AccountSID) == "" || strings.TrimSpace(a.cfg.AuthToken) == "" {
+	accountSID := strings.TrimSpace(firstNonEmpty(
+		stringValue(msg.Metadata, "account_sid"),
+		secretString(msg.Metadata, "account_sid"),
+		secretString(msg.Metadata, "default"),
+		a.cfg.AccountSID,
+	))
+	authToken := strings.TrimSpace(firstNonEmpty(
+		stringValue(msg.Metadata, "auth_token"),
+		secretString(msg.Metadata, "auth_token"),
+		secretString(msg.Metadata, "default"),
+		a.cfg.AuthToken,
+	))
+
+	if a.cfg.DryRun || accountSID == "" || authToken == "" {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[twilio:during-dry-run] send skipped (dry-run or missing credentials)",
 			logger.Field{Key: "to", Value: msg.To},
@@ -110,10 +123,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		return fmt.Errorf("twilio: destination missing")
 	}
 
-	from := stringValue(msg.Metadata, "from")
-	if from == "" {
-		from = a.cfg.From
-	}
+	from := firstNonEmpty(stringValue(msg.Metadata, "from"), secretString(msg.Metadata, "from"), a.cfg.From)
 
 	body := stringValue(msg.Metadata, "body")
 	if body == "" {
@@ -149,12 +159,12 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		}
 	}
 
-	endpoint := fmt.Sprintf("%s/2010-04-01/Accounts/%s/Messages.json", strings.TrimRight(a.cfg.APIBaseURL, "/"), a.cfg.AccountSID)
+	endpoint := fmt.Sprintf("%s/2010-04-01/Accounts/%s/Messages.json", strings.TrimRight(a.cfg.APIBaseURL, "/"), accountSID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return fmt.Errorf("twilio: build request: %w", err)
 	}
-	req.SetBasicAuth(a.cfg.AccountSID, a.cfg.AuthToken)
+	req.SetBasicAuth(accountSID, authToken)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := a.client.Do(req)
@@ -210,6 +220,41 @@ func stringSlice(meta map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func secretString(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	raw, ok := meta["secrets"]
+	if !ok {
+		return ""
+	}
+	switch v := raw.(type) {
+	case map[string][]byte:
+		if val, ok := v[key]; ok {
+			return strings.TrimSpace(string(val))
+		}
+	case map[string]any:
+		if val, ok := v[key]; ok {
+			switch data := val.(type) {
+			case string:
+				return strings.TrimSpace(data)
+			case []byte:
+				return strings.TrimSpace(string(data))
+			}
+		}
+	}
+	return ""
 }
 
 func stripHTML(html string) string {
