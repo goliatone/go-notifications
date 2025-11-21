@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/goliatone/go-notifications/internal/commands"
+	internalprefs "github.com/goliatone/go-notifications/internal/preferences"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
@@ -15,6 +16,9 @@ func SeedData(ctx context.Context, app *App) error {
 		return err
 	}
 	if err := seedTemplates(ctx, app); err != nil {
+		return err
+	}
+	if err := seedPreferences(ctx, app); err != nil {
 		return err
 	}
 	if err := seedInboxItems(ctx, app); err != nil {
@@ -108,6 +112,16 @@ func seedDefinitions(ctx context.Context, app *App) error {
 			Category:    "test",
 			Channels:    []string{"email", "in-app"},
 			TemplateIDs: []string{"email:test.email", "in-app:test.in-app"},
+			AllowUpdate: true,
+		},
+		{
+			Code:        "admin_message",
+			Name:        "Admin Message",
+			Description: "Direct message from administrator",
+			Severity:    "info",
+			Category:    "admin",
+			Channels:    []string{"in-app"},
+			TemplateIDs: []string{"in-app:admin_message.in-app"},
 			AllowUpdate: true,
 		},
 	}
@@ -243,11 +257,59 @@ func seedTemplates(ctx context.Context, app *App) error {
 			},
 			AllowUpdate: true,
 		},
+		// Admin message in-app - English
+		{
+			TemplateInput: templates.TemplateInput{
+				Code:    "admin_message.in-app",
+				Channel: "in-app",
+				Locale:  "en",
+				Subject: "Message from Admin",
+				Body:    "{{ message }}",
+				Format:  "text",
+			},
+			AllowUpdate: true,
+		},
 	}
 
 	for _, tmpl := range templateData {
 		if err := app.Catalog.SaveTemplate.Execute(ctx, tmpl); err != nil {
 			// app.Logger.Error("failed to seed template", "code", tmpl.Code, "error", err)
+		}
+	}
+
+	return nil
+}
+
+func seedPreferences(ctx context.Context, app *App) error {
+	// Seed some sample preferences for Bob (disable email for system_alert)
+	bobUser := app.Users["bob@example.com"]
+	if bobUser != nil {
+		enabled := false
+		_, err := app.Module.Preferences().Upsert(ctx, internalprefs.PreferenceInput{
+			SubjectType:    "user",
+			SubjectID:      bobUser.ID,
+			DefinitionCode: "system_alert",
+			Channel:        "email",
+			Enabled:        &enabled,
+		})
+		if err != nil {
+			// app.Logger.Error("failed to create preference", "error", err)
+		}
+	}
+
+	// Disable comment_reply for Carlos
+	carlosUser := app.Users["carlos@example.com"]
+	if carlosUser != nil {
+		enabled := false
+		_, err := app.Module.Preferences().Upsert(ctx, internalprefs.PreferenceInput{
+			SubjectType:    "user",
+			SubjectID:      carlosUser.ID,
+			DefinitionCode: "comment_reply",
+			Channel:        "in-app",
+			Enabled:        &enabled,
+		})
+		if err != nil {
+			// app.Logger.Error("failed to create preference", "error", err)
 		}
 	}
 
