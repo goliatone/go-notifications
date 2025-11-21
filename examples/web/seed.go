@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/goliatone/go-notifications/internal/commands"
+	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
 
@@ -21,6 +23,51 @@ func SeedData(ctx context.Context, app *App) error {
 	return nil
 }
 
+// EnsureSeeded verifies required demo definitions/templates exist, reseeding if needed.
+func EnsureSeeded(ctx context.Context, app *App) error {
+	if app == nil || app.Module == nil || app.Module.Container() == nil {
+		return errors.New("seed: app not initialized")
+	}
+	container := app.Module.Container()
+
+	defRepo := container.Storage.Definitions
+	if defRepo == nil {
+		return errors.New("seed: definition repository not available")
+	}
+
+	tplRepo := container.Storage.Templates
+	if tplRepo == nil {
+		return errors.New("seed: template repository not available")
+	}
+
+	if _, err := defRepo.GetByCode(ctx, "test_notification"); err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		return SeedData(ctx, app)
+	}
+
+	if _, err := tplRepo.GetByCodeAndLocale(ctx, "test.in-app", "en", "in-app"); err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		return SeedData(ctx, app)
+	}
+	if _, err := tplRepo.GetByCodeAndLocale(ctx, "test.email", "en", "email"); err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		return SeedData(ctx, app)
+	}
+
+	return nil
+}
+
+// ensureSeededOrError forces seeding and surfaces any errors to clients.
+func ensureSeededOrError(ctx context.Context, app *App) error {
+	return SeedData(ctx, app)
+}
+
 func seedDefinitions(ctx context.Context, app *App) error {
 	definitions := []commands.CreateDefinition{
 		{
@@ -30,7 +77,7 @@ func seedDefinitions(ctx context.Context, app *App) error {
 			Severity:    "info",
 			Category:    "onboarding",
 			Channels:    []string{"email", "in-app"},
-			TemplateIDs: []string{"welcome.email", "welcome.in-app"},
+			TemplateIDs: []string{"email:welcome.email", "in-app:welcome.in-app"},
 			AllowUpdate: true,
 		},
 		{
@@ -40,7 +87,7 @@ func seedDefinitions(ctx context.Context, app *App) error {
 			Severity:    "info",
 			Category:    "social",
 			Channels:    []string{"in-app"},
-			TemplateIDs: []string{"comment_reply.in-app"},
+			TemplateIDs: []string{"in-app:comment_reply.in-app"},
 			AllowUpdate: true,
 		},
 		{
@@ -50,7 +97,7 @@ func seedDefinitions(ctx context.Context, app *App) error {
 			Severity:    "critical",
 			Category:    "system",
 			Channels:    []string{"email", "in-app"},
-			TemplateIDs: []string{"system_alert.email", "system_alert.in-app"},
+			TemplateIDs: []string{"email:system_alert.email", "in-app:system_alert.in-app"},
 			AllowUpdate: true,
 		},
 		{
@@ -60,7 +107,7 @@ func seedDefinitions(ctx context.Context, app *App) error {
 			Severity:    "info",
 			Category:    "test",
 			Channels:    []string{"email", "in-app"},
-			TemplateIDs: []string{"test.email", "test.in-app"},
+			TemplateIDs: []string{"email:test.email", "in-app:test.in-app"},
 			AllowUpdate: true,
 		},
 	}
@@ -83,7 +130,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Channel: "email",
 				Locale:  "en",
 				Subject: "Welcome to Notification Center!",
-				Body:    "Hello {{ .name }},\n\nWelcome to our notification system. You can manage your preferences at any time.\n\nBest regards,\nThe Team",
+				Body:    "Hello {{ name }},\n\nWelcome to our notification system. You can manage your preferences at any time.\n\nBest regards,\nThe Team",
 				Format:  "text",
 			},
 			AllowUpdate: true,
@@ -95,7 +142,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Channel: "email",
 				Locale:  "es",
 				Subject: "¡Bienvenido al Centro de Notificaciones!",
-				Body:    "Hola {{ .name }},\n\n¡Bienvenido a nuestro sistema de notificaciones! Puedes gestionar tus preferencias en cualquier momento.\n\nSaludos,\nEl Equipo",
+				Body:    "Hola {{ name }},\n\n¡Bienvenido a nuestro sistema de notificaciones! Puedes gestionar tus preferencias en cualquier momento.\n\nSaludos,\nEl Equipo",
 				Format:  "text",
 			},
 			AllowUpdate: true,
@@ -107,7 +154,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Channel: "in-app",
 				Locale:  "en",
 				Subject: "Welcome!",
-				Body:    "Welcome {{ .name }}! Thanks for joining our notification center.",
+				Body:    "Welcome {{ name }}! Thanks for joining our notification center.",
 				Format:  "text",
 			},
 			AllowUpdate: true,
@@ -119,7 +166,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Channel: "in-app",
 				Locale:  "es",
 				Subject: "¡Bienvenido!",
-				Body:    "¡Bienvenido {{ .name }}! Gracias por unirte a nuestro centro de notificaciones.",
+				Body:    "¡Bienvenido {{ name }}! Gracias por unirte a nuestro centro de notificaciones.",
 				Format:  "text",
 			},
 			AllowUpdate: true,
@@ -130,8 +177,8 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Code:    "system_alert.email",
 				Channel: "email",
 				Locale:  "en",
-				Subject: "System Alert: {{ .title }}",
-				Body:    "{{ .message }}\n\nPlease check the dashboard for more details.",
+				Subject: "System Alert: {{ title }}",
+				Body:    "{{ message }}\n\nPlease check the dashboard for more details.",
 				Format:  "text",
 			},
 			AllowUpdate: true,
@@ -142,8 +189,8 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Code:    "system_alert.in-app",
 				Channel: "in-app",
 				Locale:  "en",
-				Subject: "{{ .title }}",
-				Body:    "{{ .message }}",
+				Subject: "{{ title }}",
+				Body:    "{{ message }}",
 				Format:  "text",
 			},
 			AllowUpdate: true,
@@ -155,7 +202,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Channel: "in-app",
 				Locale:  "en",
 				Subject: "New Reply",
-				Body:    "{{ .author }} replied to your comment: \"{{ .message }}\"",
+				Body:    "{{ author }} replied to your comment: \"{{ message }}\"",
 				Format:  "text",
 			},
 			AllowUpdate: true,
@@ -167,7 +214,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Channel: "in-app",
 				Locale:  "es",
 				Subject: "Nueva Respuesta",
-				Body:    "{{ .author }} respondió a tu comentario: \"{{ .message }}\"",
+				Body:    "{{ author }} respondió a tu comentario: \"{{ message }}\"",
 				Format:  "text",
 			},
 			AllowUpdate: true,
@@ -179,7 +226,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Channel: "email",
 				Locale:  "en",
 				Subject: "Test Notification",
-				Body:    "Hello {{ .name }},\n\n{{ .message }}\n\nThis is a test of the multi-channel notification system.",
+				Body:    "Hello {{ name }},\n\n{{ message }}\n\nThis is a test of the multi-channel notification system.",
 				Format:  "text",
 			},
 			AllowUpdate: true,
@@ -191,7 +238,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Channel: "in-app",
 				Locale:  "en",
 				Subject: "Test Notification",
-				Body:    "{{ .message }}",
+				Body:    "{{ message }}",
 				Format:  "text",
 			},
 			AllowUpdate: true,
