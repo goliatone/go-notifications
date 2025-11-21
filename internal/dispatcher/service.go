@@ -265,26 +265,48 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		return nil
 	}
 	// TODO: We should support multi-channel deliveries
-	messenger, err := s.registry.Route(job.channel)
-	if err != nil {
-		return fmt.Errorf("route channel %s: %w", job.channel, err)
+	candidates := s.registry.List(job.channel)
+	if len(candidates) == 0 {
+		return fmt.Errorf("route channel %s: %w", job.channel, adapters.ErrAdapterNotFound)
 	}
 
-	sendMsg := adapters.Message{
-		ID:       message.ID.String(),
-		Channel:  channelType,
-		Provider: messenger.Name(),
-		Subject:  message.Subject,
-		Body:     message.Body,
-		To:       message.Receiver,
-		Metadata: map[string]any{
-			"event_id": event.ID.String(),
-		},
-		Locale: renderResult.Locale,
+	var success bool
+	var lastErr error
+
+	for _, messenger := range candidates {
+		sendMsg := adapters.Message{
+			ID:       message.ID.String(),
+			Channel:  channelType,
+			Provider: messenger.Name(),
+			Subject:  message.Subject,
+			Body:     message.Body,
+			To:       message.Receiver,
+			Metadata: map[string]any{
+				"event_id": event.ID.String(),
+			},
+			Locale: renderResult.Locale,
+		}
+
+		// Use a copy so per-adapter status updates don't clobber each other mid-loop.
+		msgCopy := *message
+		if err := s.deliverWithRetries(ctx, messenger, &msgCopy, sendMsg); err != nil {
+			lastErr = err
+			continue
+		}
+		success = true
 	}
 
-	if err := s.deliverWithRetries(ctx, messenger, message, sendMsg); err != nil {
-		return err
+	if s.messages != nil {
+		if success {
+			message.Status = domain.MessageStatusDelivered
+		} else {
+			message.Status = domain.MessageStatusFailed
+		}
+		_ = s.messages.Update(ctx, message)
+	}
+
+	if !success {
+		return lastErr
 	}
 	return nil
 }
