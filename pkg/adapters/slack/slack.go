@@ -96,7 +96,12 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	token := strings.TrimSpace(a.cfg.Token)
+	token := strings.TrimSpace(firstNonEmpty(
+		stringValue(msg.Metadata, "token"),
+		secretString(msg.Metadata, "token"),
+		secretString(msg.Metadata, "default"),
+		a.cfg.Token,
+	))
 	if token == "" && !a.cfg.DryRun {
 		return fmt.Errorf("slack: token required")
 	}
@@ -210,4 +215,30 @@ func stripHTML(html string) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func secretString(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	raw, ok := meta["secrets"]
+	if !ok {
+		return ""
+	}
+	switch v := raw.(type) {
+	case map[string][]byte:
+		if val, ok := v[key]; ok {
+			return strings.TrimSpace(string(val))
+		}
+	case map[string]any:
+		if val, ok := v[key]; ok {
+			switch data := val.(type) {
+			case string:
+				return strings.TrimSpace(data)
+			case []byte:
+				return strings.TrimSpace(string(data))
+			}
+		}
+	}
+	return ""
 }
