@@ -148,13 +148,13 @@ class NotificationCenter {
 
         switch(msg.event) {
             case 'inbox.new':
+            case 'inbox.created':
                 this.showToast('New notification received!', 'info')
                 this.loadInbox()
                 break
             case 'inbox.read':
-                this.loadInbox()
-                break
             case 'inbox.dismissed':
+            case 'inbox.updated':
                 this.loadInbox()
                 break
         }
