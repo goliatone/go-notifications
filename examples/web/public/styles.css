@@ -99,13 +99,14 @@ body {
     border-radius: 50%;
     font-size: 12px;
     font-weight: bold;
-    min-width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     line-height: 1;
     padding: 0;
+    flex-shrink: 0;
 }
 
 /* Container */
