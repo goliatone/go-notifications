@@ -47,10 +47,10 @@ func Defaults() Config {
 			SessionKey:     "demo-secret-key-change-in-production",
 			SessionTimeout: time.Hour,
 		},
-		Persistence: PersistenceConfig{
-			Driver: "sqlite",
-			DSN:    ":memory:",
-		},
+	Persistence: PersistenceConfig{
+		Driver: "sqlite",
+		DSN:    "file:tmp/demo.db?_busy_timeout=5000&_fk=1",
+	},
 		Locales: []string{"en", "es"},
 		Features: FeatureFlags{
 			EnableWebSocket: true,
