@@ -272,6 +272,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 10px;
 }
 
 .preference-item:last-child {
@@ -280,6 +281,43 @@ body {
 
 .preference-label {
     font-size: 14px;
+}
+
+.preference-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.provider-select {
+    padding: 6px 8px;
+    border: 1px solid #dfe6e9;
+    border-radius: 6px;
+    background: #f8f9fb;
+    font-size: 12px;
+    color: #2c3e50;
+}
+
+.pref-meta {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+
+.chip {
+    background: #ecf0f1;
+    color: #2c3e50;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.2px;
+}
+
+.chip-soft {
+    background: #e8f4fd;
 }
 
 .toggle {
@@ -362,6 +400,44 @@ input:checked + .toggle-slider:before {
         transform: translateX(0);
         opacity: 1;
     }
+}
+
+.delivery-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #ecf0f1;
+}
+
+.delivery-title {
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.delivery-meta {
+    display: flex;
+    gap: 6px;
+    margin: 4px 0;
+}
+
+.delivery-dest {
+    font-size: 12px;
+}
+
+.delivery-status {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.status-ok {
+    color: #27ae60;
+}
+
+.status-failed {
+    color: #e74c3c;
 }
 
 /* Connection Status */
