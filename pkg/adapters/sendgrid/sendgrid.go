@@ -113,13 +113,23 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	if strings.TrimSpace(a.cfg.APIKey) == "" {
+	apiKey := strings.TrimSpace(firstNonEmpty(
+		stringValue(msg.Metadata, "api_key"),
+		secretString(msg.Metadata, "api_key"),
+		secretString(msg.Metadata, "default"),
+		a.cfg.APIKey,
+	))
+	if apiKey == "" {
 		return fmt.Errorf("sendgrid: api key required")
 	}
 	if strings.TrimSpace(msg.To) == "" {
 		return fmt.Errorf("sendgrid: destination required")
 	}
-	from := firstNonEmpty(stringValue(msg.Metadata, "from"), a.cfg.From)
+	from := firstNonEmpty(
+		stringValue(msg.Metadata, "from"),
+		secretString(msg.Metadata, "from"),
+		a.cfg.From,
+	)
 	if strings.TrimSpace(from) == "" {
 		return fmt.Errorf("sendgrid: from required")
 	}
@@ -176,7 +186,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if err != nil {
 		return fmt.Errorf("sendgrid: build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+a.cfg.APIKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
@@ -241,4 +251,30 @@ func stringSlice(meta map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+func secretString(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	raw, ok := meta["secrets"]
+	if !ok {
+		return ""
+	}
+	switch v := raw.(type) {
+	case map[string][]byte:
+		if val, ok := v[key]; ok {
+			return strings.TrimSpace(string(val))
+		}
+	case map[string]any:
+		if val, ok := v[key]; ok {
+			switch data := val.(type) {
+			case string:
+				return strings.TrimSpace(data)
+			case []byte:
+				return strings.TrimSpace(string(data))
+			}
+		}
+	}
+	return ""
 }
