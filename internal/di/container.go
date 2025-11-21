@@ -15,6 +15,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/queue"
 	"github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/storage"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
@@ -30,6 +31,7 @@ type Options struct {
 	Queue       queue.Queue
 	Broadcaster broadcaster.Broadcaster
 	Adapters    []adapters.Messenger
+	Secrets     secrets.Resolver
 }
 
 // Container wires repositories, services, dispatcher, commands, and manager.
@@ -43,6 +45,7 @@ type Container struct {
 	Dispatcher  *dispatcher.Service
 	Commands    *commands.Registry
 	Adapters    *adapters.Registry
+	Secrets     secrets.Resolver
 }
 
 // New constructs the container using the supplied options.
@@ -83,6 +86,11 @@ func New(opts Options) (*Container, error) {
 	b := opts.Broadcaster
 	if b == nil {
 		b = &broadcaster.Nop{}
+	}
+
+	secretsResolver := opts.Secrets
+	if secretsResolver == nil {
+		secretsResolver = secrets.SimpleResolver{Provider: secrets.NopProvider{}}
 	}
 
 	adapterRegistry := adapters.NewRegistry(opts.Adapters...)
@@ -127,6 +135,7 @@ func New(opts Options) (*Container, error) {
 		Config:      cfg.Dispatcher,
 		Preferences: prefSvc,
 		Inbox:       inboxSvc,
+		Secrets:     secretsResolver,
 	})
 	if err != nil {
 		return nil, err
@@ -165,5 +174,6 @@ func New(opts Options) (*Container, error) {
 		Dispatcher:  dispatcherSvc,
 		Commands:    cmdRegistry,
 		Adapters:    adapterRegistry,
+		Secrets:     secretsResolver,
 	}, nil
 }
