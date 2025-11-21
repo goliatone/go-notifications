@@ -104,7 +104,7 @@ func Load(input any, opts ...LoadOption) (Config, error) {
 		opt(&settings)
 	}
 
-	cfg, err := cfgx.Build[Config](input, settings.buildOpts...)
+	cfg, err := cfgx.Build(input, settings.buildOpts...)
 	if err != nil {
 		return Config{}, err
 	}
