@@ -25,3 +25,4 @@ vendor/
 .env
 .version
 node_modules/
+.envset
