@@ -31,6 +31,8 @@ type DispatcherConfig struct {
 	Enabled    bool `mapstructure:"enabled" json:"enabled"`
 	MaxRetries int  `mapstructure:"max_retries" json:"max_retries"`
 	MaxWorkers int  `mapstructure:"max_workers" json:"max_workers"`
+	// EnvFallbackAllowlist gates using global config/env credentials for specific subjects (e.g., admin/test users).
+	EnvFallbackAllowlist []string `mapstructure:"env_fallback_allowlist" json:"env_fallback_allowlist"`
 }
 
 // InboxConfig enables the in-app notification center.
@@ -58,9 +60,10 @@ func Defaults() Config {
 	return Config{
 		Localization: LocalizationConfig{DefaultLocale: "en"},
 		Dispatcher: DispatcherConfig{
-			Enabled:    true,
-			MaxRetries: 3,
-			MaxWorkers: 4,
+			Enabled:              true,
+			MaxRetries:           3,
+			MaxWorkers:           4,
+			EnvFallbackAllowlist: []string{},
 		},
 		Inbox: InboxConfig{
 			Enabled: true,
