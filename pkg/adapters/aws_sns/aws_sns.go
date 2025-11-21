@@ -153,7 +153,9 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if err != nil {
 		return fmt.Errorf("aws_sns: request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	_, _ = io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
