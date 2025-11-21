@@ -15,6 +15,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	pkgoptions "github.com/goliatone/go-notifications/pkg/options"
 	prefsvc "github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/templates"
 	opts "github.com/goliatone/go-options"
 )
@@ -35,6 +36,7 @@ type Dependencies struct {
 	Config      config.DispatcherConfig
 	Preferences *prefsvc.Service
 	Inbox       inboxDeliverer
+	Secrets     secrets.Resolver
 }
 
 // Service expands events into rendered messages and routes them to adapters.
@@ -49,6 +51,7 @@ type Service struct {
 	cfg         config.DispatcherConfig
 	preferences *prefsvc.Service
 	inbox       inboxDeliverer
+	secrets     secrets.Resolver
 }
 
 // DispatchOptions allow callers to override channels/locales.
@@ -100,6 +103,7 @@ func New(deps Dependencies) (*Service, error) {
 		cfg:         deps.Config,
 		preferences: deps.Preferences,
 		inbox:       deps.Inbox,
+		secrets:     deps.Secrets,
 	}, nil
 }
 
@@ -183,6 +187,62 @@ func (s *Service) Dispatch(ctx context.Context, event *domain.NotificationEvent,
 	return nil
 }
 
+func (s *Service) resolveSecrets(ctx context.Context, event *domain.NotificationEvent, job deliveryJob, messenger adapters.Messenger, overrideProvider string) (map[string][]byte, error) {
+	channelType, provider := adapters.ParseChannel(job.channel)
+	if overrideProvider != "" {
+		provider = overrideProvider
+	}
+	if provider == "" {
+		provider = messenger.Name()
+	}
+	if s.secrets == nil {
+		if s.allowFallback(job.recipient, event) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("dispatcher: secrets resolver not configured and fallback not allowed for recipient %s", job.recipient)
+	}
+
+	refs := []secrets.Reference{
+		{Scope: secrets.ScopeUser, SubjectID: job.recipient, Channel: channelType, Provider: provider, Key: "default"},
+	}
+	if event != nil && strings.TrimSpace(event.TenantID) != "" {
+		refs = append(refs, secrets.Reference{Scope: secrets.ScopeTenant, SubjectID: event.TenantID, Channel: channelType, Provider: provider, Key: "default"})
+	}
+	refs = append(refs, secrets.Reference{Scope: secrets.ScopeSystem, SubjectID: "default", Channel: channelType, Provider: provider, Key: "default"})
+
+	resolved, err := s.secrets.Resolve(refs...)
+	if err != nil && err != secrets.ErrNotFound {
+		return nil, err
+	}
+
+	// Prefer user -> tenant -> system
+	for _, ref := range refs {
+		if val, ok := resolved[ref]; ok {
+			return map[string][]byte{"default": val.Data}, nil
+		}
+	}
+
+	if s.allowFallback(job.recipient, event) {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("dispatcher: no scoped secret for recipient %s and fallback not allowed", job.recipient)
+}
+
+func (s *Service) allowFallback(recipient string, event *domain.NotificationEvent) bool {
+	if len(s.cfg.EnvFallbackAllowlist) == 0 {
+		return false
+	}
+	for _, allowed := range s.cfg.EnvFallbackAllowlist {
+		if allowed == recipient {
+			return true
+		}
+		if event != nil && allowed == event.TenantID {
+			return true
+		}
+	}
+	return false
+}
+
 type deliveryJob struct {
 	event        *domain.NotificationEvent
 	channel      string
@@ -201,7 +261,8 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		}
 	}
 
-	if allowed, reason, err := s.allowDelivery(ctx, event, def, job.recipient, channelType); err != nil {
+	preferredProvider := ""
+	if allowed, reason, providerOverride, err := s.allowDelivery(ctx, event, def, job.recipient, channelType); err != nil {
 		return fmt.Errorf("preferences evaluation: %w", err)
 	} else if !allowed {
 		s.logger.Debug("delivery skipped by preferences",
@@ -210,6 +271,8 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 			logger.Field{Key: "reason", Value: reason},
 		)
 		return nil
+	} else if providerOverride != "" {
+		preferredProvider = providerOverride
 	}
 
 	payload := cloneJSONMap(event.Context)
@@ -265,15 +328,25 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		return nil
 	}
 	// TODO: We should support multi-channel deliveries
-	candidates := s.registry.List(job.channel)
+	routeChannel := job.channel
+	if preferredProvider != "" {
+		routeChannel = fmt.Sprintf("%s:%s", channelType, preferredProvider)
+	}
+	candidates := s.registry.List(routeChannel)
 	if len(candidates) == 0 {
-		return fmt.Errorf("route channel %s: %w", job.channel, adapters.ErrAdapterNotFound)
+		return fmt.Errorf("route channel %s: %w", routeChannel, adapters.ErrAdapterNotFound)
 	}
 
 	var success bool
 	var lastErr error
 
 	for _, messenger := range candidates {
+		secretPayload, err := s.resolveSecrets(ctx, event, job, messenger, preferredProvider)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
 		sendMsg := adapters.Message{
 			ID:       message.ID.String(),
 			Channel:  channelType,
@@ -282,9 +355,13 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 			Body:     message.Body,
 			To:       message.Receiver,
 			Metadata: map[string]any{
-				"event_id": event.ID.String(),
+				"event_id":        event.ID.String(),
+				"definition_code": def.Code,
 			},
 			Locale: renderResult.Locale,
+		}
+		if len(secretPayload) > 0 {
+			sendMsg.Metadata["secrets"] = secretPayload
 		}
 
 		// Use a copy so per-adapter status updates don't clobber each other mid-loop.
@@ -397,9 +474,9 @@ func (s *Service) handleInboxDelivery(ctx context.Context, message *domain.Notif
 	return nil
 }
 
-func (s *Service) allowDelivery(ctx context.Context, event *domain.NotificationEvent, def *domain.NotificationDefinition, recipient, channel string) (bool, string, error) {
+func (s *Service) allowDelivery(ctx context.Context, event *domain.NotificationEvent, def *domain.NotificationDefinition, recipient, channel string) (bool, string, string, error) {
 	if s.preferences == nil || def == nil || event == nil {
-		return true, "", nil
+		return true, "", "", nil
 	}
 	scopes := buildPreferenceScopes(event, recipient, def.Code, channel)
 	req := prefsvc.EvaluationRequest{
@@ -413,12 +490,12 @@ func (s *Service) allowDelivery(ctx context.Context, event *domain.NotificationE
 	}
 	result, err := s.preferences.Evaluate(ctx, req)
 	if err != nil {
-		return false, "", err
+		return false, "", "", err
 	}
 	if !result.Allowed {
-		return false, result.Reason, nil
+		return false, result.Reason, result.Provider, nil
 	}
-	return true, "", nil
+	return true, "", result.Provider, nil
 }
 
 func buildPreferenceScopes(event *domain.NotificationEvent, recipient, definitionCode, channel string) []pkgoptions.PreferenceScopeRef {
