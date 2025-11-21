@@ -28,6 +28,7 @@ type Option func(*Adapter)
 // Config holds Telegram Bot API options.
 type Config struct {
 	Token                 string
+	ChatID                string
 	BaseURL               string
 	ParseMode             string
 	DisableWebPagePreview bool
@@ -35,6 +36,7 @@ type Config struct {
 	Timeout               time.Duration
 	SkipTLSVerify         bool
 	PlainOnly             bool // force text/plain even when HTML is provided
+	DryRun                bool // when true, skip sending but still succeed
 }
 
 func WithName(name string) Option {
@@ -100,18 +102,25 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		return fmt.Errorf("telegram: bot token required")
 	}
 	chatID := strings.TrimSpace(msg.To)
-	if chatID == "" {
+	// Always prefer configured ChatID when provided (useful for demos where the recipient ID is not a Telegram chat)
+	if a.cfg.ChatID != "" {
+		chatID = strings.TrimSpace(a.cfg.ChatID)
+	}
+	if chatID == "" && !a.cfg.DryRun {
 		return fmt.Errorf("telegram: chat id required")
 	}
 
-	body := firstNonEmpty(msg.Metadata, "html_body", "body", msg.Body)
-	parseMode := strings.TrimSpace(firstNonEmpty(msg.Metadata, "parse_mode", a.cfg.ParseMode))
-	if parseMode == "" && !a.cfg.PlainOnly && strings.TrimSpace(firstNonEmpty(msg.Metadata, "html_body")) != "" {
+	htmlBody := stringValue(msg.Metadata, "html_body")
+	textBody := stringValue(msg.Metadata, "body")
+
+	body := firstNonEmptyStrings(htmlBody, textBody, msg.Body, msg.Subject)
+	parseMode := sanitizeParseMode(strings.TrimSpace(firstNonEmptyStrings(stringValue(msg.Metadata, "parse_mode"), a.cfg.ParseMode)))
+	if parseMode == "" && !a.cfg.PlainOnly && strings.TrimSpace(htmlBody) != "" {
 		parseMode = "HTML"
 	}
 	if a.cfg.PlainOnly {
 		parseMode = ""
-		body = firstNonEmpty(msg.Metadata, "body", msg.Body)
+		body = firstNonEmptyStrings(textBody, msg.Body, msg.Subject)
 	}
 	if body == "" {
 		return fmt.Errorf("telegram: message body required")
@@ -152,31 +161,18 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if err != nil {
 		return fmt.Errorf("telegram: request failed: %w", err)
 	}
-	defer resp.Body.Close()
-	_, _ = io.ReadAll(resp.Body) // drain for keep-alive reuse
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	bodyBytes, _ = io.ReadAll(resp.Body) // drain for keep-alive reuse
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("telegram: unexpected status %d", resp.StatusCode)
+		// Surface Telegram's response for easier troubleshooting (e.g., chat not found / bot blocked)
+		return fmt.Errorf("telegram: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 	}
 
 	a.base.LogSuccess(a.name, msg)
 	return nil
-}
-
-func firstNonEmpty(meta map[string]any, keys ...any) string {
-	for _, key := range keys {
-		switch v := key.(type) {
-		case string:
-			if s := stringValue(meta, v); s != "" {
-				return s
-			}
-		default:
-			if s := fmt.Sprint(v); strings.TrimSpace(s) != "" {
-				return s
-			}
-		}
-	}
-	return ""
 }
 
 func stringValue(meta map[string]any, key string) string {
@@ -212,4 +208,24 @@ func boolValue(meta map[string]any, key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+func sanitizeParseMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "html":
+		return "HTML"
+	case "markdown", "md", "markdownv2", "mdv2":
+		return "MarkdownV2"
+	default:
+		return ""
+	}
+}
+
+func firstNonEmptyStrings(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
