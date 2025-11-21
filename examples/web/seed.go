@@ -73,6 +73,29 @@ func ensureSeededOrError(ctx context.Context, app *App) error {
 }
 
 func seedDefinitions(ctx context.Context, app *App) error {
+	// Get available channels from adapter registry
+	availableChannels := app.AdapterRegistry.GetAvailableChannels()
+
+	// Helper to filter channels based on what's available
+	getChannels := func(desired ...string) []string {
+		result := make([]string, 0)
+		for _, ch := range desired {
+			if contains(availableChannels, ch) {
+				result = append(result, ch)
+			}
+		}
+		return result
+	}
+
+	// Helper to build template IDs based on available channels
+	getTemplateIDs := func(code string, channels []string) []string {
+		ids := make([]string, 0, len(channels))
+		for _, ch := range channels {
+			ids = append(ids, ch+":"+code+"."+ch)
+		}
+		return ids
+	}
+
 	definitions := []commands.CreateDefinition{
 		{
 			Code:        "welcome",
@@ -80,8 +103,8 @@ func seedDefinitions(ctx context.Context, app *App) error {
 			Description: "Welcome new users",
 			Severity:    "info",
 			Category:    "onboarding",
-			Channels:    []string{"email", "in-app"},
-			TemplateIDs: []string{"email:welcome.email", "in-app:welcome.in-app"},
+			Channels:    getChannels("email", "in-app", "slack"),
+			TemplateIDs: []string{}, // Will be set below
 			AllowUpdate: true,
 		},
 		{
@@ -90,8 +113,8 @@ func seedDefinitions(ctx context.Context, app *App) error {
 			Description: "Notify when someone replies to a comment",
 			Severity:    "info",
 			Category:    "social",
-			Channels:    []string{"in-app"},
-			TemplateIDs: []string{"in-app:comment_reply.in-app"},
+			Channels:    getChannels("in-app", "chat"),
+			TemplateIDs: []string{}, // Will be set below
 			AllowUpdate: true,
 		},
 		{
@@ -100,8 +123,8 @@ func seedDefinitions(ctx context.Context, app *App) error {
 			Description: "Critical system notifications",
 			Severity:    "critical",
 			Category:    "system",
-			Channels:    []string{"email", "in-app"},
-			TemplateIDs: []string{"email:system_alert.email", "in-app:system_alert.in-app"},
+			Channels:    getChannels("email", "in-app", "sms", "slack"),
+			TemplateIDs: []string{}, // Will be set below
 			AllowUpdate: true,
 		},
 		{
@@ -110,8 +133,8 @@ func seedDefinitions(ctx context.Context, app *App) error {
 			Description: "For testing multi-channel delivery",
 			Severity:    "info",
 			Category:    "test",
-			Channels:    []string{"email", "in-app"},
-			TemplateIDs: []string{"email:test.email", "in-app:test.in-app"},
+			Channels:    getChannels("email", "in-app", "chat", "sms"),
+			TemplateIDs: []string{}, // Will be set below
 			AllowUpdate: true,
 		},
 		{
@@ -120,10 +143,15 @@ func seedDefinitions(ctx context.Context, app *App) error {
 			Description: "Direct message from administrator",
 			Severity:    "info",
 			Category:    "admin",
-			Channels:    []string{"in-app"},
-			TemplateIDs: []string{"in-app:admin_message.in-app"},
+			Channels:    getChannels("in-app", "chat"),
+			TemplateIDs: []string{}, // Will be set below
 			AllowUpdate: true,
 		},
+	}
+
+	// Set template IDs based on actual channels
+	for i := range definitions {
+		definitions[i].TemplateIDs = getTemplateIDs(definitions[i].Code, definitions[i].Channels)
 	}
 
 	for _, def := range definitions {
@@ -236,7 +264,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 		// Test email - English
 		{
 			TemplateInput: templates.TemplateInput{
-				Code:    "test.email",
+				Code:    "test_notification.email",
 				Channel: "email",
 				Locale:  "en",
 				Subject: "Test Notification",
@@ -248,7 +276,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 		// Test in-app - English
 		{
 			TemplateInput: templates.TemplateInput{
-				Code:    "test.in-app",
+				Code:    "test_notification.in-app",
 				Channel: "in-app",
 				Locale:  "en",
 				Subject: "Test Notification",
@@ -265,6 +293,90 @@ func seedTemplates(ctx context.Context, app *App) error {
 				Locale:  "en",
 				Subject: "Message from Admin",
 				Body:    "{{ message }}",
+				Format:  "text",
+			},
+			AllowUpdate: true,
+		},
+		// Admin message chat - English (for Slack/Telegram)
+		{
+			TemplateInput: templates.TemplateInput{
+				Code:    "admin_message.chat",
+				Channel: "chat",
+				Locale:  "en",
+				Subject: "Admin Message",
+				Body:    "📢 *Admin Message*\n{{ message }}",
+				Format:  "text",
+			},
+			AllowUpdate: true,
+		},
+		// Test chat - English
+		{
+			TemplateInput: templates.TemplateInput{
+				Code:    "test_notification.chat",
+				Channel: "chat",
+				Locale:  "en",
+				Subject: "Test Notification",
+				Body:    "🧪 {{ message }}",
+				Format:  "text",
+			},
+			AllowUpdate: true,
+		},
+		// Test SMS - English
+		{
+			TemplateInput: templates.TemplateInput{
+				Code:    "test_notification.sms",
+				Channel: "sms",
+				Locale:  "en",
+				Subject: "",
+				Body:    "{{ message }}",
+				Format:  "text",
+			},
+			AllowUpdate: true,
+		},
+		// System alert SMS - English
+		{
+			TemplateInput: templates.TemplateInput{
+				Code:    "system_alert.sms",
+				Channel: "sms",
+				Locale:  "en",
+				Subject: "",
+				Body:    "ALERT: {{ message }}",
+				Format:  "text",
+			},
+			AllowUpdate: true,
+		},
+		// System alert Slack - English
+		{
+			TemplateInput: templates.TemplateInput{
+				Code:    "system_alert.slack",
+				Channel: "slack",
+				Locale:  "en",
+				Subject: "System Alert",
+				Body:    "🚨 *{{ title }}*\n{{ message }}",
+				Format:  "text",
+			},
+			AllowUpdate: true,
+		},
+		// Welcome Slack - English
+		{
+			TemplateInput: templates.TemplateInput{
+				Code:    "welcome.slack",
+				Channel: "slack",
+				Locale:  "en",
+				Subject: "Welcome!",
+				Body:    "👋 Welcome {{ name }}! Thanks for joining our notification center.",
+				Format:  "text",
+			},
+			AllowUpdate: true,
+		},
+		// Comment reply chat - English
+		{
+			TemplateInput: templates.TemplateInput{
+				Code:    "comment_reply.chat",
+				Channel: "chat",
+				Locale:  "en",
+				Subject: "New Reply",
+				Body:    "💬 {{ author }} replied: \"{{ message }}\"",
 				Format:  "text",
 			},
 			AllowUpdate: true,
