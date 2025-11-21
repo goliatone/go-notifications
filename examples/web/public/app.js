@@ -37,6 +37,7 @@ class NotificationCenter {
 
         if (this.currentUser.admin) {
             document.getElementById('admin-panel').style.display = 'block'
+            this.loadUsers()
         }
     }
 
@@ -58,12 +59,14 @@ class NotificationCenter {
         document.getElementById('refresh-btn')?.addEventListener('click', () => this.loadInbox())
         document.getElementById('unread-only')?.addEventListener('change', (e) => {
             this.unreadOnlyFilter = e.target.checked
+            this.currentPage = 1 // Reset to first page when filtering
             this.loadInbox()
         })
 
         // Admin actions
         document.getElementById('broadcast-btn')?.addEventListener('click', () => this.broadcastAlert())
         document.getElementById('view-stats-btn')?.addEventListener('click', () => this.viewStats())
+        document.getElementById('send-to-user-btn')?.addEventListener('click', () => this.sendToUser())
     }
 
     async fetchCurrentUser() {
@@ -196,10 +199,10 @@ class NotificationCenter {
         list.innerHTML = items.map(item => `
             <div class="inbox-item ${item.unread ? 'unread' : ''}" data-id="${item.id}">
                 <div class="inbox-item-header">
-                    <div class="inbox-item-title">${this.escapeHtml(item.title)}</div>
+                    <div class="inbox-item-title">${this.escapeHtml(item.title || 'Notification')}</div>
                     <div class="inbox-item-time">${this.formatTime(item.created_at)}</div>
                 </div>
-                <div class="inbox-item-body">${this.escapeHtml(item.body)}</div>
+                <div class="inbox-item-body">${this.escapeHtml(item.body || 'No message content')}</div>
                 <div class="inbox-item-actions">
                     ${item.unread ?
                         `<button class="btn btn-small btn-primary" onclick="app.markRead('${item.id}')">Mark Read</button>` :
@@ -240,9 +243,15 @@ class NotificationCenter {
     }
 
     async markAllRead() {
-        // This would require a bulk operation endpoint
-        // For now, just refresh
-        this.showToast('Mark all read not implemented yet', 'info')
+        try {
+            const resp = await fetch('/api/inbox/mark-all-read', { method: 'POST' })
+            if (!resp.ok) throw new Error('Failed to mark all as read')
+            const data = await resp.json()
+            this.showToast(`Marked ${data.count} notifications as read`, 'info')
+            this.loadInbox()
+        } catch (e) {
+            this.showToast('Failed to mark all as read', 'error')
+        }
     }
 
     async loadPreferences() {
@@ -263,15 +272,15 @@ class NotificationCenter {
         const list = document.getElementById('preferences-list')
 
         if (preferences.length === 0) {
-            list.innerHTML = '<p class="text-muted">No preferences set</p>'
+            list.innerHTML = '<p class="text-muted">No notification types available</p>'
             return
         }
 
         list.innerHTML = preferences.map(pref => `
             <div class="preference-item">
                 <div class="preference-label">
-                    ${pref.definition_code || 'All'}
-                    ${pref.channel ? `(${pref.channel})` : ''}
+                    <div style="font-weight: 500;">${this.escapeHtml(pref.definition_name)}</div>
+                    <div style="font-size: 12px; color: #7f8c8d;">${pref.channel}</div>
                 </div>
                 <label class="toggle">
                     <input type="checkbox"
@@ -341,6 +350,70 @@ class NotificationCenter {
         }
     }
 
+    async loadUsers() {
+        try {
+            const resp = await fetch('/admin/users')
+            if (!resp.ok) throw new Error('Failed to load users')
+            const data = await resp.json()
+
+            const select = document.getElementById('user-select')
+            if (!select) return
+
+            // Clear and populate
+            select.innerHTML = '<option value="">Select user...</option>'
+            data.users.forEach(user => {
+                // Exclude current user from the list
+                if (user.id !== this.currentUser.id) {
+                    const option = document.createElement('option')
+                    option.value = user.id
+                    option.textContent = `${user.name} (${user.email})`
+                    select.appendChild(option)
+                }
+            })
+        } catch (e) {
+            console.error('Failed to load users:', e)
+            this.showToast('Failed to load users', 'error')
+        }
+    }
+
+    async sendToUser() {
+        const select = document.getElementById('user-select')
+        const textarea = document.getElementById('user-message')
+
+        if (!select || !textarea) return
+
+        const userId = select.value
+        const message = textarea.value.trim()
+
+        if (!userId) {
+            this.showToast('Please select a user', 'error')
+            return
+        }
+
+        if (!message) {
+            this.showToast('Please enter a message', 'error')
+            return
+        }
+
+        try {
+            const resp = await fetch('/admin/send-to-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: userId,
+                    message: message
+                })
+            })
+
+            if (!resp.ok) throw new Error('Failed to send notification')
+
+            this.showToast('Notification sent!', 'info')
+            textarea.value = '' // Clear the message
+        } catch (e) {
+            this.showToast('Failed to send notification: ' + e.message, 'error')
+        }
+    }
+
     updateBadge() {
         const badge = document.getElementById('unread-count')
         if (badge) {
@@ -370,13 +443,21 @@ class NotificationCenter {
     formatTime(timestamp) {
         if (!timestamp) return 'Just now'
         const date = new Date(timestamp)
+
+        // Check if date is valid
+        if (isNaN(date.getTime())) return 'Just now'
+
         const now = new Date()
         const diff = now - date
 
+        if (diff < 0) return 'Just now' // Future date, treat as just now
         if (diff < 60000) return 'Just now'
         if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago'
         if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago'
-        return Math.floor(diff / 86400000) + 'd ago'
+        if (diff < 2592000000) return Math.floor(diff / 86400000) + 'd ago' // Less than 30 days
+
+        // For older dates, show actual date
+        return date.toLocaleDateString()
     }
 }
 
