@@ -36,7 +36,7 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 	consoleAdapter := console.New(lgr)
 	registry.Adapters = append(registry.Adapters, consoleAdapter)
 	registry.EnabledAdapters = append(registry.EnabledAdapters, "console")
-	registry.addChannels("console")
+	registry.addChannels("console", "email", "email:console")
 
 	// Slack
 	if cfg.Slack.IsConfigured() {
@@ -48,19 +48,20 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 		}))
 		registry.Adapters = append(registry.Adapters, slackAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "slack")
-		registry.addChannels("chat", "slack")
+		registry.addChannels("chat", "slack", "chat:slack")
 	}
 
 	// Telegram
 	if cfg.Telegram.IsConfigured() {
 		telegramAdapter := telegram.New(lgr, telegram.WithConfig(telegram.Config{
 			Token:   cfg.Telegram.BotToken,
+			ChatID:  cfg.Telegram.ChatID,
 			BaseURL: "https://api.telegram.org",
 			Timeout: config.DefaultAdapterTimeout,
 		}))
 		registry.Adapters = append(registry.Adapters, telegramAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "telegram")
-		registry.addChannels("chat")
+		registry.addChannels("chat", "chat:telegram", "telegram")
 	}
 
 	// Twilio (SMS)
@@ -73,7 +74,7 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 		}))
 		registry.Adapters = append(registry.Adapters, twilioAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "twilio")
-		registry.addChannels("sms")
+		registry.addChannels("sms", "sms:twilio")
 	}
 
 	// SendGrid (Email)
@@ -89,7 +90,7 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 		)
 		registry.Adapters = append(registry.Adapters, sendgridAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "sendgrid")
-		registry.addChannels("email")
+		registry.addChannels("email", "email:sendgrid")
 	}
 
 	// Mailgun (Email)
@@ -106,7 +107,7 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 		}))
 		registry.Adapters = append(registry.Adapters, mailgunAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "mailgun")
-		registry.addChannels("email")
+		registry.addChannels("email", "email:mailgun")
 	}
 
 	// WhatsApp
@@ -118,7 +119,7 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig) *AdapterRegistry
 		}))
 		registry.Adapters = append(registry.Adapters, whatsappAdapter)
 		registry.EnabledAdapters = append(registry.EnabledAdapters, "whatsapp")
-		registry.addChannels("whatsapp")
+		registry.addChannels("whatsapp", "whatsapp:whatsapp")
 	}
 
 	return registry
