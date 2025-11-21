@@ -13,6 +13,7 @@ require (
 	github.com/uptrace/bun v1.2.15
 	github.com/uptrace/bun/dialect/sqlitedialect v1.2.15
 	github.com/uptrace/bun/driver/sqliteshim v1.2.15
+	golang.org/x/crypto v0.32.0
 )
 
 require (
@@ -45,6 +46,7 @@ require (
 	github.com/goliatone/go-composite-fs v0.0.1 // indirect
 	github.com/goliatone/go-config v0.6.0 // indirect
 	github.com/goliatone/go-errors v0.9.0 // indirect
+	github.com/goliatone/go-masker v0.1.0 // indirect
 	github.com/goliatone/go-options v0.4.0 // indirect
 	github.com/goliatone/go-persistence-bun v0.6.0 // indirect
 	github.com/goliatone/go-repository-bun v0.9.0 // indirect
@@ -71,6 +73,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/savsgio/gotils v0.0.0-20240303185622-093b76447511 // indirect
+	github.com/showa-93/go-mask v0.6.2 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
