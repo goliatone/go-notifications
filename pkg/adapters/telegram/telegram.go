@@ -98,12 +98,17 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	if strings.TrimSpace(a.cfg.Token) == "" {
+	token := strings.TrimSpace(firstNonEmptyStrings(
+		stringValue(msg.Metadata, "token"),
+		secretString(msg.Metadata, "token"),
+		secretString(msg.Metadata, "default"),
+		a.cfg.Token,
+	))
+	if token == "" {
 		return fmt.Errorf("telegram: bot token required")
 	}
-	chatID := strings.TrimSpace(msg.To)
-	// Always prefer configured ChatID when provided (useful for demos where the recipient ID is not a Telegram chat)
-	if a.cfg.ChatID != "" {
+	chatID := strings.TrimSpace(firstNonEmptyStrings(stringValue(msg.Metadata, "chat_id"), msg.To))
+	if chatID == "" {
 		chatID = strings.TrimSpace(a.cfg.ChatID)
 	}
 	if chatID == "" && !a.cfg.DryRun {
@@ -149,7 +154,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		payload["reply_to_message_id"] = replyTo
 	}
 
-	endpoint := fmt.Sprintf("%s/bot%s/sendMessage", strings.TrimRight(a.cfg.BaseURL, "/"), strings.TrimSpace(a.cfg.Token))
+	endpoint := fmt.Sprintf("%s/bot%s/sendMessage", strings.TrimRight(a.cfg.BaseURL, "/"), token)
 	bodyBytes, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(bodyBytes)))
 	if err != nil {
@@ -219,6 +224,32 @@ func sanitizeParseMode(mode string) string {
 	default:
 		return ""
 	}
+}
+
+func secretString(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	raw, ok := meta["secrets"]
+	if !ok {
+		return ""
+	}
+	switch v := raw.(type) {
+	case map[string][]byte:
+		if val, ok := v[key]; ok {
+			return strings.TrimSpace(string(val))
+		}
+	case map[string]any:
+		if val, ok := v[key]; ok {
+			switch data := val.(type) {
+			case string:
+				return strings.TrimSpace(data)
+			case []byte:
+				return strings.TrimSpace(string(data))
+			}
+		}
+	}
+	return ""
 }
 
 func firstNonEmptyStrings(values ...string) string {
