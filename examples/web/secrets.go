@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	bunrepo "github.com/goliatone/go-notifications/internal/storage/bun"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
@@ -26,5 +27,20 @@ func buildSecretsProvider(db *bun.DB, lgr logger.Logger) (secrets.Provider, secr
 	if err != nil {
 		return nil, nil, fmt.Errorf("secrets: provider: %w", err)
 	}
-	return provider, secrets.SimpleResolver{Provider: provider}, nil
+	resolver := secrets.SimpleResolver{Provider: provider}
+	cacheTTL := parseCacheTTL(os.Getenv("SECRETS_CACHE_TTL"))
+	if cacheTTL > 0 {
+		resolver = secrets.NewCachingResolver(resolver, cacheTTL)
+	}
+	return provider, resolver, nil
+}
+
+func parseCacheTTL(raw string) time.Duration {
+	if raw == "" {
+		return 30 * time.Second
+	}
+	if ttl, err := time.ParseDuration(raw); err == nil && ttl > 0 {
+		return ttl
+	}
+	return 0
 }
