@@ -2,6 +2,7 @@ package di
 
 import (
 	"errors"
+	"reflect"
 
 	i18n "github.com/goliatone/go-i18n"
 	"github.com/goliatone/go-notifications/internal/dispatcher"
@@ -48,6 +49,10 @@ type Container struct {
 	Secrets     secrets.Resolver
 }
 
+func isZeroConfig(cfg config.Config) bool {
+	return reflect.ValueOf(cfg).IsZero()
+}
+
 // New constructs the container using the supplied options.
 func New(opts Options) (*Container, error) {
 	if opts.Translator == nil {
@@ -55,7 +60,7 @@ func New(opts Options) (*Container, error) {
 	}
 
 	cfg := opts.Config
-	if cfg == (config.Config{}) {
+	if isZeroConfig(cfg) {
 		cfg = config.Defaults()
 	}
 
