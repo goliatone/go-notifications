@@ -426,7 +426,7 @@ class NotificationCenter {
         const badge = document.getElementById('unread-count')
         if (badge) {
             badge.textContent = this.unreadCount
-            badge.style.display = this.unreadCount > 0 ? 'inline-block' : 'none'
+            badge.style.display = this.unreadCount > 0 ? 'inline-flex' : 'none'
         }
     }
 
