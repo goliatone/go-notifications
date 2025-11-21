@@ -1,8 +1,6 @@
 package bunrepo
 
 import (
-	"time"
-
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	repository "github.com/goliatone/go-repository-bun"
 	"github.com/google/uuid"
@@ -18,18 +16,6 @@ func withID(id uuid.UUID) repository.SelectCriteria {
 func withoutDeleted() repository.SelectCriteria {
 	return func(q *bun.SelectQuery) *bun.SelectQuery {
 		return q.Where("deleted_at IS NULL")
-	}
-}
-
-func withTimeRange(field string, since, until time.Time) repository.SelectCriteria {
-	return func(q *bun.SelectQuery) *bun.SelectQuery {
-		if !since.IsZero() {
-			q = q.Where("? >= ?", bun.Ident(field), since)
-		}
-		if !until.IsZero() {
-			q = q.Where("? <= ?", bun.Ident(field), until)
-		}
-		return q
 	}
 }
 
