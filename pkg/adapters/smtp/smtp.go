@@ -299,7 +299,7 @@ func firstNonEmpty(meta map[string]any, keys ...any) string {
 		switch v := key.(type) {
 		case string:
 			if meta != nil {
-				if raw, ok := meta[v]; ok {
+				if _, ok := meta[v]; ok {
 					if s := stringValue(meta, v); s != "" {
 						return s
 					}

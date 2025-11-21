@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
