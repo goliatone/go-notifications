@@ -1,6 +1,8 @@
 package main
 
 import (
+	"sort"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/goliatone/go-router"
 )
@@ -49,6 +51,12 @@ func (a *App) renderHome() router.HandlerFunc {
 		for _, user := range a.Users {
 			users = append(users, user)
 		}
+		sort.Slice(users, func(i, j int) bool {
+			if users[i].Name == users[j].Name {
+				return users[i].Email < users[j].Email
+			}
+			return users[i].Name < users[j].Name
+		})
 		return c.Render("home", router.ViewContext{
 			"title":        "Notification Center Demo",
 			"description":  "Test the go-notifications module end-to-end",
