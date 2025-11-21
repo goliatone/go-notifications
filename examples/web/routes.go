@@ -33,6 +33,7 @@ func (a *App) SetupRoutes(r router.Router[*fiber.App]) {
 	api.Put("/preferences", a.UpdatePreferences)
 
 	api.Get("/channels", a.GetAvailableChannels)
+	api.Get("/deliveries/last", a.GetLastDeliveries)
 
 	api.Post("/notify/test", a.SendTestNotification)
 	api.Post("/notify/event", a.EnqueueEvent)
