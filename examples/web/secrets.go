@@ -27,7 +27,7 @@ func buildSecretsProvider(db *bun.DB, lgr logger.Logger) (secrets.Provider, secr
 	if err != nil {
 		return nil, nil, fmt.Errorf("secrets: provider: %w", err)
 	}
-	resolver := secrets.SimpleResolver{Provider: provider}
+	var resolver secrets.Resolver = secrets.SimpleResolver{Provider: provider}
 	cacheTTL := parseCacheTTL(os.Getenv("SECRETS_CACHE_TTL"))
 	if cacheTTL > 0 {
 		resolver = secrets.NewCachingResolver(resolver, cacheTTL)
