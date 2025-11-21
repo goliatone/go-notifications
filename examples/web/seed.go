@@ -84,7 +84,7 @@ func seedDefinitions(ctx context.Context, app *App) error {
 				result = append(result, ch)
 			}
 		}
-		return result
+		return uniqueStrings(result)
 	}
 
 	// Helper to build template IDs based on available channels
