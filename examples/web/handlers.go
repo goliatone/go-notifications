@@ -283,6 +283,10 @@ func (a *App) SendTestNotification(c router.Context) error {
 		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 	}
 
+	if err := ensureSeededOrError(c.Context(), a); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+
 	err := a.Catalog.EnqueueEvent.Execute(c.Context(), events.IntakeRequest{
 		DefinitionCode: "test_notification",
 		Recipients:     []string{user.ID},
@@ -376,6 +380,10 @@ func (a *App) BroadcastNotification(c router.Context) error {
 	recipients := make([]string, 0, len(a.Users))
 	for _, user := range a.Users {
 		recipients = append(recipients, user.ID)
+	}
+
+	if err := ensureSeededOrError(c.Context(), a); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
 	}
 
 	if err := a.Catalog.EnqueueEvent.Execute(c.Context(), events.IntakeRequest{
