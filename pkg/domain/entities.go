@@ -13,10 +13,10 @@ import (
 
 // RecordMeta captures identifiers and audit fields shared across entities.
 type RecordMeta struct {
-	ID        uuid.UUID `bun:",pk,type:uuid"`
-	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp"`
-	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp"`
-	DeletedAt time.Time `bun:",soft_delete,nullzero"`
+	ID        uuid.UUID `bun:",pk,type:uuid" json:"id"`
+	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
+	DeletedAt time.Time `bun:",soft_delete,nullzero" json:"deleted_at,omitempty"`
 }
 
 // EnsureID assigns a UUID when the struct is about to be persisted.
@@ -243,14 +243,14 @@ type NotificationPreference struct {
 	bun.BaseModel `bun:"table:notification_preferences"`
 	RecordMeta
 
-	SubjectID       string  `bun:",nullzero,notnull"`
-	SubjectType     string  `bun:",nullzero,notnull"` // user, tenant, group, etc.
-	DefinitionCode  string  `bun:",nullzero"`
-	Channel         string  `bun:",nullzero"`
-	Locale          string  `bun:",nullzero"`
-	Enabled         bool    `bun:",nullzero"`
-	QuietHours      JSONMap `bun:"type:jsonb,nullzero"`
-	AdditionalRules JSONMap `bun:"type:jsonb,nullzero"`
+	SubjectID       string  `bun:",nullzero,notnull" json:"subject_id"`
+	SubjectType     string  `bun:",nullzero,notnull" json:"subject_type"` // user, tenant, group, etc.
+	DefinitionCode  string  `bun:",nullzero" json:"definition_code"`
+	Channel         string  `bun:",nullzero" json:"channel"`
+	Locale          string  `bun:",nullzero" json:"locale"`
+	Enabled         bool    `bun:",nullzero" json:"enabled"`
+	QuietHours      JSONMap `bun:"type:jsonb,nullzero" json:"quiet_hours,omitempty"`
+	AdditionalRules JSONMap `bun:"type:jsonb,nullzero" json:"additional_rules,omitempty"`
 }
 
 // SubscriptionGroup represents named cohorts.
@@ -269,18 +269,18 @@ type InboxItem struct {
 	bun.BaseModel `bun:"table:notification_inbox_items"`
 	RecordMeta
 
-	UserID       string    `bun:",nullzero,notnull"`
-	MessageID    uuid.UUID `bun:",nullzero"`
-	Title        string    `bun:",nullzero"`
-	Body         string    `bun:",nullzero"`
-	Locale       string    `bun:",nullzero"`
-	Unread       bool      `bun:",nullzero"`
-	Pinned       bool      `bun:",nullzero"`
-	ActionURL    string    `bun:",nullzero"`
-	Metadata     JSONMap   `bun:"type:jsonb,nullzero"`
-	ReadAt       time.Time `bun:",nullzero"`
-	DismissedAt  time.Time `bun:",nullzero"`
-	SnoozedUntil time.Time `bun:",nullzero"`
+	UserID       string    `bun:",nullzero,notnull" json:"user_id"`
+	MessageID    uuid.UUID `bun:",nullzero" json:"message_id"`
+	Title        string    `bun:",nullzero" json:"title"`
+	Body         string    `bun:",nullzero" json:"body"`
+	Locale       string    `bun:",nullzero" json:"locale"`
+	Unread       bool      `bun:",nullzero" json:"unread"`
+	Pinned       bool      `bun:",nullzero" json:"pinned"`
+	ActionURL    string    `bun:",nullzero" json:"action_url"`
+	Metadata     JSONMap   `bun:"type:jsonb,nullzero" json:"metadata,omitempty"`
+	ReadAt       time.Time `bun:",nullzero" json:"read_at,omitempty"`
+	DismissedAt  time.Time `bun:",nullzero" json:"dismissed_at,omitempty"`
+	SnoozedUntil time.Time `bun:",nullzero" json:"snoozed_until,omitempty"`
 }
 
 // Domain constants for statuses.
