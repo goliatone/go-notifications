@@ -88,8 +88,8 @@ github.com/goliatone/go-persistence-bun v0.6.0 h1:89s8TnsLJzMAWW4xiosbXA6Nzti8M+
 github.com/goliatone/go-persistence-bun v0.6.0/go.mod h1:F9cM1x7FFxM5YzMUjyj7lVjXqQFmqLv+9+/2yMxV0dg=
 github.com/goliatone/go-repository-bun v0.9.0 h1:G0lxM2yWphFo3jsvvcyF5nnf3rB/5+3M7W2OJJVZ+r0=
 github.com/goliatone/go-repository-bun v0.9.0/go.mod h1:ZG2ZKOpbHhgi81rUtVgdtNCCApu49ihPhHpce4qjaOI=
-github.com/goliatone/go-router v0.23.0 h1:ydgVhqcDjUveDlULmVCQCzo+ECVTsam1OKerzBaKl0g=
-github.com/goliatone/go-router v0.23.0/go.mod h1:85wCKmRHdnZSChgDl1QCRP385mh9CoSCrks7AQe7EPQ=
+github.com/goliatone/go-router v0.25.0 h1:LPlvl3GONSiNHJK5o2/NNH/yPa5a0/6CbOp/mwriQO0=
+github.com/goliatone/go-router v0.25.0/go.mod h1:85wCKmRHdnZSChgDl1QCRP385mh9CoSCrks7AQe7EPQ=
 github.com/goliatone/go-template v0.3.1 h1:x714biuWqtCyrtTmIrt2YjXWPYBOIS/Y2DPdWXtrAr8=
 github.com/goliatone/go-template v0.3.1/go.mod h1:2mFRGMnfvAn3r4ClMmlu4wBVkSKXgtXhVdmmmhhgSr4=
 github.com/goliatone/hashid v0.1.1 h1:VfZZf7s0uM+JZ3ZBkqaEM1mL/CJfiTmFOzZ1QuXY3EM=

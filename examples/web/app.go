@@ -41,7 +41,7 @@ type App struct {
 }
 
 func NewApp(ctx context.Context, cfg config.Config) (*App, error) {
-	lgr := &logger.Nop{}
+	lgr := newStdLogger()
 
 	sqldb, err := sql.Open(sqliteshim.ShimName, cfg.Persistence.DSN)
 	if err != nil {

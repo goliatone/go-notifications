@@ -8,7 +8,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.6
 	github.com/goliatone/go-i18n v0.2.0
 	github.com/goliatone/go-notifications v0.0.0
-	github.com/goliatone/go-router v0.23.0
+	github.com/goliatone/go-router v0.25.0
 	github.com/google/uuid v1.6.0
 	github.com/uptrace/bun v1.2.15
 	github.com/uptrace/bun/dialect/sqlitedialect v1.2.15
