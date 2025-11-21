@@ -12,6 +12,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	prefsvc "github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
 
@@ -50,6 +51,7 @@ type Dependencies struct {
 	Config      config.DispatcherConfig
 	Preferences *prefsvc.Service
 	Inbox       inboxDeliverer
+	Secrets     secrets.Resolver
 }
 
 var (
@@ -83,6 +85,7 @@ func NewWithDispatcher(deps Dependencies, dispatcherSvc *dispatcher.Service) (*M
 			Config:      deps.Config,
 			Preferences: deps.Preferences,
 			Inbox:       deps.Inbox,
+			Secrets:     deps.Secrets,
 		})
 		if err != nil {
 			return nil, err
