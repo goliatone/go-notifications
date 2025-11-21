@@ -214,6 +214,39 @@ func (a *App) SnoozeNotification(c router.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"success": true})
 }
 
+// MarkAllRead marks all inbox items as read for the current user.
+func (a *App) MarkAllRead(c router.Context) error {
+	user := GetUser(c)
+	if user == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+	}
+
+	// Get all unread items
+	result, err := a.Module.Inbox().List(c.Context(), user.ID, store.ListOptions{Limit: 1000, Offset: 0}, inbox.ListFilters{UnreadOnly: true})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+
+	// Mark all as read
+	ids := make([]string, 0, len(result.Items))
+	for _, item := range result.Items {
+		ids = append(ids, item.ID.String())
+	}
+
+	if len(ids) > 0 {
+		err = a.Catalog.InboxMarkRead.Execute(c.Context(), commands.InboxMarkRead{
+			UserID: user.ID,
+			IDs:    ids,
+			Read:   true,
+		})
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"success": true, "count": len(ids)})
+}
+
 // InboxStats returns inbox statistics.
 func (a *App) InboxStats(c router.Context) error {
 	user := GetUser(c)
@@ -232,26 +265,59 @@ func (a *App) InboxStats(c router.Context) error {
 	})
 }
 
-// GetPreferences returns user preferences.
+// GetPreferences returns user preferences along with available definitions.
 func (a *App) GetPreferences(c router.Context) error {
 	user := GetUser(c)
 	if user == nil {
 		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 	}
 
+	// Get all definitions
+	defs, err := a.Module.Container().Storage.Definitions.List(c.Context(), store.ListOptions{Limit: 100, Offset: 0})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+
+	// Get user preferences
 	result, err := a.Module.Preferences().List(c.Context(), store.ListOptions{Limit: 100, Offset: 0})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
 	}
 
-	userPrefs := make([]domain.NotificationPreference, 0, len(result.Items))
+	// Build preference map for quick lookup
+	prefMap := make(map[string]domain.NotificationPreference)
 	for _, pref := range result.Items {
 		if pref.SubjectID == user.ID {
-			userPrefs = append(userPrefs, pref)
+			key := pref.DefinitionCode + ":" + pref.Channel
+			prefMap[key] = pref
 		}
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{"preferences": userPrefs})
+	// Build response with all definitions and their channels
+	type PrefItem struct {
+		DefinitionCode string `json:"definition_code"`
+		DefinitionName string `json:"definition_name"`
+		Channel        string `json:"channel"`
+		Enabled        bool   `json:"enabled"`
+		HasPreference  bool   `json:"has_preference"`
+	}
+
+	items := make([]PrefItem, 0)
+	for _, def := range defs.Items {
+		for _, channel := range def.Channels {
+			key := def.Code + ":" + channel
+			pref, exists := prefMap[key]
+			items = append(items, PrefItem{
+				DefinitionCode: def.Code,
+				DefinitionName: def.Name,
+				Channel:        channel,
+				Enabled:        exists && pref.Enabled || !exists, // Default to enabled if no preference
+				HasPreference:  exists,
+			})
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"preferences": items})
 }
 
 // UpdatePreferences updates user preferences.
@@ -395,6 +461,52 @@ func (a *App) BroadcastNotification(c router.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{"success": true, "recipients": len(recipients)})
+}
+
+// ListUsers returns all demo users (admin only).
+func (a *App) ListUsers(c router.Context) error {
+	users := make([]map[string]any, 0, len(a.Users))
+	for _, user := range a.Users {
+		users = append(users, map[string]any{
+			"id":     user.ID,
+			"name":   user.Name,
+			"email":  user.Email,
+			"locale": user.Locale,
+			"admin":  user.IsAdmin,
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"users": users})
+}
+
+// SendToUser sends a notification to a specific user (admin only).
+func (a *App) SendToUser(c router.Context) error {
+	var req struct {
+		UserID  string `json:"user_id"`
+		Message string `json:"message"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"error": "invalid request"})
+	}
+
+	if req.UserID == "" || req.Message == "" {
+		return c.JSON(http.StatusBadRequest, map[string]any{"error": "user_id and message are required"})
+	}
+
+	if err := ensureSeededOrError(c.Context(), a); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+
+	if err := a.Catalog.EnqueueEvent.Execute(c.Context(), events.IntakeRequest{
+		DefinitionCode: "admin_message",
+		Recipients:     []string{req.UserID},
+		Context: map[string]any{
+			"message": req.Message,
+		},
+	}); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"success": true})
 }
 
 // DeliveryStats returns delivery statistics (admin only).
