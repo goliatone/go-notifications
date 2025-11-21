@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/goliatone/go-notifications/internal/commands"
@@ -110,6 +111,32 @@ func countUnread(items []domain.InboxItem) int {
 		}
 	}
 	return count
+}
+
+func providerFromRules(rules domain.JSONMap, channel string) string {
+	if len(rules) == 0 {
+		return ""
+	}
+	channel = strings.ToLower(channel)
+	if channelsRaw, ok := rules["channels"]; ok {
+		if channelsMap, ok := channelsRaw.(map[string]any); ok {
+			if entry, ok := channelsMap[channel]; ok {
+				if entryMap, ok := entry.(map[string]any); ok {
+					if provider, ok := entryMap["provider"]; ok {
+						if val, ok := provider.(string); ok {
+							return strings.TrimSpace(val)
+						}
+					}
+				}
+			}
+		}
+	}
+	if provider, ok := rules["provider"]; ok {
+		if val, ok := provider.(string); ok {
+			return strings.TrimSpace(val)
+		}
+	}
+	return ""
 }
 
 // MarkRead marks an inbox item as read.
@@ -295,24 +322,36 @@ func (a *App) GetPreferences(c router.Context) error {
 
 	// Build response with all definitions and their channels
 	type PrefItem struct {
-		DefinitionCode string `json:"definition_code"`
-		DefinitionName string `json:"definition_name"`
-		Channel        string `json:"channel"`
-		Enabled        bool   `json:"enabled"`
-		HasPreference  bool   `json:"has_preference"`
+		DefinitionCode string   `json:"definition_code"`
+		DefinitionName string   `json:"definition_name"`
+		Channel        string   `json:"channel"`
+		Enabled        bool     `json:"enabled"`
+		HasPreference  bool     `json:"has_preference"`
+		Provider       string   `json:"provider,omitempty"`
+		Providers      []string `json:"providers,omitempty"`
 	}
 
 	items := make([]PrefItem, 0)
+	providerOptions := make(map[string][]string)
 	for _, def := range defs.Items {
 		for _, channel := range def.Channels {
+			if _, ok := providerOptions[channel]; !ok {
+				providerOptions[channel] = a.AdapterRegistry.ProvidersForChannel(channel)
+			}
 			key := def.Code + ":" + channel
 			pref, exists := prefMap[key]
+			provider := ""
+			if exists {
+				provider = providerFromRules(pref.AdditionalRules, channel)
+			}
 			items = append(items, PrefItem{
 				DefinitionCode: def.Code,
 				DefinitionName: def.Name,
 				Channel:        channel,
 				Enabled:        exists && pref.Enabled || !exists, // Default to enabled if no preference
 				HasPreference:  exists,
+				Provider:       provider,
+				Providers:      providerOptions[channel],
 			})
 		}
 	}
@@ -327,15 +366,37 @@ func (a *App) UpdatePreferences(c router.Context) error {
 		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 	}
 
-	var req preferences.PreferenceInput
+	var req struct {
+		DefinitionCode string `json:"definition_code"`
+		Channel        string `json:"channel"`
+		Enabled        *bool  `json:"enabled,omitempty"`
+		Provider       string `json:"provider,omitempty"`
+	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"error": "invalid request"})
 	}
 
-	req.SubjectID = user.ID
-	req.SubjectType = "user"
+	update := preferences.PreferenceInput{
+		SubjectID:      user.ID,
+		SubjectType:    "user",
+		DefinitionCode: req.DefinitionCode,
+		Channel:        req.Channel,
+		Rules:          domain.JSONMap{},
+	}
+	if req.Enabled != nil {
+		update.Enabled = req.Enabled
+	}
+	if provider := strings.TrimSpace(req.Provider); provider != "" {
+		update.Rules = domain.JSONMap{
+			"channels": map[string]any{
+				strings.ToLower(req.Channel): map[string]any{
+					"provider": provider,
+				},
+			},
+		}
+	}
 
-	if err := a.Catalog.UpsertPreference.Execute(c.Context(), req); err != nil {
+	if err := a.Catalog.UpsertPreference.Execute(c.Context(), update); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
 	}
 
@@ -515,6 +576,43 @@ func (a *App) GetAvailableChannels(c router.Context) error {
 		"channels": a.AdapterRegistry.GetAvailableChannels(),
 		"adapters": a.AdapterRegistry.EnabledAdapters,
 	})
+}
+
+// GetLastDeliveries returns the most recent delivery metadata for the current user.
+func (a *App) GetLastDeliveries(c router.Context) error {
+	user := GetUser(c)
+	if user == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+	}
+	if a.DeliveryLogs == nil {
+		return c.JSON(http.StatusOK, map[string]any{"deliveries": []any{}})
+	}
+	records, err := a.DeliveryLogs.LastForUser(c.Context(), user.ID, 10)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+	type deliveryView struct {
+		Channel        string    `json:"channel"`
+		Provider       string    `json:"provider"`
+		Address        string    `json:"address"`
+		Status         string    `json:"status"`
+		DefinitionCode string    `json:"definition_code"`
+		Message        string    `json:"message"`
+		Timestamp      time.Time `json:"timestamp"`
+	}
+	out := make([]deliveryView, 0, len(records))
+	for _, rec := range records {
+		out = append(out, deliveryView{
+			Channel:        rec.Channel,
+			Provider:       rec.Provider,
+			Address:        rec.Address,
+			Status:         rec.Status,
+			DefinitionCode: rec.DefinitionCode,
+			Message:        rec.Message,
+			Timestamp:      rec.CreatedAt,
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"deliveries": out})
 }
 
 // DeliveryStats returns delivery statistics (admin only).
