@@ -50,33 +50,41 @@ func New(opts Options) (*Container, error) {
 	if opts.Translator == nil {
 		return nil, errors.New("di: translator is required")
 	}
+
 	cfg := opts.Config
 	if cfg == (config.Config{}) {
 		cfg = config.Defaults()
 	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+
 	providers := opts.Storage
 	if providers.Definitions == nil {
 		providers = storage.NewMemoryProviders()
 	}
+
 	lgr := opts.Logger
 	if lgr == nil {
 		lgr = &logger.Nop{}
 	}
+
 	c := opts.Cache
 	if c == nil {
 		c = &cache.Nop{}
 	}
+
 	q := opts.Queue
 	if q == nil {
 		q = &queue.Nop{}
 	}
+
 	b := opts.Broadcaster
 	if b == nil {
 		b = &broadcaster.Nop{}
 	}
+
 	adapterRegistry := adapters.NewRegistry(opts.Adapters...)
 
 	tplSvc, err := templates.New(templates.Dependencies{
@@ -90,6 +98,7 @@ func New(opts Options) (*Container, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	prefSvc, err := preferences.New(preferences.Dependencies{
 		Repository: providers.Preferences,
 		Logger:     lgr,
@@ -97,6 +106,7 @@ func New(opts Options) (*Container, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	inboxSvc, err := inbox.New(inbox.Dependencies{
 		Repository:  providers.Inbox,
 		Broadcaster: b,
@@ -105,6 +115,7 @@ func New(opts Options) (*Container, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	dispatcherSvc, err := dispatcher.New(dispatcher.Dependencies{
 		Definitions: providers.Definitions,
 		Events:      providers.Events,
@@ -120,6 +131,7 @@ func New(opts Options) (*Container, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	eventSvc, err := events.New(events.Dependencies{
 		Definitions: providers.Definitions,
 		Events:      providers.Events,
@@ -130,6 +142,7 @@ func New(opts Options) (*Container, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	cmdRegistry, err := commands.New(commands.Dependencies{
 		Definitions: providers.Definitions,
 		Templates:   tplSvc,
@@ -141,6 +154,7 @@ func New(opts Options) (*Container, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &Container{
 		Config:      cfg,
 		Storage:     providers,

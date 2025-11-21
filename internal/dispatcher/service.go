@@ -68,18 +68,23 @@ func New(deps Dependencies) (*Service, error) {
 	if deps.Definitions == nil {
 		return nil, ErrMissingDefinitions
 	}
+
 	if deps.Templates == nil {
 		return nil, ErrMissingTemplates
 	}
+
 	if deps.Registry == nil {
 		return nil, ErrMissingRegistry
 	}
+
 	if deps.Logger == nil {
 		deps.Logger = &logger.Nop{}
 	}
+
 	if deps.Config.MaxWorkers <= 0 {
 		deps.Config.MaxWorkers = 4
 	}
+
 	if deps.Config.MaxRetries <= 0 {
 		deps.Config.MaxRetries = 3
 	}
@@ -125,7 +130,7 @@ func (s *Service) Dispatch(ctx context.Context, event *domain.NotificationEvent,
 	var wg sync.WaitGroup
 	workerCount := min(s.cfg.MaxWorkers, len(channels)*len(recipients))
 
-	for i := 0; i < workerCount; i++ {
+	for range workerCount {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -188,6 +193,7 @@ type deliveryJob struct {
 
 func (s *Service) processDelivery(ctx context.Context, event *domain.NotificationEvent, def *domain.NotificationDefinition, job deliveryJob) error {
 	channelType, provider := adapters.ParseChannel(job.channel)
+	inboxChannel := isInboxChannel(channelType)
 	renderLocale := job.locale
 	if renderLocale == "" && event != nil {
 		if locale, ok := event.Context["locale"].(string); ok && locale != "" {
@@ -222,6 +228,14 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		Data:    payload,
 	})
 	if err != nil {
+		s.logger.Error("dispatcher render failed",
+			logger.Field{Key: "template", Value: job.templateCode},
+			logger.Field{Key: "channel", Value: channelType},
+			logger.Field{Key: "recipient", Value: job.recipient},
+			logger.Field{Key: "definition", Value: def.Code},
+			logger.Field{Key: "event_id", Value: event.ID},
+			logger.Field{Key: "error", Value: err},
+		)
 		return fmt.Errorf("render template %s: %w", job.templateCode, err)
 	}
 
@@ -241,6 +255,16 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		}
 	}
 
+	if inboxChannel {
+		if s.inbox == nil {
+			return errors.New("dispatcher: inbox channel requested but inbox service is not configured")
+		}
+		if err := s.handleInboxDelivery(ctx, message); err != nil {
+			return err
+		}
+		return nil
+	}
+	// TODO: We should support multi-channel deliveries
 	messenger, err := s.registry.Route(job.channel)
 	if err != nil {
 		return fmt.Errorf("route channel %s: %w", job.channel, err)
@@ -257,13 +281,6 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 			"event_id": event.ID.String(),
 		},
 		Locale: renderResult.Locale,
-	}
-
-	if channelType == "inbox" && s.inbox != nil {
-		if err := s.handleInboxDelivery(ctx, message); err != nil {
-			return err
-		}
-		return nil
 	}
 
 	if err := s.deliverWithRetries(ctx, messenger, message, sendMsg); err != nil {
@@ -443,4 +460,13 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func isInboxChannel(channel string) bool {
+	switch channel {
+	case "inbox", "in-app", "inapp", "in_app":
+		return true
+	default:
+		return false
+	}
 }
