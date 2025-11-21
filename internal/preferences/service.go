@@ -39,6 +39,7 @@ type PreferenceInput struct {
 	Enabled        *bool             `json:"enabled,omitempty"`
 	Locale         *string           `json:"locale,omitempty"`
 	QuietHours     *QuietHoursWindow `json:"quiet_hours,omitempty"`
+	Provider       *string           `json:"provider,omitempty"`
 	Rules          domain.JSONMap    `json:"rules,omitempty"`
 }
 
@@ -58,8 +59,10 @@ type EvaluationResult struct {
 	Reason            string
 	QuietHoursActive  bool
 	ChannelOverride   bool
+	Provider          string
 	Trace             opts.Trace
 	ChannelTrace      opts.Trace
+	ProviderTrace     opts.Trace
 	Resolver          *pkgoptions.Resolver
 	RequiredSubs      []string
 	SubscriptionTrace opts.Trace
@@ -239,6 +242,18 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluationRequest) (Evaluati
 				result.Allowed = false
 			}
 		}
+		// Provider override at channel level
+		if provider, trace, err := resolver.ResolveString(fmt.Sprintf("rules.channels.%s.provider", strings.ToLower(req.Channel))); err == nil && strings.TrimSpace(provider) != "" {
+			result.Provider = strings.TrimSpace(provider)
+			result.ProviderTrace = trace
+		}
+	}
+	// Fallback provider at root rules if channel-specific not set.
+	if result.Provider == "" {
+		if provider, trace, err := resolver.ResolveString("rules.provider"); err == nil && strings.TrimSpace(provider) != "" {
+			result.Provider = strings.TrimSpace(provider)
+			result.ProviderTrace = trace
+		}
 	}
 
 	if window, ok := resolveQuietHours(resolver); ok {
@@ -309,6 +324,9 @@ func applyInput(record *domain.NotificationPreference, input PreferenceInput) {
 	if record == nil {
 		return
 	}
+	if record.AdditionalRules == nil {
+		record.AdditionalRules = make(domain.JSONMap)
+	}
 	if input.Enabled != nil {
 		record.Enabled = *input.Enabled
 	}
@@ -320,6 +338,9 @@ func applyInput(record *domain.NotificationPreference, input PreferenceInput) {
 	}
 	if input.Rules != nil {
 		record.AdditionalRules = copyJSONMap(input.Rules)
+	}
+	if input.Provider != nil {
+		record.AdditionalRules["provider"] = strings.TrimSpace(*input.Provider)
 	}
 }
 
