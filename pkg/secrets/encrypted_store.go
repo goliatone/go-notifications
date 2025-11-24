@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -126,6 +127,8 @@ func translateStoreError(err error) error {
 	switch err {
 	case nil:
 		return nil
+	case sql.ErrNoRows:
+		return ErrNotFound
 	default:
 		return err
 	}
