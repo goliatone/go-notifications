@@ -108,9 +108,13 @@ func (r *Registry) List(channel string) []Messenger {
 	if r == nil {
 		return nil
 	}
+	base, _ := ParseChannel(channel)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	candidates := r.byChannel[normalizeKey(channel)]
+	if len(candidates) == 0 && base != normalizeKey(channel) {
+		candidates = r.byChannel[normalizeKey(base)]
+	}
 	out := make([]Messenger, len(candidates))
 	copy(out, candidates)
 	return out
