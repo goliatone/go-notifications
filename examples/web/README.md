@@ -136,7 +136,7 @@ config.Config{
 - **HTTP Router**: `github.com/goliatone/go-router` (Fiber adapter)
 - **Template Engine**: `github.com/goliatone/go-template` via go-router view helpers
 - **WebSocket**: go-router unified WebSocket context + in-process hub
-- **Database**: SQLite (in-memory)
+- **Database**: SQLite file-backed (`tmp/demo.db`)
 - **Storage**: Memory providers (for demo)
 - **Frontend**: Vanilla HTML/CSS/JavaScript
 
