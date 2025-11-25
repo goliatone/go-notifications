@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/goliatone/go-notifications/pkg/domain"
@@ -123,9 +124,9 @@ func buildTemplates(opts Options) []domain.NotificationTemplate {
 		email.Body = opts.EmailBody
 	}
 	email.Metadata = mergeJSON(email.Metadata, opts.TemplateMeta)
-	email.Metadata = mergeJSON(email.Metadata, domain.JSONMap{
-		"cta_label": defaultValue(opts.EmailCTALabel, "Download"),
-	})
+	if label := defaultValue(opts.EmailCTALabel, "Download"); label != "" {
+		email.Metadata["cta_label"] = label
+	}
 	if opts.EmailIcon != "" {
 		email.Metadata["icon"] = opts.EmailIcon
 	}
@@ -137,9 +138,9 @@ func buildTemplates(opts Options) []domain.NotificationTemplate {
 		inapp.Body = opts.InAppBody
 	}
 	inapp.Metadata = mergeJSON(inapp.Metadata, opts.TemplateMeta)
-	inapp.Metadata = mergeJSON(inapp.Metadata, domain.JSONMap{
-		"cta_label": defaultValue(opts.InAppCTALabel, "Open"),
-	})
+	if label := defaultValue(opts.InAppCTALabel, "Open"); label != "" {
+		inapp.Metadata["cta_label"] = label
+	}
 	if opts.InAppIcon != "" {
 		inapp.Metadata["icon"] = opts.InAppIcon
 	}
@@ -179,7 +180,7 @@ func upsertDefinition(ctx context.Context, repo store.NotificationDefinitionRepo
 }
 
 func upsertTemplate(ctx context.Context, svc *templates.Service, desired domain.NotificationTemplate) (*domain.NotificationTemplate, error) {
-	if (desired == domain.NotificationTemplate{}) {
+	if strings.TrimSpace(desired.Code) == "" || strings.TrimSpace(desired.Channel) == "" {
 		return nil, nil
 	}
 	current, err := svc.Get(ctx, desired.Code, desired.Channel, desired.Locale)
@@ -250,14 +251,26 @@ func definitionsEqual(a, b domain.NotificationDefinition) bool {
 }
 
 func templatesEqual(existing domain.NotificationTemplate, desired domain.NotificationTemplate, mergedMeta domain.JSONMap) bool {
-	return existing.Code == desired.Code &&
-		existing.Channel == desired.Channel &&
-		existing.Locale == desired.Locale &&
-		existing.Subject == desired.Subject &&
-		existing.Body == desired.Body &&
-		existing.Format == desired.Format &&
-		jsonEqual(existing.Metadata, mergedMeta) &&
-		schemaEqual(existing.Schema, desired.Schema)
+	a := normalizeTemplate(existing)
+	b := normalizeTemplate(domain.NotificationTemplate{
+		Code:     desired.Code,
+		Channel:  desired.Channel,
+		Locale:   desired.Locale,
+		Subject:  desired.Subject,
+		Body:     desired.Body,
+		Format:   desired.Format,
+		Schema:   desired.Schema,
+		Metadata: mergedMeta,
+	})
+
+	return a.Code == b.Code &&
+		a.Channel == b.Channel &&
+		a.Locale == b.Locale &&
+		a.Subject == b.Subject &&
+		a.Body == b.Body &&
+		a.Format == b.Format &&
+		jsonEqual(a.Metadata, b.Metadata) &&
+		schemaEqual(a.Schema, b.Schema)
 }
 
 func stringListsEqual(a, b domain.StringList) bool {
@@ -279,29 +292,75 @@ func stringListsEqual(a, b domain.StringList) bool {
 }
 
 func jsonEqual(a, b domain.JSONMap) bool {
-	if len(a) != len(b) {
-		return false
+	if len(a) == 0 && len(b) == 0 {
+		return true
 	}
-	for k, v := range a {
-		if b[k] != v {
-			return false
-		}
-	}
-	return true
+	return reflect.DeepEqual(a, b)
 }
 
 func schemaEqual(a, b domain.TemplateSchema) bool {
-	return stringSlicesEqual(a.Required, b.Required) && stringSlicesEqual(a.Optional, b.Optional)
+	sa := sanitizeSchema(a)
+	sb := sanitizeSchema(b)
+	return stringSlicesEqual(sa.Required, sb.Required) && stringSlicesEqual(sa.Optional, sb.Optional)
+}
+
+func sanitizeSchema(schema domain.TemplateSchema) domain.TemplateSchema {
+	if schema.IsZero() {
+		return schema
+	}
+	return domain.TemplateSchema{
+		Required: uniqueStrings(schema.Required),
+		Optional: uniqueStrings(schema.Optional),
+	}
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, val := range values {
+		key := strings.TrimSpace(val)
+		if key == "" {
+			continue
+		}
+		key = strings.ToLower(key)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, val)
+	}
+	return result
+}
+
+func normalizeTemplate(t domain.NotificationTemplate) domain.NotificationTemplate {
+	t.Code = strings.TrimSpace(t.Code)
+	t.Channel = strings.TrimSpace(strings.ToLower(t.Channel))
+	t.Locale = strings.TrimSpace(t.Locale)
+	t.Subject = strings.TrimSpace(t.Subject)
+	t.Body = strings.TrimSpace(t.Body)
+	t.Format = strings.TrimSpace(t.Format)
+	t.Schema = sanitizeSchema(t.Schema)
+	t.Metadata = mergeJSON(t.Metadata, nil)
+	return t
 }
 
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
-		if a[i] != b[i] {
+	seen := make(map[string]int, len(a))
+	for _, v := range a {
+		seen[strings.ToLower(strings.TrimSpace(v))]++
+	}
+	for _, v := range b {
+		key := strings.ToLower(strings.TrimSpace(v))
+		if count, ok := seen[key]; !ok || count == 0 {
 			return false
 		}
+		seen[key]--
 	}
 	return true
 }

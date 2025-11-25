@@ -52,8 +52,9 @@ func Templates() []domain.NotificationTemplate {
 			Format:      "text/html",
 			Schema:      templateSchema,
 			Metadata: domain.JSONMap{
-				"category": "export",
-				"cta":      "download",
+				"category":  "export",
+				"cta_label": "Download",
+				"icon":      "download",
 			},
 		},
 		{
@@ -66,8 +67,10 @@ func Templates() []domain.NotificationTemplate {
 			Format:      "text/markdown",
 			Schema:      templateSchema,
 			Metadata: domain.JSONMap{
-				"category": "export",
-				"cta":      "open",
+				"category":  "export",
+				"cta_label": "Open",
+				"icon":      "file-export",
+				"badge":     "export",
 			},
 		},
 	}
@@ -80,20 +83,20 @@ func Schema() domain.TemplateSchema {
 
 const emailBody = `
 {{ t(locale, "export.ready.body.intro", FileName, Format) }}
-{{ t(locale, "export.ready.body.link_label") }}: {{ URL }}
+{% if CTALabel %}{{ CTALabel }}{% else %}{{ t(locale, "export.ready.body.link_label") }}{% endif %}: {% if ActionURL %}{{ ActionURL }}{% else %}{{ URL }}{% endif %}
 {{ t(locale, "export.ready.body.expires", ExpiresAt) }}
-{{ if Rows }}{{ t(locale, "export.ready.body.rows", Rows) }}{{ end }}
-{{ if Parts }}{{ t(locale, "export.ready.body.parts", Parts) }}{{ end }}
-{{ if ManifestURL }}{{ t(locale, "export.ready.body.manifest", ManifestURL) }}{{ end }}
-{{ if Message }}{{ t(locale, "export.ready.body.message", Message) }}{{ end }}
+{% if Rows %}{{ t(locale, "export.ready.body.rows", Rows) }}{% endif %}
+{% if Parts %}{{ t(locale, "export.ready.body.parts", Parts) }}{% endif %}
+{% if ManifestURL %}{{ t(locale, "export.ready.body.manifest", ManifestURL) }}{% endif %}
+{% if Message %}{{ t(locale, "export.ready.body.message", Message) }}{% endif %}
 `
 
 const inAppBody = `
 {{ t(locale, "export.ready.body.intro", FileName, Format) }}
 {{ t(locale, "export.ready.body.expires", ExpiresAt) }}
-{{ if Message }}{{ t(locale, "export.ready.body.message", Message) }}{{ end }}
-{{ t(locale, "export.ready.body.link_label") }}: {{ URL }}
-{{ if ManifestURL }}{{ t(locale, "export.ready.body.manifest", ManifestURL) }}{{ end }}
-{{ if Rows }}{{ t(locale, "export.ready.body.rows", Rows) }}{{ end }}
-{{ if Parts }}{{ t(locale, "export.ready.body.parts", Parts) }}{{ end }}
+{% if Message %}{{ t(locale, "export.ready.body.message", Message) }}{% endif %}
+{% if CTALabel %}{{ CTALabel }}{% else %}{{ t(locale, "export.ready.body.link_label") }}{% endif %}: {% if ActionURL %}{{ ActionURL }}{% else %}{{ URL }}{% endif %}
+{% if ManifestURL %}{{ t(locale, "export.ready.body.manifest", ManifestURL) }}{% endif %}
+{% if Rows %}{{ t(locale, "export.ready.body.rows", Rows) }}{% endif %}
+{% if Parts %}{{ t(locale, "export.ready.body.parts", Parts) }}{% endif %}
 `

@@ -3,7 +3,6 @@ package exportready
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
