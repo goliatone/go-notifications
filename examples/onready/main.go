@@ -12,7 +12,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/adapters/console"
 	"github.com/goliatone/go-notifications/pkg/config"
-	"github.com/goliatone/go-notifications/pkg/exportready"
+	"github.com/goliatone/go-notifications/pkg/onready"
 	"github.com/goliatone/go-notifications/pkg/inbox"
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
 	"github.com/goliatone/go-notifications/pkg/interfaces/cache"
@@ -25,7 +25,7 @@ func main() {
 	ctx := context.Background()
 
 	// Translators
-	store := i18n.NewStaticStore(exportready.Translations())
+	store := i18n.NewStaticStore(onready.Translations())
 	translator, err := i18n.NewSimpleTranslator(store, i18n.WithTranslatorDefaultLocale("en"))
 	if err != nil {
 		log.Fatal(err)
@@ -62,10 +62,10 @@ func main() {
 	}
 
 	// Register assets (idempotent)
-	regResult, err := exportready.Register(ctx, exportready.Dependencies{
+	regResult, err := onready.Register(ctx, onready.Dependencies{
 		Definitions: defRepo,
 		Templates:   tplSvc,
-	}, exportready.Options{})
+	}, onready.Options{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -87,19 +87,19 @@ func main() {
 		Config: config.DispatcherConfig{
 			EnvFallbackAllowlist: []string{"user-1"},
 		},
-		Inbox:       inboxSvc,
+		Inbox: inboxSvc,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	exp, err := exportready.NewNotifier(mgr, regResult.DefinitionCode)
+exp, err := onready.NewNotifier(mgr, regResult.DefinitionCode)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Send sample payload
-	err = exp.Send(ctx, exportready.ExportReadyEvent{
+err = exp.Send(ctx, onready.OnReadyEvent{
 		Recipients:  []string{"user-1"},
 		Locale:      "en",
 		FileName:    "orders.csv",
@@ -122,7 +122,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Println("export-ready notification sent (check console output)")
+	log.Println("onready notification sent (check console output)")
 }
 
 // stdoutLogger is a minimal logger that prints to stdout for the example.
