@@ -466,10 +466,10 @@ func applyChannelOverrides(payload domain.JSONMap, channel string, message *doma
 	if message.Metadata == nil {
 		message.Metadata = make(domain.JSONMap)
 	}
-	if link, ok := payload["URL"].(string); ok && link != "" {
+	if link := firstString(payload, "url", "action_url"); link != "" {
 		message.Metadata["action_url"] = link
 	}
-	if manifest, ok := payload["ManifestURL"].(string); ok && manifest != "" {
+	if manifest := firstString(payload, "manifest_url"); manifest != "" {
 		message.Metadata["manifest_url"] = manifest
 	}
 
@@ -506,12 +506,33 @@ func resolveTemplateOverrides(payload domain.JSONMap, channel string) {
 	if payload == nil {
 		payload = make(domain.JSONMap)
 	}
-	if label, ok := overrides["cta_label"].(string); ok && strings.TrimSpace(label) != "" {
-		payload["CTALabel"] = label
+	if label := firstString(overrides, "cta_label"); label != "" {
+		payload["cta_label"] = label
 	}
-	if link, ok := overrides["action_url"].(string); ok && strings.TrimSpace(link) != "" {
-		payload["ActionURL"] = link
+	if link := firstString(overrides, "action_url"); link != "" {
+		payload["action_url"] = link
 	}
+}
+
+func firstString(m map[string]any, keys ...string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	for _, key := range keys {
+		if val, ok := m[key]; ok {
+			switch v := val.(type) {
+			case string:
+				if s := strings.TrimSpace(v); s != "" {
+					return s
+				}
+			default:
+				if s := strings.TrimSpace(fmt.Sprint(v)); s != "" {
+					return s
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func extractOverrides(payload domain.JSONMap, channel string) map[string]any {
