@@ -283,6 +283,7 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 	payload["channel"] = channelType
 	payload["provider"] = provider
 	payload["definition"] = def.Metadata
+	resolveTemplateOverrides(payload, channelType)
 
 	renderResult, err := s.templates.Render(ctx, templates.RenderRequest{
 		Code:    job.templateCode,
@@ -312,6 +313,7 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		Status:   domain.MessageStatusPending,
 		Metadata: renderResult.Metadata,
 	}
+	applyChannelOverrides(payload, channelType, message)
 	if s.messages != nil {
 		if err := s.messages.Create(ctx, message); err != nil {
 			return fmt.Errorf("persist message: %w", err)
@@ -460,9 +462,89 @@ func cloneJSONMap(src domain.JSONMap) domain.JSONMap {
 	return dst
 }
 
+func applyChannelOverrides(payload domain.JSONMap, channel string, message *domain.NotificationMessage) {
+	if message.Metadata == nil {
+		message.Metadata = make(domain.JSONMap)
+	}
+	if link, ok := payload["URL"].(string); ok && link != "" {
+		message.Metadata["action_url"] = link
+	}
+	if manifest, ok := payload["ManifestURL"].(string); ok && manifest != "" {
+		message.Metadata["manifest_url"] = manifest
+	}
+
+	overrides := extractOverrides(payload, channel)
+	if len(overrides) == 0 {
+		return
+	}
+	if subject, ok := overrides["subject"].(string); ok && strings.TrimSpace(subject) != "" {
+		message.Subject = subject
+	}
+	if body, ok := overrides["body"].(string); ok && strings.TrimSpace(body) != "" {
+		message.Body = body
+	}
+	if action, ok := overrides["action_url"].(string); ok && strings.TrimSpace(action) != "" {
+		message.Metadata["action_url"] = action
+	}
+	if icon, ok := overrides["icon"].(string); ok && strings.TrimSpace(icon) != "" {
+		message.Metadata["icon"] = icon
+	}
+	if badge, ok := overrides["badge"].(string); ok && strings.TrimSpace(badge) != "" {
+		message.Metadata["badge"] = badge
+	}
+	if cta, ok := overrides["cta_label"].(string); ok && strings.TrimSpace(cta) != "" {
+		message.Metadata["cta_label"] = cta
+	}
+}
+
+func resolveTemplateOverrides(payload domain.JSONMap, channel string) {
+	overrides := extractOverrides(payload, channel)
+	if len(overrides) == 0 {
+		return
+	}
+	// ensure map exists for renderer helpers
+	if payload == nil {
+		payload = make(domain.JSONMap)
+	}
+	if label, ok := overrides["cta_label"].(string); ok && strings.TrimSpace(label) != "" {
+		payload["CTALabel"] = label
+	}
+	if link, ok := overrides["action_url"].(string); ok && strings.TrimSpace(link) != "" {
+		payload["ActionURL"] = link
+	}
+}
+
+func extractOverrides(payload domain.JSONMap, channel string) map[string]any {
+	if len(payload) == 0 {
+		return nil
+	}
+	raw, ok := payload["channel_overrides"]
+	if !ok {
+		return nil
+	}
+	switch ov := raw.(type) {
+	case map[string]any:
+		if ch, ok := ov[channel]; ok {
+			if m, ok := ch.(map[string]any); ok {
+				return m
+			}
+		}
+	case map[string]map[string]any:
+		if m, ok := ov[channel]; ok {
+			return m
+		}
+	}
+	return nil
+}
+
 func (s *Service) handleInboxDelivery(ctx context.Context, message *domain.NotificationMessage) error {
 	if message == nil {
 		return errors.New("dispatcher: message is required for inbox delivery")
+	}
+	if message.Metadata != nil {
+		if link, ok := message.Metadata["action_url"]; !ok || link == "" {
+			message.Metadata["action_url"] = ""
+		}
 	}
 	if err := s.inbox.DeliverFromMessage(ctx, message); err != nil {
 		return fmt.Errorf("dispatcher: inbox delivery failed: %w", err)
