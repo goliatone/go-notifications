@@ -1,4 +1,4 @@
-package exportready
+package onready
 
 import (
 	i18n "github.com/goliatone/go-i18n"

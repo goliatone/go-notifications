@@ -1,4 +1,4 @@
-package exportready
+package onready
 
 import "github.com/goliatone/go-notifications/pkg/domain"
 
@@ -13,10 +13,10 @@ func preparePayloadForChannel(payload domain.JSONMap, channel string) {
 		return
 	}
 	if label, ok := overrides["cta_label"].(string); ok && label != "" {
-		payload["CTALabel"] = label
+		payload["cta_label"] = label
 	}
 	if link, ok := overrides["action_url"].(string); ok && link != "" {
-		payload["ActionURL"] = link
+		payload["action_url"] = link
 	}
 }
 

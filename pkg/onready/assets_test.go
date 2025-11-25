@@ -1,4 +1,4 @@
-package exportready
+package onready
 
 import (
 	"context"
@@ -76,14 +76,14 @@ func TestTemplatesRenderEmailAndInApp(t *testing.T) {
 	}
 
 	payload := map[string]any{
-		"FileName":    "orders.csv",
-		"Format":      "csv",
-		"URL":         "https://example.com/exports/orders.csv",
-		"ExpiresAt":   "2024-05-01T00:00:00Z",
-		"Rows":        1200,
-		"Parts":       3,
-		"ManifestURL": "https://example.com/exports/manifest.json",
-		"Message":     "Filtered to active customers",
+		"file_name":    "orders.csv",
+		"format":       "csv",
+		"url":          "https://example.com/exports/orders.csv",
+		"expires_at":   "2024-05-01T00:00:00Z",
+		"rows":         1200,
+		"parts":        3,
+		"manifest_url": "https://example.com/exports/manifest.json",
+		"message":      "Filtered to active customers",
 	}
 
 	email, err := svc.Render(ctx, pkgtemplates.RenderRequest{
@@ -98,10 +98,10 @@ func TestTemplatesRenderEmailAndInApp(t *testing.T) {
 	if !strings.Contains(email.Subject, `orders.csv`) {
 		t.Fatalf("email subject missing filename: %s", email.Subject)
 	}
-	if !strings.Contains(email.Body, payload["URL"].(string)) {
+	if !strings.Contains(email.Body, payload["url"].(string)) {
 		t.Fatalf("email body missing URL: %s", email.Body)
 	}
-	if !strings.Contains(email.Body, payload["ManifestURL"].(string)) {
+	if !strings.Contains(email.Body, payload["manifest_url"].(string)) {
 		t.Fatalf("email body missing manifest URL: %s", email.Body)
 	}
 	if !strings.Contains(email.Body, "Rows: 1200") || !strings.Contains(email.Body, "Parts: 3") {
@@ -113,10 +113,10 @@ func TestTemplatesRenderEmailAndInApp(t *testing.T) {
 		Channel: "in-app",
 		Locale:  "en",
 		Data: map[string]any{
-			"FileName":  payload["FileName"],
-			"Format":    payload["Format"],
-			"URL":       payload["URL"],
-			"ExpiresAt": payload["ExpiresAt"],
+			"file_name":  payload["file_name"],
+			"format":     payload["format"],
+			"url":        payload["url"],
+			"expires_at": payload["expires_at"],
 		},
 	})
 	if err != nil {
@@ -125,7 +125,7 @@ func TestTemplatesRenderEmailAndInApp(t *testing.T) {
 	if strings.Contains(inapp.Body, "Rows:") || strings.Contains(inapp.Body, "Parts:") || strings.Contains(inapp.Body, "Manifest") {
 		t.Fatalf("in-app body should omit optional fields when absent: %s", inapp.Body)
 	}
-	if !strings.Contains(inapp.Subject, payload["FileName"].(string)) {
+	if !strings.Contains(inapp.Subject, payload["file_name"].(string)) {
 		t.Fatalf("in-app subject missing filename: %s", inapp.Subject)
 	}
 }
@@ -153,10 +153,10 @@ func TestTemplatesRespectChannelOverrides(t *testing.T) {
 	}
 
 	payload := map[string]any{
-		"FileName":  "export.json",
-		"Format":    "json",
-		"URL":       "https://example.com/export.json",
-		"ExpiresAt": "2024-06-01T00:00:00Z",
+		"file_name":  "export.json",
+		"format":     "json",
+		"url":        "https://example.com/export.json",
+		"expires_at": "2024-06-01T00:00:00Z",
 		"channel_overrides": map[string]map[string]any{
 			"email": {
 				"cta_label":  "Download now",
@@ -225,10 +225,10 @@ func TestSchemaEnforcedForRequiredFields(t *testing.T) {
 		Channel: "email",
 		Locale:  "en",
 		Data: map[string]any{
-			"FileName": "orders.csv",
-			"Format":   "csv",
-			"URL":      "https://example.com/exports/orders.csv",
-			// ExpiresAt missing
+			"file_name": "orders.csv",
+			"format":    "csv",
+			"url":       "https://example.com/exports/orders.csv",
+			// expires_at missing
 		},
 	})
 	var schemaErr internaltemplates.SchemaError

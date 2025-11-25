@@ -1,4 +1,4 @@
-package exportready
+package onready
 
 import (
 	"testing"

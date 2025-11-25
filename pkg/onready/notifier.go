@@ -1,4 +1,4 @@
-package exportready
+package onready
 
 import (
 	"context"
@@ -9,13 +9,13 @@ import (
 	"github.com/goliatone/go-notifications/pkg/notifier"
 )
 
-// ExportNotifier defines a DI-friendly interface for sending export-ready events.
-type ExportNotifier interface {
-	Send(ctx context.Context, evt ExportReadyEvent) error
+// OnReadyNotifier defines a DI-friendly interface for sending ready/complete events.
+type OnReadyNotifier interface {
+	Send(ctx context.Context, evt OnReadyEvent) error
 }
 
-// ExportReadyEvent carries the payload required by export-ready templates.
-type ExportReadyEvent struct {
+// OnReadyEvent carries the payload required by ready/complete templates.
+type OnReadyEvent struct {
 	Recipients []string
 	Locale     string
 	TenantID   string
@@ -42,11 +42,11 @@ type notifierImpl struct {
 	definitionCode string
 }
 
-// NewNotifier constructs the default ExportNotifier implementation.
+// NewNotifier constructs the default OnReadyNotifier implementation.
 // If definitionCode is empty, the default DefinitionCode is used.
-func NewNotifier(mgr *notifier.Manager, definitionCode string) (ExportNotifier, error) {
+func NewNotifier(mgr *notifier.Manager, definitionCode string) (OnReadyNotifier, error) {
 	if mgr == nil {
-		return nil, errors.New("exportready: notifier manager is required")
+		return nil, errors.New("onready: notifier manager is required")
 	}
 	code := strings.TrimSpace(definitionCode)
 	if code == "" {
@@ -59,30 +59,30 @@ func NewNotifier(mgr *notifier.Manager, definitionCode string) (ExportNotifier, 
 }
 
 // Send enqueues and dispatches an export-ready event through the notifier manager.
-func (n *notifierImpl) Send(ctx context.Context, evt ExportReadyEvent) error {
+func (n *notifierImpl) Send(ctx context.Context, evt OnReadyEvent) error {
 	if n == nil || n.mgr == nil {
-		return errors.New("exportready: notifier not initialised")
+		return errors.New("onready: notifier not initialised")
 	}
 	if err := validateExportEvent(evt); err != nil {
 		return err
 	}
 
 	payload := make(map[string]any)
-	payload["FileName"] = evt.FileName
-	payload["Format"] = evt.Format
-	payload["URL"] = evt.URL
-	payload["ExpiresAt"] = evt.ExpiresAt
+	payload["file_name"] = evt.FileName
+	payload["format"] = evt.Format
+	payload["url"] = evt.URL
+	payload["expires_at"] = evt.ExpiresAt
 	if evt.Rows > 0 {
-		payload["Rows"] = evt.Rows
+		payload["rows"] = evt.Rows
 	}
 	if evt.Parts > 0 {
-		payload["Parts"] = evt.Parts
+		payload["parts"] = evt.Parts
 	}
 	if evt.ManifestURL != "" {
-		payload["ManifestURL"] = evt.ManifestURL
+		payload["manifest_url"] = evt.ManifestURL
 	}
 	if evt.Message != "" {
-		payload["Message"] = evt.Message
+		payload["message"] = evt.Message
 	}
 	if evt.ChannelOverrides != nil {
 		payload["channel_overrides"] = evt.ChannelOverrides
@@ -103,21 +103,21 @@ func (n *notifierImpl) Send(ctx context.Context, evt ExportReadyEvent) error {
 	})
 }
 
-func validateExportEvent(evt ExportReadyEvent) error {
+func validateExportEvent(evt OnReadyEvent) error {
 	if len(evt.Recipients) == 0 {
-		return errors.New("exportready: at least one recipient is required")
+		return errors.New("onready: at least one recipient is required")
 	}
 	if strings.TrimSpace(evt.FileName) == "" {
-		return errors.New("exportready: FileName is required")
+		return errors.New("onready: FileName is required")
 	}
 	if strings.TrimSpace(evt.Format) == "" {
-		return errors.New("exportready: Format is required")
+		return errors.New("onready: Format is required")
 	}
 	if strings.TrimSpace(evt.URL) == "" {
-		return errors.New("exportready: URL is required")
+		return errors.New("onready: URL is required")
 	}
 	if strings.TrimSpace(evt.ExpiresAt) == "" {
-		return errors.New("exportready: ExpiresAt is required")
+		return errors.New("onready: ExpiresAt is required")
 	}
 	return nil
 }

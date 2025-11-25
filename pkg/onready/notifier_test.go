@@ -1,4 +1,4 @@
-package exportready
+package onready
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/notifier"
 )
 
-func TestExportNotifierSendsEmail(t *testing.T) {
+func TestOnReadyNotifierSendsEmail(t *testing.T) {
 	ctx := context.Background()
 	defRepo := memstore.NewDefinitionRepository()
 	tplRepo := memstore.NewTemplateRepository()
@@ -55,7 +55,7 @@ func TestExportNotifierSendsEmail(t *testing.T) {
 		t.Fatalf("build export notifier: %v", err)
 	}
 
-	payload := ExportReadyEvent{
+	payload := OnReadyEvent{
 		Recipients:  []string{"user-1"},
 		Locale:      "en",
 		FileName:    "orders.csv",
@@ -107,7 +107,7 @@ func TestExportNotifierSendsEmail(t *testing.T) {
 	}
 }
 
-func TestExportNotifierSendsInApp(t *testing.T) {
+func TestOnReadyNotifierSendsInApp(t *testing.T) {
 	ctx := context.Background()
 	defRepo := memstore.NewDefinitionRepository()
 	tplRepo := memstore.NewTemplateRepository()
@@ -147,7 +147,7 @@ func TestExportNotifierSendsInApp(t *testing.T) {
 		t.Fatalf("build export notifier: %v", err)
 	}
 
-	payload := ExportReadyEvent{
+	payload := OnReadyEvent{
 		Recipients: []string{"user-2"},
 		Locale:     "en",
 		FileName:   "accounts.xlsx",

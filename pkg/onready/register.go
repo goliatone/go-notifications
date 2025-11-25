@@ -1,4 +1,4 @@
-package exportready
+package onready
 
 import (
 	"context"
@@ -50,10 +50,10 @@ type Result struct {
 // Register installs (or updates) the export-ready definition and templates.
 func Register(ctx context.Context, deps Dependencies, opts Options) (Result, error) {
 	if deps.Definitions == nil {
-		return Result{}, errors.New("exportready: Definitions repository is required")
+		return Result{}, errors.New("onready: Definitions repository is required")
 	}
 	if deps.Templates == nil {
-		return Result{}, errors.New("exportready: Templates service is required")
+		return Result{}, errors.New("onready: Templates service is required")
 	}
 
 	def := buildDefinition(opts)
@@ -151,11 +151,11 @@ func buildTemplates(opts Options) []domain.NotificationTemplate {
 func upsertDefinition(ctx context.Context, repo store.NotificationDefinitionRepository, desired domain.NotificationDefinition) (*domain.NotificationDefinition, error) {
 	existing, err := repo.GetByCode(ctx, desired.Code)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return nil, fmt.Errorf("exportready: get definition: %w", err)
+		return nil, fmt.Errorf("onready: get definition: %w", err)
 	}
 	if existing == nil {
 		if err := repo.Create(ctx, &desired); err != nil {
-			return nil, fmt.Errorf("exportready: create definition: %w", err)
+			return nil, fmt.Errorf("onready: create definition: %w", err)
 		}
 		return &desired, nil
 	}
@@ -174,7 +174,7 @@ func upsertDefinition(ctx context.Context, repo store.NotificationDefinitionRepo
 	}
 
 	if err := repo.Update(ctx, &updated); err != nil {
-		return nil, fmt.Errorf("exportready: update definition: %w", err)
+		return nil, fmt.Errorf("onready: update definition: %w", err)
 	}
 	return &updated, nil
 }
@@ -185,7 +185,7 @@ func upsertTemplate(ctx context.Context, svc *templates.Service, desired domain.
 	}
 	current, err := svc.Get(ctx, desired.Code, desired.Channel, desired.Locale)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return nil, fmt.Errorf("exportready: get template %s/%s: %w", desired.Code, desired.Channel, err)
+		return nil, fmt.Errorf("onready: get template %s/%s: %w", desired.Code, desired.Channel, err)
 	}
 	if current == nil {
 		record, err := svc.Create(ctx, templates.TemplateInput{
@@ -200,7 +200,7 @@ func upsertTemplate(ctx context.Context, svc *templates.Service, desired domain.
 			Metadata:    desired.Metadata,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("exportready: create template %s/%s: %w", desired.Code, desired.Channel, err)
+			return nil, fmt.Errorf("onready: create template %s/%s: %w", desired.Code, desired.Channel, err)
 		}
 		return record, nil
 	}
@@ -222,7 +222,7 @@ func upsertTemplate(ctx context.Context, svc *templates.Service, desired domain.
 		Metadata:    mergedMeta,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("exportready: update template %s/%s: %w", desired.Code, desired.Channel, err)
+		return nil, fmt.Errorf("onready: update template %s/%s: %w", desired.Code, desired.Channel, err)
 	}
 	return updated, nil
 }

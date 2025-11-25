@@ -1,4 +1,4 @@
-package exportready
+package onready
 
 import (
 	"github.com/goliatone/go-notifications/pkg/domain"
@@ -14,8 +14,8 @@ const (
 )
 
 var templateSchema = domain.TemplateSchema{
-	Required: []string{"FileName", "Format", "URL", "ExpiresAt"},
-	Optional: []string{"Rows", "Parts", "ManifestURL", "Message"},
+	Required: []string{"file_name", "format", "url", "expires_at"},
+	Optional: []string{"rows", "parts", "manifest_url", "message"},
 }
 
 // Definition returns the default export-ready notification definition with channel mappings.
@@ -46,7 +46,7 @@ func Templates() []domain.NotificationTemplate {
 			Code:        EmailTemplateCode,
 			Channel:     "email",
 			Locale:      "en",
-			Subject:     `{{ t(locale, "export.ready.subject", FileName) }}`,
+			Subject:     `{{ t(locale, "export.ready.subject", file_name) }}`,
 			Body:        emailBody,
 			Description: "Email template for export-ready notifications",
 			Format:      "text/html",
@@ -61,7 +61,7 @@ func Templates() []domain.NotificationTemplate {
 			Code:        InAppTemplateCode,
 			Channel:     "in-app",
 			Locale:      "en",
-			Subject:     `{{ t(locale, "export.ready.title", FileName) }}`,
+			Subject:     `{{ t(locale, "export.ready.title", file_name) }}`,
 			Body:        inAppBody,
 			Description: "In-app template for export-ready notifications",
 			Format:      "text/markdown",
@@ -82,21 +82,21 @@ func Schema() domain.TemplateSchema {
 }
 
 const emailBody = `
-{{ t(locale, "export.ready.body.intro", FileName, Format) }}
-{% if CTALabel %}{{ CTALabel }}{% else %}{{ t(locale, "export.ready.body.link_label") }}{% endif %}: {% if ActionURL %}{{ ActionURL }}{% else %}{{ URL }}{% endif %}
-{{ t(locale, "export.ready.body.expires", ExpiresAt) }}
-{% if Rows %}{{ t(locale, "export.ready.body.rows", Rows) }}{% endif %}
-{% if Parts %}{{ t(locale, "export.ready.body.parts", Parts) }}{% endif %}
-{% if ManifestURL %}{{ t(locale, "export.ready.body.manifest", ManifestURL) }}{% endif %}
-{% if Message %}{{ t(locale, "export.ready.body.message", Message) }}{% endif %}
+{{ t(locale, "export.ready.body.intro", file_name, format) }}
+{% if cta_label %}{{ cta_label }}{% else %}{{ t(locale, "export.ready.body.link_label") }}{% endif %}: {% if action_url %}{{ action_url }}{% else %}{{ url }}{% endif %}
+{{ t(locale, "export.ready.body.expires", expires_at) }}
+{% if rows %}{{ t(locale, "export.ready.body.rows", rows) }}{% endif %}
+{% if parts %}{{ t(locale, "export.ready.body.parts", parts) }}{% endif %}
+{% if manifest_url %}{{ t(locale, "export.ready.body.manifest", manifest_url) }}{% endif %}
+{% if message %}{{ t(locale, "export.ready.body.message", message) }}{% endif %}
 `
 
 const inAppBody = `
-{{ t(locale, "export.ready.body.intro", FileName, Format) }}
-{{ t(locale, "export.ready.body.expires", ExpiresAt) }}
-{% if Message %}{{ t(locale, "export.ready.body.message", Message) }}{% endif %}
-{% if CTALabel %}{{ CTALabel }}{% else %}{{ t(locale, "export.ready.body.link_label") }}{% endif %}: {% if ActionURL %}{{ ActionURL }}{% else %}{{ URL }}{% endif %}
-{% if ManifestURL %}{{ t(locale, "export.ready.body.manifest", ManifestURL) }}{% endif %}
-{% if Rows %}{{ t(locale, "export.ready.body.rows", Rows) }}{% endif %}
-{% if Parts %}{{ t(locale, "export.ready.body.parts", Parts) }}{% endif %}
+{{ t(locale, "export.ready.body.intro", file_name, format) }}
+{{ t(locale, "export.ready.body.expires", expires_at) }}
+{% if message %}{{ t(locale, "export.ready.body.message", message) }}{% endif %}
+{% if cta_label %}{{ cta_label }}{% else %}{{ t(locale, "export.ready.body.link_label") }}{% endif %}: {% if action_url %}{{ action_url }}{% else %}{{ url }}{% endif %}
+{% if manifest_url %}{{ t(locale, "export.ready.body.manifest", manifest_url) }}{% endif %}
+{% if rows %}{{ t(locale, "export.ready.body.rows", rows) }}{% endif %}
+{% if parts %}{{ t(locale, "export.ready.body.parts", parts) }}{% endif %}
 `
