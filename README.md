@@ -50,6 +50,29 @@ func send(ctx context.Context) error {
 - `docs/NTF_TEMPLATES.md`: template authoring, schema validation, and go-cms imports.
 - `docs/NTF_OPTIONS.md`, `docs/NTF_ENTITIES.md`, `docs/NTF_REALTIME.md`: supporting guides.
 - `docs/NTF_TSK.md`: implementation roadmap with progress for each phase.
+- `docs/onready.md`: opt-in OnReady helper for “job ready” style notifications (example: `examples/onready`).
+
+## OnReady helper
+
+`pkg/onready` ships an opt-in definition/template + notifier wrapper for “something is ready” flows (exports, reports, async jobs). It installs via a helper and reuses the main dispatcher/renderer.
+
+```go
+import "github.com/goliatone/go-notifications/pkg/onready"
+
+result, _ := onready.Register(ctx, onready.Dependencies{
+    Definitions: defRepo,
+    Templates:   tplSvc,
+}, onready.Options{})
+
+ready, _ := onready.NewNotifier(manager, result.DefinitionCode)
+_ = ready.Send(ctx, onready.OnReadyEvent{
+    Recipients: []string{"user-1"},
+    FileName:   "orders.csv",
+    Format:     "csv",
+    URL:        "https://example.com/orders.csv",
+    ExpiresAt:  "2025-01-01T00:00:00Z",
+})
+```
 
 ## Development workflow
 
