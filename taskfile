@@ -160,12 +160,42 @@ function samples {
 ##
 ## -----
 ##
+## test:onready
+##
+## Placeholder for onready notification assets; swap to targeted packages once implemented.
+function test:onready {
+    local packages=()
+
+    [[ -d "./pkg/onready" ]] && packages+=("./pkg/onready...")
+    [[ -d "./internal/onready" ]] && packages+=("./internal/onready...")
+
+    if [ ${#packages[@]} -eq 0 ]; then
+        echo "[test:onready] placeholder: onready packages not present yet (see NOTIF_TSK Phase 1–3)"
+        return 0
+    fi
+
+    go test "${packages[@]}"
+}
+
+##
+## -----
+##
 ## ci
 ##
 ## Run linters, tests, and docs checks
 function ci {
-    # lint && test && docs:lint && samples
-    lint && test && samples
+    lint && test && samples && ci:onready
+}
+
+##
+## -----
+##
+## ci:onready
+##
+## CI placeholder to ensure onready helpers/templates gain targeted coverage.
+function ci:onready {
+    echo "[ci:onready] running placeholder onready checks"
+    test:onready
 }
 
 ##
