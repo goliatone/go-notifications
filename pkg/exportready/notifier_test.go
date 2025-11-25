@@ -43,7 +43,7 @@ func TestExportNotifierSendsEmail(t *testing.T) {
 		Templates:   tplSvc,
 		Adapters:    registry,
 		Logger:      &logger.Nop{},
-		Config:      config.DispatcherConfig{},
+		Config:      config.DispatcherConfig{EnvFallbackAllowlist: []string{"user-1", "user-2"}},
 		Inbox:       inboxSvc,
 	})
 	if err != nil {
@@ -135,7 +135,7 @@ func TestExportNotifierSendsInApp(t *testing.T) {
 		Templates:   tplSvc,
 		Adapters:    registry,
 		Logger:      &logger.Nop{},
-		Config:      config.DispatcherConfig{},
+		Config:      config.DispatcherConfig{EnvFallbackAllowlist: []string{"user-1", "user-2"}},
 		Inbox:       inboxSvc,
 	})
 	if err != nil {
