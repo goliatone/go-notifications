@@ -42,6 +42,14 @@ func TestDefinitionAndTemplatesShape(t *testing.T) {
 			t.Fatalf("template %s optional schema mismatch", tpl.Code)
 		}
 	}
+	email := baseTemplateFor(tpls, "email")
+	if email.Metadata["cta_label"] != "Download" || email.Metadata["icon"] == "" {
+		t.Fatalf("expected email metadata defaults, got %v", email.Metadata)
+	}
+	inapp := baseTemplateFor(tpls, "in-app")
+	if inapp.Metadata["cta_label"] != "Open" || inapp.Metadata["badge"] == "" {
+		t.Fatalf("expected in-app metadata defaults, got %v", inapp.Metadata)
+	}
 }
 
 func TestTemplatesRenderEmailAndInApp(t *testing.T) {
@@ -122,6 +130,74 @@ func TestTemplatesRenderEmailAndInApp(t *testing.T) {
 	}
 }
 
+func TestTemplatesRespectChannelOverrides(t *testing.T) {
+	ctx := context.Background()
+	repo := memstore.NewTemplateRepository()
+	for _, tpl := range Templates() {
+		copy := tpl
+		if err := repo.Create(ctx, &copy); err != nil {
+			t.Fatalf("seed template: %v", err)
+		}
+	}
+	translator := newTranslator(t)
+	svc, err := pkgtemplates.New(pkgtemplates.Dependencies{
+		Repository:    repo,
+		Cache:         &cache.Nop{},
+		Logger:        &logger.Nop{},
+		Translator:    translator,
+		Fallbacks:     i18n.NewStaticFallbackResolver(),
+		DefaultLocale: "en",
+	})
+	if err != nil {
+		t.Fatalf("template service: %v", err)
+	}
+
+	payload := map[string]any{
+		"FileName":  "export.json",
+		"Format":    "json",
+		"URL":       "https://example.com/export.json",
+		"ExpiresAt": "2024-06-01T00:00:00Z",
+		"channel_overrides": map[string]map[string]any{
+			"email": {
+				"cta_label":  "Download now",
+				"action_url": "https://cdn.example.com/export.json",
+			},
+			"in-app": {
+				"cta_label":  "Open link",
+				"action_url": "https://cdn.example.com/export.json",
+			},
+		},
+	}
+
+	preparePayloadForChannel(payload, "email")
+	email, err := svc.Render(ctx, pkgtemplates.RenderRequest{
+		Code:    EmailTemplateCode,
+		Channel: "email",
+		Locale:  "en",
+		Data:    payload,
+	})
+	if err != nil {
+		t.Fatalf("render email: %v", err)
+	}
+	if !strings.Contains(email.Body, "Download now") || !strings.Contains(email.Body, "cdn.example.com") {
+		t.Fatalf("email did not apply overrides: %s", email.Body)
+	}
+
+	preparePayloadForChannel(payload, "in-app")
+	inapp, err := svc.Render(ctx, pkgtemplates.RenderRequest{
+		Code:    InAppTemplateCode,
+		Channel: "in-app",
+		Locale:  "en",
+		Data:    payload,
+	})
+	if err != nil {
+		t.Fatalf("render in-app: %v", err)
+	}
+	if !strings.Contains(inapp.Body, "Open link") || !strings.Contains(inapp.Body, "cdn.example.com") {
+		t.Fatalf("in-app did not apply overrides: %s", inapp.Body)
+	}
+}
+
 func TestSchemaEnforcedForRequiredFields(t *testing.T) {
 	ctx := context.Background()
 	repo := memstore.NewTemplateRepository()
@@ -162,16 +238,6 @@ func TestSchemaEnforcedForRequiredFields(t *testing.T) {
 	if len(schemaErr.Missing) == 0 {
 		t.Fatalf("expected missing fields to be reported")
 	}
-}
-
-func newTranslator(t *testing.T) i18n.Translator {
-	t.Helper()
-	store := i18n.NewStaticStore(Translations())
-	translator, err := i18n.NewSimpleTranslator(store, i18n.WithTranslatorDefaultLocale("en"))
-	if err != nil {
-		t.Fatalf("translator: %v", err)
-	}
-	return translator
 }
 
 func contains(list domain.StringList, value string) bool {

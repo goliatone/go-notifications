@@ -5,17 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	i18n "github.com/goliatone/go-i18n"
 	memstore "github.com/goliatone/go-notifications/internal/storage/memory"
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/inbox"
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
-	"github.com/goliatone/go-notifications/pkg/interfaces/cache"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	"github.com/goliatone/go-notifications/pkg/notifier"
-	"github.com/goliatone/go-notifications/pkg/templates"
 )
 
 func TestExportNotifierSendsEmail(t *testing.T) {
@@ -74,6 +71,17 @@ func TestExportNotifierSendsEmail(t *testing.T) {
 
 	if err := exportNotifier.Send(ctx, payload); err != nil {
 		t.Fatalf("send: %v", err)
+	}
+
+	msgs, err := msgRepo.List(ctx, store.ListOptions{})
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if msgs.Total == 0 {
+		t.Fatalf("expected stored message")
+	}
+	if msgs.Items[0].Metadata["action_url"] == "" {
+		t.Fatalf("expected action_url metadata to be set")
 	}
 
 	sent := registry.List("email")
@@ -147,6 +155,13 @@ func TestExportNotifierSendsInApp(t *testing.T) {
 		URL:        "https://example.com/accounts.xlsx",
 		ExpiresAt:  "2024-05-02T00:00:00Z",
 		Channels:   []string{"in-app"},
+		ChannelOverrides: map[string]map[string]any{
+			"in-app": {
+				"action_url": "https://cdn.example.com/accounts.xlsx",
+				"icon":       "inbox",
+				"badge":      "ready",
+			},
+		},
 	}
 
 	if err := exportNotifier.Send(ctx, payload); err != nil {
@@ -162,6 +177,21 @@ func TestExportNotifierSendsInApp(t *testing.T) {
 	}
 	if !strings.Contains(result.Items[0].Title, "accounts.xlsx") {
 		t.Fatalf("expected inbox title to include filename, got %s", result.Items[0].Title)
+	}
+
+	msgs, err := msgRepo.List(ctx, store.ListOptions{})
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if msgs.Total == 0 {
+		t.Fatalf("expected stored message")
+	}
+	meta := msgs.Items[0].Metadata
+	if meta["action_url"] != "https://cdn.example.com/accounts.xlsx" {
+		t.Fatalf("expected action_url override, got %v", meta["action_url"])
+	}
+	if meta["icon"] != "inbox" || meta["badge"] != "ready" {
+		t.Fatalf("expected icon/badge overrides, got %v", meta)
 	}
 }
 
@@ -186,23 +216,6 @@ func (s *stubMessenger) Send(ctx context.Context, msg adapters.Message) error {
 	return nil
 }
 
-func newTemplateService(t *testing.T, repo *memstore.TemplateRepository) *templates.Service {
-	t.Helper()
-	translator := newTranslator(t)
-	svc, err := templates.New(templates.Dependencies{
-		Repository:    repo,
-		Cache:         &cache.Nop{},
-		Logger:        &logger.Nop{},
-		Translator:    translator,
-		Fallbacks:     i18n.NewStaticFallbackResolver(),
-		DefaultLocale: "en",
-	})
-	if err != nil {
-		t.Fatalf("template service: %v", err)
-	}
-	return svc
-}
-
 func newInboxService(t *testing.T, repo *memstore.InboxRepository) *inbox.Service {
 	t.Helper()
 	svc, err := inbox.New(inbox.Dependencies{
@@ -214,14 +227,4 @@ func newInboxService(t *testing.T, repo *memstore.InboxRepository) *inbox.Servic
 		t.Fatalf("inbox service: %v", err)
 	}
 	return svc
-}
-
-func newTranslator(t *testing.T) i18n.Translator {
-	t.Helper()
-	store := i18n.NewStaticStore(Translations())
-	translator, err := i18n.NewSimpleTranslator(store, i18n.WithTranslatorDefaultLocale("en"))
-	if err != nil {
-		t.Fatalf("translator: %v", err)
-	}
-	return translator
 }
