@@ -14,6 +14,7 @@ require (
 	github.com/goliatone/go-options v0.4.0
 	github.com/goliatone/go-persistence-bun v0.6.0
 	github.com/goliatone/go-repository-bun v0.9.0
+	github.com/goliatone/go-users v0.7.0
 	github.com/goliatone/go-template v0.3.1
 	github.com/google/uuid v1.6.0
 	github.com/uptrace/bun v1.2.15
