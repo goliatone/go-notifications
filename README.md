@@ -52,6 +52,23 @@ func send(ctx context.Context) error {
 - `docs/NTF_TSK.md`: implementation roadmap with progress for each phase.
 - `docs/onready.md`: opt-in OnReady helper for “job ready” style notifications (example: `examples/onready`).
 
+### Activity hooks
+
+The module emits activity events (created, delivered/failed, inbox read/snooze/dismiss) through optional hooks. Provide `Activity` hooks in `notifier.ModuleOptions`—for example, bridge to go-users with `activity/usersink.Hook`:
+
+```go
+import (
+    "github.com/goliatone/go-notifications/pkg/activity"
+    "github.com/goliatone/go-notifications/pkg/activity/usersink"
+    "github.com/goliatone/go-notifications/pkg/notifier"
+)
+
+module, _ := notifier.NewModule(notifier.ModuleOptions{
+    // ...
+    Activity: activity.Hooks{usersink.Hook{Sink: myGoUsersSink}},
+})
+```
+
 ## OnReady helper
 
 `pkg/onready` ships an opt-in definition/template + notifier wrapper for “something is ready” flows (exports, reports, async jobs). It installs via a helper and reuses the main dispatcher/renderer.
