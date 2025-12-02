@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/goliatone/go-notifications/internal/dispatcher"
+	"github.com/goliatone/go-notifications/pkg/activity"
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/domain"
@@ -33,6 +34,7 @@ type Manager struct {
 	dispatcher *dispatcher.Service
 	events     store.NotificationEventRepository
 	logger     logger.Logger
+	activity   activity.Hooks
 }
 
 // Dependencies bundles repositories/adapters required by the manager.
@@ -52,6 +54,7 @@ type Dependencies struct {
 	Preferences *prefsvc.Service
 	Inbox       inboxDeliverer
 	Secrets     secrets.Resolver
+	Activity    activity.Hooks
 }
 
 var (
@@ -96,6 +99,7 @@ func NewWithDispatcher(deps Dependencies, dispatcherSvc *dispatcher.Service) (*M
 		dispatcher: dispatcherSvc,
 		events:     deps.Events,
 		logger:     deps.Logger,
+		activity:   deps.Activity,
 	}, nil
 }
 
@@ -124,11 +128,37 @@ func (m *Manager) Send(ctx context.Context, evt Event) error {
 	if err := m.events.Create(ctx, record); err != nil {
 		return err
 	}
+	m.activity.Notify(ctx, activity.Event{
+		Verb:           "notification.created",
+		ActorID:        evt.ActorID,
+		TenantID:       evt.TenantID,
+		ObjectType:     "notification_event",
+		ObjectID:       record.ID.String(),
+		DefinitionCode: evt.DefinitionCode,
+		Recipients:     []string(record.Recipients),
+		Metadata: map[string]any{
+			"status":   record.Status,
+			"channels": evt.Channels,
+			"locale":   evt.Locale,
+		},
+	})
 	if err := m.dispatcher.Dispatch(ctx, record, dispatcher.DispatchOptions{
 		Channels: evt.Channels,
 		Locale:   evt.Locale,
 	}); err != nil {
 		_ = m.events.UpdateStatus(ctx, record.ID, domain.EventStatusFailed)
+		m.activity.Notify(ctx, activity.Event{
+			Verb:           "notification.failed",
+			ActorID:        evt.ActorID,
+			TenantID:       evt.TenantID,
+			ObjectType:     "notification_event",
+			ObjectID:       record.ID.String(),
+			DefinitionCode: evt.DefinitionCode,
+			Recipients:     []string(record.Recipients),
+			Metadata: map[string]any{
+				"error": err.Error(),
+			},
+		})
 		return err
 	}
 	return nil
