@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/goliatone/go-notifications/pkg/activity"
 	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
@@ -39,6 +40,7 @@ type Dependencies struct {
 	Repository  store.InboxRepository
 	Broadcaster broadcaster.Broadcaster
 	Logger      logger.Logger
+	Activity    activity.Hooks
 }
 
 // Service manages inbox CRUD and realtime fan-out.
@@ -46,6 +48,7 @@ type Service struct {
 	repo        store.InboxRepository
 	broadcaster broadcaster.Broadcaster
 	logger      logger.Logger
+	activity    activity.Hooks
 }
 
 var (
@@ -67,6 +70,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		repo:        deps.Repository,
 		broadcaster: deps.Broadcaster,
 		logger:      deps.Logger,
+		activity:    deps.Activity,
 	}, nil
 }
 
@@ -91,6 +95,18 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*domain.InboxI
 		return nil, err
 	}
 	s.emit(ctx, "inbox.created", item)
+	s.activity.Notify(ctx, activity.Event{
+		Verb:       "notification.inbox.created",
+		ActorID:    item.UserID,
+		UserID:     item.UserID,
+		ObjectType: "inbox_item",
+		ObjectID:   item.ID.String(),
+		Metadata: map[string]any{
+			"title":      item.Title,
+			"pinned":     item.Pinned,
+			"message_id": item.MessageID.String(),
+		},
+	})
 	return item, nil
 }
 
@@ -138,6 +154,17 @@ func (s *Service) MarkRead(ctx context.Context, userID string, ids []uuid.UUID, 
 			return err
 		}
 		s.emit(ctx, "inbox.updated", item)
+		verb := "notification.unread"
+		if read {
+			verb = "notification.read"
+		}
+		s.activity.Notify(ctx, activity.Event{
+			Verb:       verb,
+			ActorID:    userID,
+			UserID:     item.UserID,
+			ObjectType: "inbox_item",
+			ObjectID:   item.ID.String(),
+		})
 	}
 	return nil
 }
@@ -156,6 +183,16 @@ func (s *Service) Snooze(ctx context.Context, userID string, id uuid.UUID, until
 	}
 	item.SnoozedUntil = until
 	s.emit(ctx, "inbox.updated", item)
+	s.activity.Notify(ctx, activity.Event{
+		Verb:       "notification.snoozed",
+		ActorID:    userID,
+		UserID:     item.UserID,
+		ObjectType: "inbox_item",
+		ObjectID:   item.ID.String(),
+		Metadata: map[string]any{
+			"until": until,
+		},
+	})
 	return nil
 }
 
@@ -174,6 +211,13 @@ func (s *Service) Dismiss(ctx context.Context, userID string, id uuid.UUID) erro
 	item.DismissedAt = time.Now().UTC()
 	item.Unread = false
 	s.emit(ctx, "inbox.updated", item)
+	s.activity.Notify(ctx, activity.Event{
+		Verb:       "notification.dismissed",
+		ActorID:    userID,
+		UserID:     item.UserID,
+		ObjectType: "inbox_item",
+		ObjectID:   item.ID.String(),
+	})
 	return nil
 }
 
