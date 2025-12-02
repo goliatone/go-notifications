@@ -6,6 +6,7 @@ import (
 
 	i18n "github.com/goliatone/go-i18n"
 	"github.com/goliatone/go-notifications/internal/dispatcher"
+	"github.com/goliatone/go-notifications/pkg/activity"
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/commands"
 	"github.com/goliatone/go-notifications/pkg/config"
@@ -33,6 +34,7 @@ type Options struct {
 	Broadcaster broadcaster.Broadcaster
 	Adapters    []adapters.Messenger
 	Secrets     secrets.Resolver
+	Activity    activity.Hooks
 }
 
 // Container wires repositories, services, dispatcher, commands, and manager.
@@ -47,6 +49,7 @@ type Container struct {
 	Commands    *commands.Registry
 	Adapters    *adapters.Registry
 	Secrets     secrets.Resolver
+	Activity    activity.Hooks
 }
 
 func isZeroConfig(cfg config.Config) bool {
@@ -58,6 +61,8 @@ func New(opts Options) (*Container, error) {
 	if opts.Translator == nil {
 		return nil, errors.New("di: translator is required")
 	}
+
+	hooks := opts.Activity
 
 	cfg := opts.Config
 	if isZeroConfig(cfg) {
@@ -124,6 +129,7 @@ func New(opts Options) (*Container, error) {
 		Repository:  providers.Inbox,
 		Broadcaster: b,
 		Logger:      lgr,
+		Activity:    hooks,
 	})
 	if err != nil {
 		return nil, err
@@ -141,6 +147,7 @@ func New(opts Options) (*Container, error) {
 		Preferences: prefSvc,
 		Inbox:       inboxSvc,
 		Secrets:     secretsResolver,
+		Activity:    hooks,
 	})
 	if err != nil {
 		return nil, err
@@ -152,6 +159,7 @@ func New(opts Options) (*Container, error) {
 		Dispatcher:  dispatcherSvc,
 		Queue:       q,
 		Logger:      lgr,
+		Activity:    hooks,
 	})
 	if err != nil {
 		return nil, err
@@ -180,5 +188,6 @@ func New(opts Options) (*Container, error) {
 		Commands:    cmdRegistry,
 		Adapters:    adapterRegistry,
 		Secrets:     secretsResolver,
+		Activity:    hooks,
 	}, nil
 }
