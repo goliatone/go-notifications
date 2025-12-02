@@ -6,6 +6,7 @@ import (
 
 	"github.com/goliatone/go-notifications/internal/dispatcher"
 	interevents "github.com/goliatone/go-notifications/internal/events"
+	"github.com/goliatone/go-notifications/pkg/activity"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/queue"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
@@ -31,6 +32,7 @@ type Dependencies struct {
 	Dispatcher  *dispatcher.Service
 	Queue       queue.Queue
 	Logger      logger.Logger
+	Activity    activity.Hooks
 }
 
 // New constructs the public façade.
@@ -41,6 +43,7 @@ func New(deps Dependencies) (*Service, error) {
 		Dispatcher:  deps.Dispatcher,
 		Queue:       deps.Queue,
 		Logger:      deps.Logger,
+		Activity:    deps.Activity,
 	})
 	if err != nil {
 		return nil, err
