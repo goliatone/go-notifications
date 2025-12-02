@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/goliatone/go-notifications/pkg/activity"
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/domain"
@@ -37,6 +38,7 @@ type Dependencies struct {
 	Preferences *prefsvc.Service
 	Inbox       inboxDeliverer
 	Secrets     secrets.Resolver
+	Activity    activity.Hooks
 }
 
 // Service expands events into rendered messages and routes them to adapters.
@@ -52,6 +54,7 @@ type Service struct {
 	preferences *prefsvc.Service
 	inbox       inboxDeliverer
 	secrets     secrets.Resolver
+	activity    activity.Hooks
 }
 
 // DispatchOptions allow callers to override channels/locales.
@@ -104,6 +107,7 @@ func New(deps Dependencies) (*Service, error) {
 		preferences: deps.Preferences,
 		inbox:       deps.Inbox,
 		secrets:     deps.Secrets,
+		activity:    deps.Activity,
 	}, nil
 }
 
@@ -300,6 +304,7 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 			logger.Field{Key: "event_id", Value: event.ID},
 			logger.Field{Key: "error", Value: err},
 		)
+		s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, nil, "failed", provider, renderLocale, err))
 		return fmt.Errorf("render template %s: %w", job.templateCode, err)
 	}
 
@@ -316,17 +321,21 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 	applyChannelOverrides(payload, channelType, message)
 	if s.messages != nil {
 		if err := s.messages.Create(ctx, message); err != nil {
+			s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "failed", provider, renderLocale, err))
 			return fmt.Errorf("persist message: %w", err)
 		}
 	}
 
 	if inboxChannel {
 		if s.inbox == nil {
+			s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "failed", provider, renderLocale, errors.New("inbox service not configured")))
 			return errors.New("dispatcher: inbox channel requested but inbox service is not configured")
 		}
 		if err := s.handleInboxDelivery(ctx, message); err != nil {
+			s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "failed", provider, renderLocale, err))
 			return err
 		}
+		s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "delivered", provider, renderLocale, nil))
 		return nil
 	}
 	// TODO: We should support multi-channel deliveries
@@ -341,11 +350,13 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 
 	var success bool
 	var lastErr error
+	var lastProvider string
 
 	for _, messenger := range candidates {
 		secretPayload, err := s.resolveSecrets(ctx, event, job, messenger, preferredProvider)
 		if err != nil {
 			lastErr = err
+			lastProvider = messenger.Name()
 			continue
 		}
 
@@ -370,9 +381,11 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		msgCopy := *message
 		if err := s.deliverWithRetries(ctx, messenger, &msgCopy, sendMsg); err != nil {
 			lastErr = err
+			lastProvider = messenger.Name()
 			continue
 		}
 		success = true
+		lastProvider = messenger.Name()
 	}
 
 	if s.messages != nil {
@@ -385,8 +398,10 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 	}
 
 	if !success {
+		s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "failed", lastProvider, renderResult.Locale, lastErr))
 		return lastErr
 	}
+	s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "delivered", lastProvider, renderResult.Locale, nil))
 	return nil
 }
 
@@ -430,6 +445,63 @@ func (s *Service) recordAttempt(ctx context.Context, adapterName string, message
 		},
 	}
 	return s.attempts.Create(ctx, record)
+}
+
+func (s *Service) buildDeliveryActivity(event *domain.NotificationEvent, def *domain.NotificationDefinition, job deliveryJob, message *domain.NotificationMessage, status, provider, locale string, err error) activity.Event {
+	defCode := ""
+	actorID := ""
+	tenantID := ""
+	contextCopy := domain.JSONMap{}
+	objectID := ""
+
+	if def != nil {
+		defCode = def.Code
+	}
+	if event != nil {
+		defCode = event.DefinitionCode
+		actorID = event.ActorID
+		tenantID = event.TenantID
+		objectID = event.ID.String()
+		if len(event.Context) > 0 {
+			contextCopy = cloneJSONMap(event.Context)
+		}
+	}
+	if message != nil {
+		objectID = message.ID.String()
+	}
+
+	meta := map[string]any{
+		"channel":   job.channel,
+		"provider":  provider,
+		"locale":    locale,
+		"status":    status,
+		"context":   contextCopy,
+		"template":  job.templateCode,
+		"recipient": job.recipient,
+	}
+	if err != nil {
+		meta["error"] = err.Error()
+	}
+	if message != nil {
+		meta["message_status"] = message.Status
+	}
+	recipients := []string(nil)
+	if job.recipient != "" {
+		recipients = []string{job.recipient}
+	}
+
+	return activity.Event{
+		Verb:           fmt.Sprintf("notification.%s", status),
+		ActorID:        actorID,
+		UserID:         job.recipient,
+		TenantID:       tenantID,
+		ObjectType:     "notification_message",
+		ObjectID:       objectID,
+		Channel:        job.channel,
+		DefinitionCode: defCode,
+		Recipients:     recipients,
+		Metadata:       meta,
+	}
 }
 
 func templateCodeForChannel(def *domain.NotificationDefinition, ch string) string {
