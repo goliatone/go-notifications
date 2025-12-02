@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/goliatone/go-notifications/internal/dispatcher"
+	"github.com/goliatone/go-notifications/pkg/activity"
 	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/queue"
@@ -51,6 +52,7 @@ type Dependencies struct {
 	Dispatcher  dispatcherInterface
 	Queue       queue.Queue
 	Logger      logger.Logger
+	Activity    activity.Hooks
 }
 
 type dispatcherInterface interface {
@@ -65,8 +67,9 @@ type Service struct {
 	queue       queue.Queue
 	logger      logger.Logger
 
-	mu      sync.Mutex
-	digests map[string]*digestBatch
+	mu       sync.Mutex
+	digests  map[string]*digestBatch
+	activity activity.Hooks
 }
 
 var (
@@ -99,6 +102,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		queue:       deps.Queue,
 		logger:      deps.Logger,
 		digests:     make(map[string]*digestBatch),
+		activity:    deps.Activity,
 	}, nil
 }
 
@@ -154,6 +158,20 @@ func (s *Service) dispatchNow(ctx context.Context, req IntakeRequest) error {
 	if err := s.events.Create(ctx, record); err != nil {
 		return err
 	}
+	s.activity.Notify(ctx, activity.Event{
+		Verb:           "notification.created",
+		ActorID:        req.ActorID,
+		TenantID:       req.TenantID,
+		ObjectType:     "notification_event",
+		ObjectID:       record.ID.String(),
+		DefinitionCode: req.DefinitionCode,
+		Recipients:     []string(record.Recipients),
+		Metadata: map[string]any{
+			"channels": req.Channels,
+			"locale":   req.Locale,
+			"digest":   req.Digest,
+		},
+	})
 	if err := s.dispatcher.Dispatch(ctx, record, dispatcher.DispatchOptions{
 		Channels: req.Channels,
 		Locale:   req.Locale,
