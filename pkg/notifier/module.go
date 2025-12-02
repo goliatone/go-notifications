@@ -3,6 +3,7 @@ package notifier
 import (
 	i18n "github.com/goliatone/go-i18n"
 	"github.com/goliatone/go-notifications/internal/di"
+	"github.com/goliatone/go-notifications/pkg/activity"
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/commands"
 	"github.com/goliatone/go-notifications/pkg/config"
@@ -30,6 +31,7 @@ type ModuleOptions struct {
 	Broadcaster broadcaster.Broadcaster
 	Adapters    []adapters.Messenger
 	Secrets     secrets.Resolver
+	Activity    activity.Hooks
 }
 
 // Module bundles the container and exposes high-level accessors.
@@ -51,6 +53,7 @@ func NewModule(opts ModuleOptions) (*Module, error) {
 		Broadcaster: opts.Broadcaster,
 		Adapters:    opts.Adapters,
 		Secrets:     opts.Secrets,
+		Activity:    opts.Activity,
 	})
 	if err != nil {
 		return nil, err
@@ -66,6 +69,7 @@ func NewModule(opts ModuleOptions) (*Module, error) {
 		Config:      container.Config.Dispatcher,
 		Preferences: container.Preferences,
 		Inbox:       container.Inbox,
+		Activity:    opts.Activity,
 	}, container.Dispatcher)
 	if err != nil {
 		return nil, err
