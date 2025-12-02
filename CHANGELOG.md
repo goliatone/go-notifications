@@ -1,5 +1,21 @@
 # Changelog
 
+# [0.2.0](https://github.com/goliatone/go-notifications/compare/v0.1.0...v0.2.0) - (2025-12-02)
+
+## <!-- 16 -->➕ Add
+
+- Activity hooks ([63146ae](https://github.com/goliatone/go-notifications/commit/63146aef4ce398e0a840c4c41e7b297c9bb999a3))  - (goliatone)
+- Activity  adapter ([10d727d](https://github.com/goliatone/go-notifications/commit/10d727d08f910080dd01af07a9cdcdb98f0f893a))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.1.0 ([c8c4357](https://github.com/goliatone/go-notifications/commit/c8c4357f9a29341cce0c9e91d6cb0a45f2973e81))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([3879d09](https://github.com/goliatone/go-notifications/commit/3879d09895fbba7bd5f519e4db0a931992a0f857))  - (goliatone)
+- Update deps ([be8152e](https://github.com/goliatone/go-notifications/commit/be8152ef2e314bb5b8039cdec870d2ad89a5e0b9))  - (goliatone)
+
 # [0.1.0](https://github.com/goliatone/go-notifications/tree/v0.1.0) - (2025-11-25)
 
 ## <!-- 1 -->🐛 Bug Fixes
