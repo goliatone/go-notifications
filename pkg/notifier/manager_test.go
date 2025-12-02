@@ -8,6 +8,7 @@ import (
 	i18n "github.com/goliatone/go-i18n"
 	"github.com/goliatone/go-notifications/internal/inbox"
 	"github.com/goliatone/go-notifications/internal/storage/memory"
+	"github.com/goliatone/go-notifications/pkg/activity"
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/adapters/console"
 	"github.com/goliatone/go-notifications/pkg/adapters/twilio"
@@ -20,6 +21,14 @@ import (
 	prefsvc "github.com/goliatone/go-notifications/pkg/preferences"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
+
+type captureHook struct {
+	events []activity.Event
+}
+
+func (c *captureHook) Notify(_ context.Context, evt activity.Event) {
+	c.events = append(c.events, evt)
+}
 
 func TestManagerSendMultiChannelSuccess(t *testing.T) {
 	ctx := context.Background()
@@ -138,6 +147,98 @@ func TestManagerSendMultiChannelSuccess(t *testing.T) {
 	}
 	if attemptList.Total != 2 {
 		t.Fatalf("expected 2 attempts, got %d", attemptList.Total)
+	}
+}
+
+func TestManagerEmitsActivityEvents(t *testing.T) {
+	ctx := context.Background()
+	defRepo := memory.NewDefinitionRepository()
+	eventRepo := memory.NewEventRepository()
+	msgRepo := memory.NewMessageRepository()
+	attemptRepo := memory.NewDeliveryRepository()
+	tplRepo := memory.NewTemplateRepository()
+	prefRepo := memory.NewPreferenceRepository()
+	inboxRepo := memory.NewInboxRepository()
+
+	translator := newTestTranslator(t)
+	tplSvc, err := templates.New(templates.Dependencies{
+		Repository: tplRepo,
+		Cache:      &cache.Nop{},
+		Logger:     &logger.Nop{},
+		Translator: translator,
+	})
+	if err != nil {
+		t.Fatalf("template service: %v", err)
+	}
+
+	createTemplate(t, tplSvc, templates.TemplateInput{
+		Code:    "activity-email",
+		Channel: "email",
+		Locale:  "en",
+		Subject: "Hello {{ Name }}",
+		Body:    "Email body {{ Name }}",
+		Format:  "text/plain",
+	})
+
+	definition := &domain.NotificationDefinition{
+		Code:         "activity",
+		Channels:     domain.StringList{"email:console"},
+		TemplateKeys: domain.StringList{"email:activity-email"},
+	}
+	if err := defRepo.Create(ctx, definition); err != nil {
+		t.Fatalf("create definition: %v", err)
+	}
+
+	registry := adapters.NewRegistry(console.New(&logger.Nop{}))
+	hook := &captureHook{}
+
+	prefs := newPreferenceService(t, prefRepo)
+	inboxSvc := newInboxService(t, inboxRepo)
+
+	manager, err := New(Dependencies{
+		Definitions: defRepo,
+		Events:      eventRepo,
+		Messages:    msgRepo,
+		Attempts:    attemptRepo,
+		Templates:   tplSvc,
+		Adapters:    registry,
+		Logger:      &logger.Nop{},
+		Config: config.DispatcherConfig{
+			Enabled:    true,
+			MaxRetries: 1,
+			MaxWorkers: 1,
+		},
+		Preferences: prefs,
+		Inbox:       inboxSvc,
+		Activity:    activity.Hooks{hook},
+	})
+	if err != nil {
+		t.Fatalf("manager: %v", err)
+	}
+
+	err = manager.Send(ctx, Event{
+		DefinitionCode: "activity",
+		Recipients:     []string{"user@example.com"},
+		Context:        map[string]any{"Name": "Rosa"},
+		ActorID:        "actor-1",
+		TenantID:       "tenant-1",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if len(hook.events) == 0 {
+		t.Fatalf("expected activity events to be emitted")
+	}
+	verbs := map[string]bool{}
+	for _, evt := range hook.events {
+		verbs[evt.Verb] = true
+	}
+	if !verbs["notification.created"] {
+		t.Fatalf("expected notification.created activity")
+	}
+	if !verbs["notification.delivered"] {
+		t.Fatalf("expected notification.delivered activity")
 	}
 }
 
