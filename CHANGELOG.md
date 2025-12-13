@@ -1,5 +1,15 @@
 # Changelog
 
+# [0.3.0](https://github.com/goliatone/go-notifications/compare/v0.2.0...v0.3.0) - (2025-12-13)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.2.0 ([b26c281](https://github.com/goliatone/go-notifications/commit/b26c28150a7cd774160c402e6eb1d14e4249d1d6))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([1b4bbd3](https://github.com/goliatone/go-notifications/commit/1b4bbd3663dd9398b3d665a1ffbd07bd9e5ea5cc))  - (goliatone)
+
 # [0.2.0](https://github.com/goliatone/go-notifications/compare/v0.1.0...v0.2.0) - (2025-12-02)
 
 ## <!-- 16 -->➕ Add
