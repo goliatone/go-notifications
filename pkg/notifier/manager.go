@@ -89,6 +89,7 @@ func NewWithDispatcher(deps Dependencies, dispatcherSvc *dispatcher.Service) (*M
 			Preferences: deps.Preferences,
 			Inbox:       deps.Inbox,
 			Secrets:     deps.Secrets,
+			Activity:    deps.Activity,
 		})
 		if err != nil {
 			return nil, err
