@@ -19,6 +19,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	prefsvc "github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
 
@@ -195,6 +196,20 @@ func TestManagerEmitsActivityEvents(t *testing.T) {
 	prefs := newPreferenceService(t, prefRepo)
 	inboxSvc := newInboxService(t, inboxRepo)
 
+	secretSeed := map[secrets.Reference]secrets.SecretValue{
+		{
+			Scope:     secrets.ScopeSystem,
+			SubjectID: "default",
+			Channel:   "email",
+			Provider:  "console",
+			Key:       "default",
+			Version:   "1",
+		}: {
+			Data:    []byte("noop"),
+			Version: "1",
+		},
+	}
+
 	manager, err := New(Dependencies{
 		Definitions: defRepo,
 		Events:      eventRepo,
@@ -210,6 +225,7 @@ func TestManagerEmitsActivityEvents(t *testing.T) {
 		},
 		Preferences: prefs,
 		Inbox:       inboxSvc,
+		Secrets:     secrets.SimpleResolver{Provider: secrets.NewStaticProvider(secretSeed)},
 		Activity:    activity.Hooks{hook},
 	})
 	if err != nil {
@@ -222,6 +238,7 @@ func TestManagerEmitsActivityEvents(t *testing.T) {
 		Context:        map[string]any{"Name": "Rosa"},
 		ActorID:        "actor-1",
 		TenantID:       "tenant-1",
+		Locale:         "en",
 	})
 	if err != nil {
 		t.Fatalf("send: %v", err)
@@ -230,15 +247,45 @@ func TestManagerEmitsActivityEvents(t *testing.T) {
 	if len(hook.events) == 0 {
 		t.Fatalf("expected activity events to be emitted")
 	}
-	verbs := map[string]bool{}
+
+	var created []activity.Event
+	var delivered []activity.Event
 	for _, evt := range hook.events {
-		verbs[evt.Verb] = true
+		switch evt.Verb {
+		case "notification.created":
+			created = append(created, evt)
+		case "notification.delivered":
+			delivered = append(delivered, evt)
+		}
 	}
-	if !verbs["notification.created"] {
-		t.Fatalf("expected notification.created activity")
+	if len(created) != 1 {
+		t.Fatalf("expected 1 notification.created activity, got %d", len(created))
 	}
-	if !verbs["notification.delivered"] {
-		t.Fatalf("expected notification.delivered activity")
+	if len(delivered) != 1 {
+		t.Fatalf("expected 1 notification.delivered activity, got %d", len(delivered))
+	}
+
+	deliveredEvt := delivered[0]
+	if deliveredEvt.UserID != "user@example.com" {
+		t.Fatalf("expected delivered user_id user@example.com, got %s", deliveredEvt.UserID)
+	}
+	if deliveredEvt.TenantID != "tenant-1" {
+		t.Fatalf("expected delivered tenant_id tenant-1, got %s", deliveredEvt.TenantID)
+	}
+	if deliveredEvt.ActorID != "actor-1" {
+		t.Fatalf("expected delivered actor_id actor-1, got %s", deliveredEvt.ActorID)
+	}
+	if deliveredEvt.DefinitionCode != "activity" {
+		t.Fatalf("expected delivered definition_code activity, got %s", deliveredEvt.DefinitionCode)
+	}
+	if deliveredEvt.Channel != "email:console" {
+		t.Fatalf("expected delivered channel email:console, got %s", deliveredEvt.Channel)
+	}
+	if provider, ok := deliveredEvt.Metadata["provider"].(string); !ok || provider != "console" {
+		t.Fatalf("expected delivered metadata provider console, got %v", deliveredEvt.Metadata["provider"])
+	}
+	if tpl, ok := deliveredEvt.Metadata["template"].(string); !ok || tpl != "activity-email" {
+		t.Fatalf("expected delivered metadata template activity-email, got %v", deliveredEvt.Metadata["template"])
 	}
 }
 
