@@ -1,5 +1,15 @@
 # Changelog
 
+# [0.4.0](https://github.com/goliatone/go-notifications/compare/v0.3.0...v0.4.0) - (2025-12-13)
+
+## <!-- 16 -->➕ Add
+
+- Activity manager ([7e480d1](https://github.com/goliatone/go-notifications/commit/7e480d107d8a2caee9f31fdc2df00cd60bb21d29))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.3.0 ([4f8f2de](https://github.com/goliatone/go-notifications/commit/4f8f2def3b905b64bd05b0af364ae84990fa13bd))  - (goliatone)
+
 # [0.3.0](https://github.com/goliatone/go-notifications/compare/v0.2.0...v0.3.0) - (2025-12-13)
 
 ## <!-- 3 -->📚 Documentation
