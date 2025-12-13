@@ -23,7 +23,6 @@ vendor/
 
 # Local tooling
 .env
-.version
 node_modules/
 .envset
 tmp
