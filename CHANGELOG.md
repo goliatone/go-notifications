@@ -1,5 +1,21 @@
 # Changelog
 
+# [0.5.0](https://github.com/goliatone/go-notifications/compare/v0.4.0...v0.5.0) - (2025-12-16)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.5.0 ([a92add6](https://github.com/goliatone/go-notifications/commit/a92add6c810ccaa1442fb686d644c6da29a9867b))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.4.0 ([0056952](https://github.com/goliatone/go-notifications/commit/00569522be47b0b8aff708933b36b23dab5e2658))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update go.mod ([39b4b1f](https://github.com/goliatone/go-notifications/commit/39b4b1f5015fec0069b5bcd5551b318aa085769e))  - (goliatone)
+- Update version ([3d28dcb](https://github.com/goliatone/go-notifications/commit/3d28dcbbe1df12327cb9e0f3d38421f4ed778818))  - (goliatone)
+- Update gitignore ([4c1fb01](https://github.com/goliatone/go-notifications/commit/4c1fb014262479da9e611140a770195bbf7410d1))  - (goliatone)
+
 # [0.4.0](https://github.com/goliatone/go-notifications/compare/v0.3.0...v0.4.0) - (2025-12-13)
 
 ## <!-- 16 -->➕ Add
