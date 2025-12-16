@@ -1,8 +1,6 @@
 module github.com/goliatone/go-notifications
 
-go 1.24.9
-
-toolchain go1.24.10
+go 1.24.10
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.0
