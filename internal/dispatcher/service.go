@@ -283,6 +283,7 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 	if payload == nil {
 		payload = make(domain.JSONMap)
 	}
+	attachments := adapters.AttachmentsFromValue(payload["attachments"])
 	payload["recipient"] = job.recipient
 	payload["channel"] = channelType
 	payload["provider"] = provider
@@ -361,12 +362,13 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		}
 
 		sendMsg := adapters.Message{
-			ID:       message.ID.String(),
-			Channel:  channelType,
-			Provider: messenger.Name(),
-			Subject:  message.Subject,
-			Body:     message.Body,
-			To:       message.Receiver,
+			ID:          message.ID.String(),
+			Channel:     channelType,
+			Provider:    messenger.Name(),
+			Subject:     message.Subject,
+			Body:        message.Body,
+			To:          message.Receiver,
+			Attachments: attachments,
 			Metadata: map[string]any{
 				"event_id":        event.ID.String(),
 				"definition_code": def.Code,
@@ -464,6 +466,7 @@ func (s *Service) buildDeliveryActivity(event *domain.NotificationEvent, def *do
 		objectID = event.ID.String()
 		if len(event.Context) > 0 {
 			contextCopy = cloneJSONMap(event.Context)
+			sanitizeContext(contextCopy)
 		}
 	}
 	if message != nil {
@@ -532,6 +535,14 @@ func cloneJSONMap(src domain.JSONMap) domain.JSONMap {
 		dst[k] = v
 	}
 	return dst
+}
+
+func sanitizeContext(ctx domain.JSONMap) {
+	if len(ctx) == 0 {
+		return
+	}
+	delete(ctx, "attachments")
+	delete(ctx, "channel_attachments")
 }
 
 func applyChannelOverrides(payload domain.JSONMap, channel string, message *domain.NotificationMessage) {
