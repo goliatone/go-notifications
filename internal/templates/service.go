@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	i18n "github.com/goliatone/go-i18n"
 	"github.com/goliatone/go-notifications/pkg/domain"
@@ -19,6 +20,7 @@ type Service struct {
 	fallbacks     i18n.FallbackResolver
 	defaultLocale string
 	localeKey     string
+	renderMu      sync.Mutex
 }
 
 // RenderRequest wraps the inputs needed to resolve and render a template variant.
@@ -210,11 +212,14 @@ func (s *Service) Render(ctx context.Context, req RenderRequest) (RenderResult, 
 		return RenderResult{}, err
 	}
 
+	s.renderMu.Lock()
 	subject, err := s.renderer.RenderString(variant.Subject(), payload)
 	if err != nil {
+		s.renderMu.Unlock()
 		return RenderResult{}, fmt.Errorf("templates: render subject: %w", err)
 	}
 	body, err := s.renderer.RenderString(variant.Body(), payload)
+	s.renderMu.Unlock()
 	if err != nil {
 		return RenderResult{}, fmt.Errorf("templates: render body: %w", err)
 	}
