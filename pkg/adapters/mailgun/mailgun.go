@@ -111,6 +111,12 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		return fmt.Errorf("mailgun: content empty")
 	}
 
+	attachments := adapters.NormalizeAttachments(msg.Attachments)
+	if metaAttachments := adapters.AttachmentsFromValue(msg.Metadata["attachments"]); len(metaAttachments) > 0 {
+		attachments = append(attachments, metaAttachments...)
+		attachments = adapters.NormalizeAttachments(attachments)
+	}
+
 	endpoint := fmt.Sprintf("%s/%s/messages", strings.TrimRight(a.cfg.APIBase, "/"), url.PathEscape(a.cfg.Domain))
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
@@ -153,28 +159,19 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 			}
 			_ = mw.WriteField("h:"+k, v)
 		}
-		// Optional raw attachments encoded as []byte in metadata:
-		// metadata["attachments"] = []map[string]any{{"filename": "...", "content": []byte{...}, "content_type": "..."}}
-		if atts := anySlice(msg.Metadata, "attachments"); len(atts) > 0 {
-			for _, att := range atts {
-				filename := stringValue(att, "filename")
-				content := bytesValue(att, "content")
-				if filename == "" || len(content) == 0 {
-					continue
-				}
-				ct := stringValue(att, "content_type")
-				if ct == "" {
-					ct = "application/octet-stream"
-				}
-				header := textproto.MIMEHeader{}
-				header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="attachment"; filename="%s"`, filename))
-				header.Set("Content-Type", ct)
-				part, err := mw.CreatePart(header)
-				if err != nil {
-					continue
-				}
-				_, _ = part.Write(content)
+		for _, att := range attachments {
+			ct := strings.TrimSpace(att.ContentType)
+			if ct == "" {
+				ct = "application/octet-stream"
 			}
+			header := textproto.MIMEHeader{}
+			header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="attachment"; filename="%s"`, att.Filename))
+			header.Set("Content-Type", ct)
+			part, err := mw.CreatePart(header)
+			if err != nil {
+				continue
+			}
+			_, _ = part.Write(att.Content)
 		}
 	}()
 
@@ -247,43 +244,4 @@ func stringSlice(meta map[string]any, key string) []string {
 	default:
 		return nil
 	}
-}
-
-func anySlice(meta map[string]any, key string) []map[string]any {
-	if meta == nil {
-		return nil
-	}
-	raw, ok := meta[key]
-	if !ok {
-		return nil
-	}
-	switch v := raw.(type) {
-	case []map[string]any:
-		return v
-	case []any:
-		out := make([]map[string]any, 0, len(v))
-		for _, entry := range v {
-			if m, ok := entry.(map[string]any); ok {
-				out = append(out, m)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func bytesValue(meta map[string]any, key string) []byte {
-	if meta == nil {
-		return nil
-	}
-	raw, ok := meta[key]
-	if !ok {
-		return nil
-	}
-	switch v := raw.(type) {
-	case []byte:
-		return v
-	}
-	return nil
 }
