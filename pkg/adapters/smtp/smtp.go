@@ -3,6 +3,7 @@ package smtp
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/mail"
@@ -152,7 +153,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	htmlBody := firstNonEmpty(msg.Metadata, "html_body", "html")
 	contentType := strings.TrimSpace(stringValue(msg.Metadata, "content_type"))
 
-	body, headers := buildMessage(fromAddr.String(), toAddr.String(), msg.Subject, msg.Headers, a.cfg.Headers, textBody, htmlBody, contentType, a.cfg.PlainOnly)
+	body, headers := buildMessage(fromAddr.String(), toAddr.String(), msg.Subject, msg.Headers, a.cfg.Headers, textBody, htmlBody, contentType, a.cfg.PlainOnly, msg.Attachments)
 
 	addr := fmt.Sprintf("%s:%d", a.cfg.Host, a.cfg.Port)
 	dialer := &net.Dialer{Timeout: a.cfg.Timeout}
@@ -234,7 +235,7 @@ func (a *Adapter) newClient(ctx context.Context, dialer *net.Dialer, addr string
 	return client, conn, nil
 }
 
-func buildMessage(from, to, subject string, msgHeaders map[string]string, cfgHeaders map[string]string, textBody, htmlBody, contentType string, plainOnly bool) (string, string) {
+func buildMessage(from, to, subject string, msgHeaders map[string]string, cfgHeaders map[string]string, textBody, htmlBody, contentType string, plainOnly bool, attachments []adapters.Attachment) (string, string) {
 	headers := map[string]string{
 		"From":         from,
 		"To":           to,
@@ -249,6 +250,11 @@ func buildMessage(from, to, subject string, msgHeaders map[string]string, cfgHea
 			continue
 		}
 		headers[k] = v
+	}
+
+	attachments = adapters.NormalizeAttachments(attachments)
+	if len(attachments) > 0 {
+		return buildMessageWithAttachments(headers, textBody, htmlBody, contentType, plainOnly, attachments)
 	}
 
 	if plainOnly {
@@ -284,6 +290,87 @@ func buildMessage(from, to, subject string, msgHeaders map[string]string, cfgHea
 	}
 	headers["Content-Type"] = ct
 	return textBody, formatHeaders(headers)
+}
+
+func buildMessageWithAttachments(headers map[string]string, textBody, htmlBody, contentType string, plainOnly bool, attachments []adapters.Attachment) (string, string) {
+	mixedBoundary := fmt.Sprintf("mixed-%d", time.Now().UnixNano())
+	headers["Content-Type"] = fmt.Sprintf("multipart/mixed; boundary=%s", mixedBoundary)
+
+	var sb strings.Builder
+	writeBodyPart(&sb, mixedBoundary, textBody, htmlBody, contentType, plainOnly)
+	for _, att := range attachments {
+		ct := strings.TrimSpace(att.ContentType)
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		sb.WriteString("--" + mixedBoundary + "\r\n")
+		sb.WriteString(fmt.Sprintf("Content-Type: %s\r\n", ct))
+		sb.WriteString(fmt.Sprintf("Content-Disposition: attachment; filename=\"%s\"\r\n", att.Filename))
+		sb.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+		sb.WriteString(encodeBase64Lines(att.Content))
+		sb.WriteString("\r\n")
+	}
+	sb.WriteString("--" + mixedBoundary + "--")
+
+	return sb.String(), formatHeaders(headers)
+}
+
+func writeBodyPart(sb *strings.Builder, mixedBoundary, textBody, htmlBody, contentType string, plainOnly bool) {
+	if plainOnly {
+		ct := contentType
+		if ct == "" {
+			ct = "text/plain; charset=UTF-8"
+		}
+		sb.WriteString("--" + mixedBoundary + "\r\n")
+		sb.WriteString(fmt.Sprintf("Content-Type: %s\r\n\r\n", ct))
+		sb.WriteString(textBody + "\r\n")
+		return
+	}
+
+	if htmlBody != "" {
+		if textBody == "" {
+			textBody = stripHTML(htmlBody)
+		}
+		altBoundary := fmt.Sprintf("alt-%d", time.Now().UnixNano())
+		sb.WriteString("--" + mixedBoundary + "\r\n")
+		sb.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=%s\r\n\r\n", altBoundary))
+
+		sb.WriteString("--" + altBoundary + "\r\n")
+		sb.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
+		sb.WriteString(textBody + "\r\n")
+		sb.WriteString("--" + altBoundary + "\r\n")
+		sb.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
+		sb.WriteString(htmlBody + "\r\n")
+		sb.WriteString("--" + altBoundary + "--\r\n")
+		return
+	}
+
+	ct := contentType
+	if ct == "" {
+		ct = "text/plain; charset=UTF-8"
+	}
+	sb.WriteString("--" + mixedBoundary + "\r\n")
+	sb.WriteString(fmt.Sprintf("Content-Type: %s\r\n\r\n", ct))
+	sb.WriteString(textBody + "\r\n")
+}
+
+func encodeBase64Lines(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	encoded := base64.StdEncoding.EncodeToString(data)
+	var sb strings.Builder
+	for i := 0; i < len(encoded); i += 76 {
+		end := i + 76
+		if end > len(encoded) {
+			end = len(encoded)
+		}
+		sb.WriteString(encoded[i:end])
+		if end < len(encoded) {
+			sb.WriteString("\r\n")
+		}
+	}
+	return sb.String()
 }
 
 func formatHeaders(headers map[string]string) string {
