@@ -10,18 +10,19 @@ import (
 
 // Message represents a rendered notification destined for a single channel/provider combo.
 type Message struct {
-	ID        string
-	Channel   string
-	Provider  string
-	Subject   string
-	Body      string
-	To        string
-	Metadata  map[string]any
-	Locale    string
-	Headers   map[string]string
-	Attempts  int
-	TraceID   string
-	RequestID string
+	ID          string
+	Channel     string
+	Provider    string
+	Subject     string
+	Body        string
+	To          string
+	Attachments []Attachment
+	Metadata    map[string]any
+	Locale      string
+	Headers     map[string]string
+	Attempts    int
+	TraceID     string
+	RequestID   string
 }
 
 // Capability describes the channels/formats supported by a messenger.
