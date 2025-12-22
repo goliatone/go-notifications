@@ -67,6 +67,13 @@ func TestOnReadyNotifierSendsEmail(t *testing.T) {
 		ManifestURL: "https://example.com/manifest.json",
 		Message:     "Filtered by customer segment",
 		Channels:    []string{"email"},
+		Attachments: []adapters.Attachment{
+			{
+				Filename:    "summary.txt",
+				ContentType: "text/plain",
+				Content:     []byte("hello"),
+			},
+		},
 	}
 
 	if err := exportNotifier.Send(ctx, payload); err != nil {
@@ -104,6 +111,12 @@ func TestOnReadyNotifierSendsEmail(t *testing.T) {
 	}
 	if !strings.Contains(msg.Body, payload.ManifestURL) {
 		t.Fatalf("expected body to include manifest url, got %s", msg.Body)
+	}
+	if len(msg.Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(msg.Attachments))
+	}
+	if msg.Attachments[0].Filename != "summary.txt" {
+		t.Fatalf("expected attachment filename summary.txt, got %s", msg.Attachments[0].Filename)
 	}
 }
 
