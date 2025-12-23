@@ -12,12 +12,12 @@ import (
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/adapters/console"
 	"github.com/goliatone/go-notifications/pkg/config"
-	"github.com/goliatone/go-notifications/pkg/onready"
 	"github.com/goliatone/go-notifications/pkg/inbox"
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
 	"github.com/goliatone/go-notifications/pkg/interfaces/cache"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/notifier"
+	"github.com/goliatone/go-notifications/pkg/onready"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
 
@@ -93,13 +93,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-exp, err := onready.NewNotifier(mgr, regResult.DefinitionCode)
+	exp, err := onready.NewNotifier(mgr, regResult.DefinitionCode)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Send sample payload
-err = exp.Send(ctx, onready.OnReadyEvent{
+	err = exp.Send(ctx, onready.OnReadyEvent{
 		Recipients:  []string{"user-1"},
 		Locale:      "en",
 		FileName:    "orders.csv",
