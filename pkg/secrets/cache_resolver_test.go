@@ -50,7 +50,7 @@ func TestCachingResolverCachesUntilTTL(t *testing.T) {
 	}
 
 	// Second call within TTL should hit cache.
-	out, err = resolver.Resolve(ref)
+	_, err = resolver.Resolve(ref)
 	if err != nil {
 		t.Fatalf("second resolve: %v", err)
 	}

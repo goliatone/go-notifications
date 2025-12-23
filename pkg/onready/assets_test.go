@@ -32,7 +32,7 @@ func TestDefinitionAndTemplatesShape(t *testing.T) {
 		t.Fatalf("expected 2 templates, got %d", len(tpls))
 	}
 	for _, tpl := range tpls {
-		if tpl.Schema.Required == nil || len(tpl.Schema.Required) == 0 {
+		if len(tpl.Schema.Required) == 0 {
 			t.Fatalf("template %s missing required schema", tpl.Code)
 		}
 		if !equalStringSets(tpl.Schema.Required, templateSchema.Required) {
