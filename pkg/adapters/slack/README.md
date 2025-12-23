@@ -6,6 +6,7 @@ Usage
 - Configure token and default channel: `slack.New(logger, slack.WithConfig(slack.Config{Token: "xoxb-...", Channel: "#alerts"}))`.
 - Optional: `BaseURL`, `Timeout`, `SkipTLSVerify`, `DryRun`, custom HTTP client.
 - Per-message metadata: `channel` (override), `body`, `html_body` (stripped to text), `thread_ts` (reply in thread).
+- Attachments: provide `Message.Attachments` with `URL` values; adapter renders them as linked attachments (no upload API).
 - Set message channel to `slack` (or `chat`) in definitions.
 
 Credentials

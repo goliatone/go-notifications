@@ -4,7 +4,7 @@ Delivers `email` channel messages via Mailgun’s Messages API, supporting text,
 
 Usage
 - Configure domain, API key, and from: `mailgun.New(logger, mailgun.WithConfig(mailgun.Config{Domain: "mg.example.com", APIKey: "key-xxx", From: "no-reply@example.com"}))`.
-- Attachments: set `Message.Attachments` with `adapters.Attachment` (metadata attachments still supported).
+- Attachments: set `Message.Attachments` with `adapters.Attachment` content (metadata attachments still supported; URL-only attachments are ignored).
 - Per-message metadata: `from`, `reply_to`, `text_body`, `html_body`, `body`, `cc`, `bcc`, `headers`, `attachments` (slice of maps: `filename`, `content` ([]byte), `content_type`).
 
 Credentials
