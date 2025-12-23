@@ -111,10 +111,10 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		return fmt.Errorf("mailgun: content empty")
 	}
 
-	attachments := adapters.NormalizeAttachments(msg.Attachments)
+	attachments := adapters.EmailAttachments(msg.Attachments)
 	if metaAttachments := adapters.AttachmentsFromValue(msg.Metadata["attachments"]); len(metaAttachments) > 0 {
 		attachments = append(attachments, metaAttachments...)
-		attachments = adapters.NormalizeAttachments(attachments)
+		attachments = adapters.EmailAttachments(attachments)
 	}
 
 	endpoint := fmt.Sprintf("%s/%s/messages", strings.TrimRight(a.cfg.APIBase, "/"), url.PathEscape(a.cfg.Domain))
