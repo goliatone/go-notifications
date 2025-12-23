@@ -105,21 +105,42 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if htmlBody != "" && !a.cfg.PlainOnly {
 		textBody = stripHTML(htmlBody)
 	}
-	if textBody == "" {
+	attachments := adapters.NormalizeAttachments(msg.Attachments)
+	attachment := firstURLAttachment(attachments)
+	if attachment == nil && textBody == "" {
 		return fmt.Errorf("whatsapp: body required")
 	}
 
-	payload := map[string]any{
-		"messaging_product": "whatsapp",
-		"to":                to,
-		"type":              "text",
-		"text": map[string]any{
-			"body": textBody,
-		},
-	}
-	if preview := boolValue(msg.Metadata, "preview_url"); preview {
-		if text, ok := payload["text"].(map[string]any); ok {
-			text["preview_url"] = true
+	var payload map[string]any
+	if attachment != nil {
+		doc := map[string]any{
+			"link": attachment.URL,
+		}
+		if attachment.Filename != "" {
+			doc["filename"] = attachment.Filename
+		}
+		if textBody != "" {
+			doc["caption"] = textBody
+		}
+		payload = map[string]any{
+			"messaging_product": "whatsapp",
+			"to":                to,
+			"type":              "document",
+			"document":          doc,
+		}
+	} else {
+		payload = map[string]any{
+			"messaging_product": "whatsapp",
+			"to":                to,
+			"type":              "text",
+			"text": map[string]any{
+				"body": textBody,
+			},
+		}
+		if preview := boolValue(msg.Metadata, "preview_url"); preview {
+			if text, ok := payload["text"].(map[string]any); ok {
+				text["preview_url"] = true
+			}
 		}
 	}
 
@@ -208,4 +229,14 @@ func stripHTML(html string) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func firstURLAttachment(attachments []adapters.Attachment) *adapters.Attachment {
+	for i, att := range attachments {
+		if strings.TrimSpace(att.URL) == "" {
+			continue
+		}
+		return &attachments[i]
+	}
+	return nil
 }
