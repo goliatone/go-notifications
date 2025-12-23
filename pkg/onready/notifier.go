@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/notifier"
 )
 
@@ -30,6 +31,9 @@ type OnReadyEvent struct {
 	Parts       int
 	ManifestURL string
 	Message     string
+
+	// Attachments are forwarded to adapters that support email attachments.
+	Attachments []adapters.Attachment
 
 	// ChannelOverrides allow callers to pass channel-specific metadata
 	// (e.g., CTA label/icon overrides) keyed by channel name.
@@ -83,6 +87,9 @@ func (n *notifierImpl) Send(ctx context.Context, evt OnReadyEvent) error {
 	}
 	if evt.Message != "" {
 		payload["message"] = evt.Message
+	}
+	if len(evt.Attachments) > 0 {
+		payload["attachments"] = evt.Attachments
 	}
 	if evt.ChannelOverrides != nil {
 		payload["channel_overrides"] = evt.ChannelOverrides
