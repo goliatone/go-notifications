@@ -128,6 +128,26 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if thread := stringValue(msg.Metadata, "thread_ts"); thread != "" {
 		payload["thread_ts"] = thread
 	}
+	if attachments := adapters.NormalizeAttachments(msg.Attachments); len(attachments) > 0 {
+		files := make([]map[string]any, 0, len(attachments))
+		for _, att := range attachments {
+			if att.URL == "" {
+				continue
+			}
+			title := strings.TrimSpace(att.Filename)
+			if title == "" {
+				title = "attachment"
+			}
+			files = append(files, map[string]any{
+				"title":      title,
+				"title_link": att.URL,
+				"text":       att.URL,
+			})
+		}
+		if len(files) > 0 {
+			payload["attachments"] = files
+		}
+	}
 
 	if a.cfg.DryRun || token == "" {
 		a.base.LogSuccess(a.name, msg)
