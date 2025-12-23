@@ -27,9 +27,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gocache-
 
-      - name: Install Task
-        uses: arduino/setup-task@v2
-
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.61.0
 
