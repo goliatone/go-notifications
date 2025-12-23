@@ -1,5 +1,42 @@
 # Changelog
 
+# [0.6.0](https://github.com/goliatone/go-notifications/compare/v0.5.0...v0.6.0) - (2025-12-23)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Template service should handle data races ([ef99de8](https://github.com/goliatone/go-notifications/commit/ef99de84adb8ec380d643c7f971b140d2d5b9925))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.6.0 ([da49770](https://github.com/goliatone/go-notifications/commit/da49770b503a3c808525a5a343f1750e7fb9f574))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- On ready notifier should handle attachment URLs ([1ce47c7](https://github.com/goliatone/go-notifications/commit/1ce47c7928ff910dc4fac57fdd8761b4a60c55eb))  - (goliatone)
+- Notifier manager handle attachments ([24a78e7](https://github.com/goliatone/go-notifications/commit/24a78e7aa21cd4ae1a0da8c0dbda1441c9da3164))  - (goliatone)
+- Whatsapp adapter handle attachments ([42a7101](https://github.com/goliatone/go-notifications/commit/42a710199dfe00ae9f171f476cc739be6eaf6b34))  - (goliatone)
+- Twilio adapter handle attachments ([c9ff898](https://github.com/goliatone/go-notifications/commit/c9ff8984c74fdd704b97a1e6ac3645e78529882a))  - (goliatone)
+- Telegram adapter handle attachments ([974732d](https://github.com/goliatone/go-notifications/commit/974732d806882c73b9a2dd85a6a1d638ba02be0a))  - (goliatone)
+- Slack adapter handle attachments ([0ee66d0](https://github.com/goliatone/go-notifications/commit/0ee66d0655633a2597bb9c2be82de347c84c9c95))  - (goliatone)
+- Attachment resolution ([1f5b6b0](https://github.com/goliatone/go-notifications/commit/1f5b6b0bbbc6e2c9fff2ee7c671d9dae7c683a2c))  - (goliatone)
+- Expose Attachmetns in dispatcher ([837f95c](https://github.com/goliatone/go-notifications/commit/837f95cefc1882911170f734daa04d9c34d92d94))  - (goliatone)
+- Expose Attachmetns in di container ([6697a04](https://github.com/goliatone/go-notifications/commit/6697a049a024dc3b29e99f301c127d6d2864d679))  - (goliatone)
+- Attachment resolver ([c143cf0](https://github.com/goliatone/go-notifications/commit/c143cf0a0600538476cffafd8ae95eb3c6841dc7))  - (goliatone)
+- Support attachments ([5dd56f5](https://github.com/goliatone/go-notifications/commit/5dd56f5ec4d9ab5107e73c4f3e915eda6eb981b6))  - (goliatone)
+- Attachment support for service ([d97cea4](https://github.com/goliatone/go-notifications/commit/d97cea4de074b30b2c6b6a8016ab3231e929b74e))  - (goliatone)
+- Attachment support ([2cee70c](https://github.com/goliatone/go-notifications/commit/2cee70c69aa912c5680954fb5a3a86186fab282c))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.5.0 ([197c6e6](https://github.com/goliatone/go-notifications/commit/197c6e6e433a1aa8b3230504e8930c9816c30e52))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([6f340ad](https://github.com/goliatone/go-notifications/commit/6f340ad6ec6256f7b5a5f9e93deadab5904d4477))  - (goliatone)
+- Udpate readme ([44b7203](https://github.com/goliatone/go-notifications/commit/44b7203243c1b8e81fb2c3176b7e9fc5e85dd8f0))  - (goliatone)
+- Udpate test ([b870595](https://github.com/goliatone/go-notifications/commit/b870595db554cf68460125af56194e56156ad387))  - (goliatone)
+- Update docs ([b2c2d86](https://github.com/goliatone/go-notifications/commit/b2c2d862efa940eaf3ba5d15494bd161c257f66f))  - (goliatone)
+
 # [0.5.0](https://github.com/goliatone/go-notifications/compare/v0.4.0...v0.5.0) - (2025-12-16)
 
 ## <!-- 13 -->📦 Bumps
