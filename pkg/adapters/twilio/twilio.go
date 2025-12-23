@@ -153,7 +153,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	}
 	form.Set("Body", body)
 
-	if media := stringSlice(msg.Metadata, "media_urls"); len(media) > 0 {
+	media := stringSlice(msg.Metadata, "media_urls")
+	if attURLs := adapters.AttachmentURLs(msg.Attachments); len(attURLs) > 0 {
+		media = append(media, attURLs...)
+	}
+	if len(media) > 0 {
 		for _, m := range media {
 			form.Add("MediaUrl", m)
 		}
