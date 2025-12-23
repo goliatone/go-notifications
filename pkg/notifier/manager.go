@@ -49,6 +49,7 @@ type Dependencies struct {
 	Attempts    store.DeliveryAttemptRepository
 	Templates   *templates.Service
 	Adapters    *adapters.Registry
+	Attachments adapters.AttachmentResolver
 	Logger      logger.Logger
 	Config      config.DispatcherConfig
 	Preferences *prefsvc.Service
@@ -84,6 +85,7 @@ func NewWithDispatcher(deps Dependencies, dispatcherSvc *dispatcher.Service) (*M
 			Attempts:    deps.Attempts,
 			Templates:   deps.Templates,
 			Registry:    deps.Adapters,
+			Attachments: deps.Attachments,
 			Logger:      deps.Logger,
 			Config:      deps.Config,
 			Preferences: deps.Preferences,
