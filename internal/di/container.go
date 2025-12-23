@@ -33,6 +33,7 @@ type Options struct {
 	Queue       queue.Queue
 	Broadcaster broadcaster.Broadcaster
 	Adapters    []adapters.Messenger
+	Attachments adapters.AttachmentResolver
 	Secrets     secrets.Resolver
 	Activity    activity.Hooks
 }
@@ -142,6 +143,7 @@ func New(opts Options) (*Container, error) {
 		Attempts:    providers.DeliveryAttempts,
 		Templates:   tplSvc,
 		Registry:    adapterRegistry,
+		Attachments: opts.Attachments,
 		Logger:      lgr,
 		Config:      cfg.Dispatcher,
 		Preferences: prefSvc,
