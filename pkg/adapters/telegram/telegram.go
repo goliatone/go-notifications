@@ -127,21 +127,34 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		parseMode = ""
 		body = firstNonEmptyStrings(textBody, msg.Body, msg.Subject)
 	}
-	if body == "" {
+	attachments := adapters.NormalizeAttachments(msg.Attachments)
+	attachment := firstURLAttachment(attachments)
+	if attachment == nil && body == "" {
 		return fmt.Errorf("telegram: message body required")
 	}
 
 	payload := map[string]any{
 		"chat_id": chatID,
-		"text":    body,
 	}
-	if parseMode != "" {
-		payload["parse_mode"] = parseMode
-	}
-
-	disablePreview := boolValue(msg.Metadata, "disable_preview", a.cfg.DisableWebPagePreview)
-	if disablePreview {
-		payload["disable_web_page_preview"] = true
+	endpoint := fmt.Sprintf("%s/bot%s/sendMessage", strings.TrimRight(a.cfg.BaseURL, "/"), token)
+	if attachment != nil {
+		payload["document"] = attachment.URL
+		if body != "" {
+			payload["caption"] = body
+		}
+		if parseMode != "" {
+			payload["parse_mode"] = parseMode
+		}
+		endpoint = fmt.Sprintf("%s/bot%s/sendDocument", strings.TrimRight(a.cfg.BaseURL, "/"), token)
+	} else {
+		payload["text"] = body
+		if parseMode != "" {
+			payload["parse_mode"] = parseMode
+		}
+		disablePreview := boolValue(msg.Metadata, "disable_preview", a.cfg.DisableWebPagePreview)
+		if disablePreview {
+			payload["disable_web_page_preview"] = true
+		}
 	}
 	disableNotification := boolValue(msg.Metadata, "silent", a.cfg.DisableNotification)
 	if disableNotification {
@@ -153,8 +166,6 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if replyTo := stringValue(msg.Metadata, "reply_to"); replyTo != "" {
 		payload["reply_to_message_id"] = replyTo
 	}
-
-	endpoint := fmt.Sprintf("%s/bot%s/sendMessage", strings.TrimRight(a.cfg.BaseURL, "/"), token)
 	bodyBytes, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(bodyBytes)))
 	if err != nil {
@@ -259,4 +270,14 @@ func firstNonEmptyStrings(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstURLAttachment(attachments []adapters.Attachment) *adapters.Attachment {
+	for i, att := range attachments {
+		if strings.TrimSpace(att.URL) == "" {
+			continue
+		}
+		return &attachments[i]
+	}
+	return nil
 }
