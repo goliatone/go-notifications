@@ -154,10 +154,11 @@ type templateUpsertCommand struct {
 }
 
 func (c templateUpsertCommand) Execute(ctx context.Context, msg TemplateUpsert) error {
-	_, err := c.templates.Get(ctx, msg.Code, msg.Channel, msg.Locale)
+	input := msg.TemplateInput
+	_, err := c.templates.Get(ctx, input.Code, input.Channel, input.Locale)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			_, err := c.templates.Create(ctx, msg.TemplateInput)
+			_, err := c.templates.Create(ctx, input)
 			return err
 		}
 		return err
@@ -165,7 +166,7 @@ func (c templateUpsertCommand) Execute(ctx context.Context, msg TemplateUpsert) 
 	if !msg.AllowUpdate {
 		return errors.New("commands: template already exists")
 	}
-	_, err = c.templates.Update(ctx, msg.TemplateInput)
+	_, err = c.templates.Update(ctx, input)
 	return err
 }
 
