@@ -252,7 +252,7 @@ func buildMessage(from, to, subject string, msgHeaders map[string]string, cfgHea
 		headers[k] = v
 	}
 
-	attachments = adapters.NormalizeAttachments(attachments)
+	attachments = adapters.EmailAttachments(attachments)
 	if len(attachments) > 0 {
 		return buildMessageWithAttachments(headers, textBody, htmlBody, contentType, plainOnly, attachments)
 	}
