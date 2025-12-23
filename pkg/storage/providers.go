@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/goliatone/go-notifications/internal/storage/bun"
+	bunrepo "github.com/goliatone/go-notifications/internal/storage/bun"
 	"github.com/goliatone/go-notifications/internal/storage/memory"
 	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
