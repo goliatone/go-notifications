@@ -91,6 +91,8 @@ _ = ready.Send(ctx, onready.OnReadyEvent{
 })
 ```
 
+Attachments are supported via `OnReadyEvent.Attachments` (raw bytes for email adapters, URLs for chat/SMS providers) with optional per-channel overrides (see `docs/onready.md`).
+
 ## Development workflow
 
 The repository includes a shell-based taskfile. Run tasks directly from the repo root:
