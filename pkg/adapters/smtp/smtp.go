@@ -304,8 +304,8 @@ func buildMessageWithAttachments(headers map[string]string, textBody, htmlBody, 
 			ct = "application/octet-stream"
 		}
 		sb.WriteString("--" + mixedBoundary + "\r\n")
-		sb.WriteString(fmt.Sprintf("Content-Type: %s\r\n", ct))
-		sb.WriteString(fmt.Sprintf("Content-Disposition: attachment; filename=\"%s\"\r\n", att.Filename))
+		fmt.Fprintf(&sb, "Content-Type: %s\r\n", ct)
+		fmt.Fprintf(&sb, "Content-Disposition: attachment; filename=\"%s\"\r\n", att.Filename)
 		sb.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
 		sb.WriteString(encodeBase64Lines(att.Content))
 		sb.WriteString("\r\n")
@@ -322,7 +322,7 @@ func writeBodyPart(sb *strings.Builder, mixedBoundary, textBody, htmlBody, conte
 			ct = "text/plain; charset=UTF-8"
 		}
 		sb.WriteString("--" + mixedBoundary + "\r\n")
-		sb.WriteString(fmt.Sprintf("Content-Type: %s\r\n\r\n", ct))
+		fmt.Fprintf(sb, "Content-Type: %s\r\n\r\n", ct)
 		sb.WriteString(textBody + "\r\n")
 		return
 	}
@@ -333,7 +333,7 @@ func writeBodyPart(sb *strings.Builder, mixedBoundary, textBody, htmlBody, conte
 		}
 		altBoundary := fmt.Sprintf("alt-%d", time.Now().UnixNano())
 		sb.WriteString("--" + mixedBoundary + "\r\n")
-		sb.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=%s\r\n\r\n", altBoundary))
+		fmt.Fprintf(sb, "Content-Type: multipart/alternative; boundary=%s\r\n\r\n", altBoundary)
 
 		sb.WriteString("--" + altBoundary + "\r\n")
 		sb.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
@@ -350,7 +350,7 @@ func writeBodyPart(sb *strings.Builder, mixedBoundary, textBody, htmlBody, conte
 		ct = "text/plain; charset=UTF-8"
 	}
 	sb.WriteString("--" + mixedBoundary + "\r\n")
-	sb.WriteString(fmt.Sprintf("Content-Type: %s\r\n\r\n", ct))
+	fmt.Fprintf(sb, "Content-Type: %s\r\n\r\n", ct)
 	sb.WriteString(textBody + "\r\n")
 }
 
