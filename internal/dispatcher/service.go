@@ -33,6 +33,7 @@ type Dependencies struct {
 	Attempts    store.DeliveryAttemptRepository
 	Templates   *templates.Service
 	Registry    *adapters.Registry
+	Attachments adapters.AttachmentResolver
 	Logger      logger.Logger
 	Config      config.DispatcherConfig
 	Preferences *prefsvc.Service
@@ -49,6 +50,7 @@ type Service struct {
 	attempts    store.DeliveryAttemptRepository
 	templates   *templates.Service
 	registry    *adapters.Registry
+	attachments adapters.AttachmentResolver
 	logger      logger.Logger
 	cfg         config.DispatcherConfig
 	preferences *prefsvc.Service
@@ -102,6 +104,7 @@ func New(deps Dependencies) (*Service, error) {
 		attempts:    deps.Attempts,
 		templates:   deps.Templates,
 		registry:    deps.Registry,
+		attachments: deps.Attachments,
 		logger:      deps.Logger,
 		cfg:         deps.Config,
 		preferences: deps.Preferences,
@@ -284,6 +287,10 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		payload = make(domain.JSONMap)
 	}
 	attachments := adapters.AttachmentsFromValue(payload["attachments"])
+	channelAttachments := adapters.ChannelAttachmentsFromValue(payload["channel_attachments"])
+	if override := adapters.ChannelAttachmentsFor(channelAttachments, channelType); len(override) > 0 {
+		attachments = override
+	}
 	payload["recipient"] = job.recipient
 	payload["channel"] = channelType
 	payload["provider"] = provider
@@ -354,6 +361,23 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 	var lastProvider string
 
 	for _, messenger := range candidates {
+		resolvedAttachments := attachments
+		if s.attachments != nil && len(attachments) > 0 {
+			resolved, err := s.attachments.Resolve(ctx, adapters.AttachmentJob{
+				Channel:        channelType,
+				Provider:       messenger.Name(),
+				Recipient:      job.recipient,
+				EventID:        event.ID.String(),
+				DefinitionCode: def.Code,
+			}, attachments)
+			if err != nil {
+				lastErr = err
+				lastProvider = messenger.Name()
+				continue
+			}
+			resolvedAttachments = resolved
+		}
+
 		secretPayload, err := s.resolveSecrets(ctx, event, job, messenger, preferredProvider)
 		if err != nil {
 			lastErr = err
@@ -368,7 +392,7 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 			Subject:     message.Subject,
 			Body:        message.Body,
 			To:          message.Receiver,
-			Attachments: attachments,
+			Attachments: resolvedAttachments,
 			Metadata: map[string]any{
 				"event_id":        event.ID.String(),
 				"definition_code": def.Code,
