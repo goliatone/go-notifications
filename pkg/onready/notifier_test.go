@@ -120,6 +120,95 @@ func TestOnReadyNotifierSendsEmail(t *testing.T) {
 	}
 }
 
+func TestOnReadyNotifierChannelAttachmentsOverride(t *testing.T) {
+	ctx := context.Background()
+	defRepo := memstore.NewDefinitionRepository()
+	tplRepo := memstore.NewTemplateRepository()
+	evtRepo := memstore.NewEventRepository()
+	msgRepo := memstore.NewMessageRepository()
+	attRepo := memstore.NewDeliveryRepository()
+	inboxRepo := memstore.NewInboxRepository()
+
+	tplSvc := newTemplateService(t, tplRepo)
+	inboxSvc := newInboxService(t, inboxRepo)
+	registry := adapters.NewRegistry(&stubMessenger{})
+
+	if _, err := Register(ctx, Dependencies{
+		Definitions: defRepo,
+		Templates:   tplSvc,
+	}, Options{}); err != nil {
+		t.Fatalf("register assets: %v", err)
+	}
+
+	mgr, err := notifier.New(notifier.Dependencies{
+		Definitions: defRepo,
+		Events:      evtRepo,
+		Messages:    msgRepo,
+		Attempts:    attRepo,
+		Templates:   tplSvc,
+		Adapters:    registry,
+		Logger:      &logger.Nop{},
+		Config:      config.DispatcherConfig{EnvFallbackAllowlist: []string{"user-1"}},
+		Inbox:       inboxSvc,
+	})
+	if err != nil {
+		t.Fatalf("build manager: %v", err)
+	}
+
+	exportNotifier, err := NewNotifier(mgr, "")
+	if err != nil {
+		t.Fatalf("build export notifier: %v", err)
+	}
+
+	payload := OnReadyEvent{
+		Recipients: []string{"user-1"},
+		Locale:     "en",
+		FileName:   "orders.csv",
+		Format:     "csv",
+		URL:        "https://example.com/orders.csv",
+		ExpiresAt:  "2024-05-01T00:00:00Z",
+		Channels:   []string{"email"},
+		Attachments: []adapters.Attachment{
+			{
+				Filename:    "default.txt",
+				ContentType: "text/plain",
+				Content:     []byte("default"),
+			},
+		},
+		ChannelAttachments: map[string][]adapters.Attachment{
+			"email": {
+				{
+					Filename:    "override.txt",
+					ContentType: "text/plain",
+					Content:     []byte("override"),
+				},
+			},
+		},
+	}
+
+	if err := exportNotifier.Send(ctx, payload); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	sent := registry.List("email")
+	if len(sent) == 0 {
+		t.Fatalf("expected at least one registered messenger")
+	}
+	mock, ok := sent[0].(*stubMessenger)
+	if !ok {
+		t.Fatalf("expected stub messenger")
+	}
+	if len(mock.sent) != 1 {
+		t.Fatalf("expected 1 email send, got %d", len(mock.sent))
+	}
+	if len(mock.sent[0].Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(mock.sent[0].Attachments))
+	}
+	if mock.sent[0].Attachments[0].Filename != "override.txt" {
+		t.Fatalf("expected override attachment, got %s", mock.sent[0].Attachments[0].Filename)
+	}
+}
+
 func TestOnReadyNotifierSendsInApp(t *testing.T) {
 	ctx := context.Background()
 	defRepo := memstore.NewDefinitionRepository()
