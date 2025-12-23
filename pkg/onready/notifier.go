@@ -32,8 +32,11 @@ type OnReadyEvent struct {
 	ManifestURL string
 	Message     string
 
-	// Attachments are forwarded to adapters that support email attachments.
+	// Attachments are forwarded to adapters that support files or media URLs.
 	Attachments []adapters.Attachment
+
+	// ChannelAttachments override attachments per channel (e.g., sms media URLs).
+	ChannelAttachments map[string][]adapters.Attachment
 
 	// ChannelOverrides allow callers to pass channel-specific metadata
 	// (e.g., CTA label/icon overrides) keyed by channel name.
@@ -90,6 +93,9 @@ func (n *notifierImpl) Send(ctx context.Context, evt OnReadyEvent) error {
 	}
 	if len(evt.Attachments) > 0 {
 		payload["attachments"] = evt.Attachments
+	}
+	if len(evt.ChannelAttachments) > 0 {
+		payload["channel_attachments"] = evt.ChannelAttachments
 	}
 	if evt.ChannelOverrides != nil {
 		payload["channel_overrides"] = evt.ChannelOverrides
