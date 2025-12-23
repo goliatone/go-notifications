@@ -28,7 +28,7 @@ jobs:
             ${{ runner.os }}-gocache-
 
       - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.61.0
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.1
 
       - name: Run lint/test/docs/samples
         run: ./taskfile ci
