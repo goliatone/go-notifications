@@ -43,3 +43,31 @@ func TestBuildMessageWithAttachments(t *testing.T) {
 		t.Fatalf("expected base64 content, got %s", body)
 	}
 }
+
+func TestBuildMessage_HTMLOnlyDerivesText(t *testing.T) {
+	body, headers := buildMessage(
+		"from@example.com",
+		"to@example.com",
+		"Subject",
+		nil,
+		nil,
+		"",
+		"<p>Hello <strong>world</strong></p>",
+		"",
+		false,
+		nil,
+	)
+
+	if !strings.Contains(headers, "multipart/alternative") {
+		t.Fatalf("expected multipart/alternative headers")
+	}
+	if !strings.Contains(body, "Content-Type: text/plain") {
+		t.Fatalf("expected text/plain part")
+	}
+	if strings.Contains(body, "<strong>") {
+		t.Fatalf("expected HTML stripped in text part")
+	}
+	if !strings.Contains(body, "Hello world") {
+		t.Fatalf("expected derived text content")
+	}
+}
