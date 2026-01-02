@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jaytaylor/html2text"
+
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 )
@@ -151,6 +153,9 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 
 	textBody := firstNonEmpty(msg.Metadata, "text_body", "text", "body", msg.Body)
 	htmlBody := firstNonEmpty(msg.Metadata, "html_body", "html")
+	if htmlBody != "" && strings.TrimSpace(textBody) == "" {
+		textBody = htmlToText(htmlBody)
+	}
 	contentType := strings.TrimSpace(stringValue(msg.Metadata, "content_type"))
 
 	body, headers := buildMessage(fromAddr.String(), toAddr.String(), msg.Subject, msg.Headers, a.cfg.Headers, textBody, htmlBody, contentType, a.cfg.PlainOnly, msg.Attachments)
@@ -251,6 +256,9 @@ func buildMessage(from, to, subject string, msgHeaders map[string]string, cfgHea
 		}
 		headers[k] = v
 	}
+	if htmlBody != "" && strings.TrimSpace(textBody) == "" {
+		textBody = htmlToText(htmlBody)
+	}
 
 	attachments = adapters.EmailAttachments(attachments)
 	if len(attachments) > 0 {
@@ -267,9 +275,6 @@ func buildMessage(from, to, subject string, msgHeaders map[string]string, cfgHea
 	}
 
 	if htmlBody != "" {
-		if textBody == "" {
-			textBody = stripHTML(htmlBody)
-		}
 		boundary := fmt.Sprintf("mixed-%d", time.Now().UnixNano())
 		headers["Content-Type"] = fmt.Sprintf("multipart/alternative; boundary=%s", boundary)
 
@@ -328,8 +333,8 @@ func writeBodyPart(sb *strings.Builder, mixedBoundary, textBody, htmlBody, conte
 	}
 
 	if htmlBody != "" {
-		if textBody == "" {
-			textBody = stripHTML(htmlBody)
+		if strings.TrimSpace(textBody) == "" {
+			textBody = htmlToText(htmlBody)
 		}
 		altBoundary := fmt.Sprintf("alt-%d", time.Now().UnixNano())
 		sb.WriteString("--" + mixedBoundary + "\r\n")
@@ -442,4 +447,14 @@ func stripHTML(html string) string {
 		}
 	}
 	return strings.TrimSpace(out.String())
+}
+
+func htmlToText(html string) string {
+	plain, err := html2text.FromString(html, html2text.Options{PrettyTables: true})
+	if err == nil {
+		if trimmed := strings.TrimSpace(plain); trimmed != "" {
+			return trimmed
+		}
+	}
+	return stripHTML(html)
 }
