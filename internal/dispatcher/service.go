@@ -402,6 +402,17 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		if len(secretPayload) > 0 {
 			sendMsg.Metadata["secrets"] = secretPayload
 		}
+		if len(message.Metadata) > 0 {
+			if sendMsg.Metadata == nil {
+				sendMsg.Metadata = make(map[string]any)
+			}
+			for k, v := range message.Metadata {
+				if _, exists := sendMsg.Metadata[k]; exists {
+					continue
+				}
+				sendMsg.Metadata[k] = v
+			}
+		}
 
 		// Use a copy so per-adapter status updates don't clobber each other mid-loop.
 		msgCopy := *message
