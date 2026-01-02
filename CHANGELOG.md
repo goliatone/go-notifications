@@ -1,5 +1,37 @@
 # Changelog
 
+# [0.7.0](https://github.com/goliatone/go-notifications/compare/v0.6.0...v0.7.0) - (2026-01-02)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Ensure we have send message metadata ([6091d9b](https://github.com/goliatone/go-notifications/commit/6091d9bf645efeb31beab8857dda2ddf69f48fb0))  - (goliatone)
+- Update github workflow to enable release ([a71dc52](https://github.com/goliatone/go-notifications/commit/a71dc52cb82564bc3cd1a46452d8dca2b5040b4b))  - (goliatone)
+- Lintin error ([84f28e9](https://github.com/goliatone/go-notifications/commit/84f28e9a092fb3874552e06246b3ae5954ba5c84))  - (goliatone)
+- Name repo ([0c2bca9](https://github.com/goliatone/go-notifications/commit/0c2bca9dfd40b276c7ce1d938f5be711ed90a3c3))  - (goliatone)
+- Increase timeout for go lint ([f2c9c3e](https://github.com/goliatone/go-notifications/commit/f2c9c3e2f027e117ecc7f98085ea9023cf2aa893))  - (goliatone)
+- Remove unused task ([617bb22](https://github.com/goliatone/go-notifications/commit/617bb2212035d64f61d38aa3f39cc6d0165e10e6))  - (goliatone)
+- Update smtp to use fmt.Fprintf ([fbc9016](https://github.com/goliatone/go-notifications/commit/fbc90162da71717b497cfaab2e8148dce045b849))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.7.0 ([37cc2aa](https://github.com/goliatone/go-notifications/commit/37cc2aa88fa3b018dbc8bb8bae7ca71586d5f8ed))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Html2text to generate non markup input ([9a6d714](https://github.com/goliatone/go-notifications/commit/9a6d71425201b845b2acff14309bdbf45dc5bf66))  - (goliatone)
+- Support for html body and text body for SMTP messages ([eeb8816](https://github.com/goliatone/go-notifications/commit/eeb8816290b379104f0fe0738982bf53a6f08149))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.6.0 ([2e2476e](https://github.com/goliatone/go-notifications/commit/2e2476e65a4833fccb33939a75cbec8301dd809d))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tests ([38c1a5a](https://github.com/goliatone/go-notifications/commit/38c1a5a04c592795af70b5980478ab6a225b10ae))  - (goliatone)
+- Update deps ([d9093fc](https://github.com/goliatone/go-notifications/commit/d9093fc16751ecc9d20962a5279d7a9a75b4addb))  - (goliatone)
+- Update github workflow ([c0e2ac3](https://github.com/goliatone/go-notifications/commit/c0e2ac3da02e8f969fb93c677df5737cd09f6604))  - (goliatone)
+- Update example ([9afd369](https://github.com/goliatone/go-notifications/commit/9afd3694ff10fa9a289c389d8b53f0d42287ad2d))  - (goliatone)
+
 # [0.6.0](https://github.com/goliatone/go-notifications/compare/v0.5.0...v0.6.0) - (2025-12-23)
 
 ## <!-- 1 -->🐛 Bug Fixes
