@@ -64,10 +64,19 @@ func TestBuildMessage_HTMLOnlyDerivesText(t *testing.T) {
 	if !strings.Contains(body, "Content-Type: text/plain") {
 		t.Fatalf("expected text/plain part")
 	}
-	if strings.Contains(body, "<strong>") {
+	plainHeader := "Content-Type: text/plain; charset=UTF-8"
+	htmlHeader := "Content-Type: text/html; charset=UTF-8"
+	plainIdx := strings.Index(body, plainHeader)
+	htmlIdx := strings.Index(body, htmlHeader)
+	if plainIdx == -1 || htmlIdx == -1 || htmlIdx < plainIdx {
+		t.Fatalf("expected text/plain part before text/html part")
+	}
+	plainSection := body[plainIdx:htmlIdx]
+	if strings.Contains(plainSection, "<strong>") {
 		t.Fatalf("expected HTML stripped in text part")
 	}
-	if !strings.Contains(body, "Hello world") {
+	plainLower := strings.ToLower(plainSection)
+	if !strings.Contains(plainLower, "hello") || !strings.Contains(plainLower, "world") {
 		t.Fatalf("expected derived text content")
 	}
 }
