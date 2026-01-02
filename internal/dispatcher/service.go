@@ -590,6 +590,12 @@ func applyChannelOverrides(payload domain.JSONMap, channel string, message *doma
 	if body, ok := overrides["body"].(string); ok && strings.TrimSpace(body) != "" {
 		message.Body = body
 	}
+	if htmlBody, ok := overrides["html_body"].(string); ok && strings.TrimSpace(htmlBody) != "" {
+		message.Metadata["html_body"] = htmlBody
+	}
+	if textBody, ok := overrides["text_body"].(string); ok && strings.TrimSpace(textBody) != "" {
+		message.Metadata["text_body"] = textBody
+	}
 	if action, ok := overrides["action_url"].(string); ok && strings.TrimSpace(action) != "" {
 		message.Metadata["action_url"] = action
 	}
