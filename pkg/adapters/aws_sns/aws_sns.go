@@ -98,9 +98,9 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[aws_sns:during-dry-run] send skipped",
-			logger.Field{Key: "to", Value: msg.To},
-			logger.Field{Key: "channel", Value: msg.Channel},
-			logger.Field{Key: "subject", Value: msg.Subject},
+			"to", msg.To,
+			"channel", msg.Channel,
+			"subject", msg.Subject,
 		)
 		return nil
 	}
