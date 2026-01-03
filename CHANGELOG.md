@@ -1,5 +1,29 @@
 # Changelog
 
+# [0.8.0](https://github.com/goliatone/go-notifications/compare/v0.7.0...v0.8.0) - (2026-01-03)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Logger definition should match required api ([6776e0e](https://github.com/goliatone/go-notifications/commit/6776e0e7fcb16ad451e6462b8c80d9d0ce4b9662))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.8.0 ([44040a9](https://github.com/goliatone/go-notifications/commit/44040a9b5d77dc9f85d1187962e4bcc9006992cf))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Use new default logger ([80d4b12](https://github.com/goliatone/go-notifications/commit/80d4b12c0e2cffc380832efbadd701a7c97c2d57))  - (goliatone)
+- Basic logger implementation ([1aa2725](https://github.com/goliatone/go-notifications/commit/1aa27257fbec86bc2d6abf982700731411e2655a))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.7.0 ([ba35c63](https://github.com/goliatone/go-notifications/commit/ba35c63a50869c99623cd7511261685d3255b379))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update example ([43c4495](https://github.com/goliatone/go-notifications/commit/43c449511ab98d96f4ab97c13f091d9ef7a84036))  - (goliatone)
+- Update tests ([7955994](https://github.com/goliatone/go-notifications/commit/7955994cf89f40f3f7105db91678c95192ca5b3f))  - (goliatone)
+
 # [0.7.0](https://github.com/goliatone/go-notifications/compare/v0.6.0...v0.7.0) - (2026-01-02)
 
 ## <!-- 1 -->🐛 Bug Fixes
