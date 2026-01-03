@@ -78,13 +78,13 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.opts.Structured {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("console delivery",
-			logger.Field{Key: "channel", Value: msg.Channel},
-			logger.Field{Key: "to", Value: msg.To},
-			logger.Field{Key: "subject", Value: msg.Subject},
-			logger.Field{Key: "text", Value: textBody},
-			logger.Field{Key: "html", Value: htmlBody},
-			logger.Field{Key: "content_type", Value: contentType},
-			logger.Field{Key: "metadata", Value: msg.Metadata},
+			"channel", msg.Channel,
+			"to", msg.To,
+			"subject", msg.Subject,
+			"text", textBody,
+			"html", htmlBody,
+			"content_type", contentType,
+			"metadata", msg.Metadata,
 		)
 		return nil
 	}
