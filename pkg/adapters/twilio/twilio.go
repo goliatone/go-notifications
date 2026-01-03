@@ -113,8 +113,8 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.cfg.DryRun || accountSID == "" || authToken == "" {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[twilio:during-dry-run] send skipped (dry-run or missing credentials)",
-			logger.Field{Key: "to", Value: msg.To},
-			logger.Field{Key: "channel", Value: msg.Channel},
+			"to", msg.To,
+			"channel", msg.Channel,
 		)
 		return nil
 	}
