@@ -93,7 +93,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		deps.Queue = &queue.Nop{}
 	}
 	if deps.Logger == nil {
-		deps.Logger = &logger.Nop{}
+		deps.Logger = logger.Default()
 	}
 	return &Service{
 		definitions: deps.Definitions,
