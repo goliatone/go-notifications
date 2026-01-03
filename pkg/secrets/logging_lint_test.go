@@ -2,10 +2,14 @@ package secrets
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -16,6 +20,10 @@ func TestNoSecretFieldsLoggedDirectly(t *testing.T) {
 		"api_key", "apikey", "apiKey",
 		"client_secret", "signing_key",
 		"chat_id", "webhook_url",
+	}
+	secretSet := make(map[string]struct{}, len(secretKeys))
+	for _, key := range secretKeys {
+		secretSet[key] = struct{}{}
 	}
 
 	_, thisFile, _, _ := runtime.Caller(0)
@@ -43,12 +51,50 @@ func TestNoSecretFieldsLoggedDirectly(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		content := string(data)
-		for _, key := range secretKeys {
-			needle := fmt.Sprintf(`logger.Field{Key: "%s"`, key)
-			if strings.Contains(content, needle) {
-				return fmt.Errorf("secret-like field %q logged in %s; mask it or drop the field", key, path)
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, data, 0)
+		if err != nil {
+			return err
+		}
+		var lintErr error
+		ast.Inspect(file, func(n ast.Node) bool {
+			if lintErr != nil {
+				return false
 			}
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch sel.Sel.Name {
+			case "Trace", "Debug", "Info", "Warn", "Error", "Fatal":
+			default:
+				return true
+			}
+			for i, arg := range call.Args {
+				if i == 0 {
+					continue
+				}
+				lit, ok := arg.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				key, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					continue
+				}
+				if _, exists := secretSet[key]; exists {
+					lintErr = fmt.Errorf("secret-like field %q logged in %s; mask it or drop the field", key, path)
+					return false
+				}
+			}
+			return true
+		})
+		if lintErr != nil {
+			return lintErr
 		}
 		return nil
 	})

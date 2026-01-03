@@ -256,23 +256,33 @@ func (m *capturingMessenger) logMaskedSecrets(msg adapters.Message) {
 	}
 
 	masked := secrets.MaskValues(values)
-	m.logger.Info("masked secrets", logger.Field{Key: "secrets", Value: masked})
+	m.logger.Info("masked secrets", "secrets", masked)
 }
 
 type captureLogger struct {
 	entries []string
 }
 
-func (l *captureLogger) With(fields ...logger.Field) logger.Logger { return l }
-func (l *captureLogger) Debug(msg string, fields ...logger.Field)  { l.record("DEBUG", msg, fields) }
-func (l *captureLogger) Info(msg string, fields ...logger.Field)   { l.record("INFO", msg, fields) }
-func (l *captureLogger) Warn(msg string, fields ...logger.Field)   { l.record("WARN", msg, fields) }
-func (l *captureLogger) Error(msg string, fields ...logger.Field)  { l.record("ERROR", msg, fields) }
+func (l *captureLogger) Trace(msg string, args ...any) { l.record("TRACE", msg, args) }
+func (l *captureLogger) Debug(msg string, args ...any) { l.record("DEBUG", msg, args) }
+func (l *captureLogger) Info(msg string, args ...any)  { l.record("INFO", msg, args) }
+func (l *captureLogger) Warn(msg string, args ...any)  { l.record("WARN", msg, args) }
+func (l *captureLogger) Error(msg string, args ...any) { l.record("ERROR", msg, args) }
+func (l *captureLogger) Fatal(msg string, args ...any) { l.record("FATAL", msg, args) }
+func (l *captureLogger) WithContext(ctx context.Context) logger.Logger {
+	return l
+}
 
-func (l *captureLogger) record(level, msg string, fields []logger.Field) {
+func (l *captureLogger) record(level, msg string, args []any) {
 	var parts []string
-	for _, f := range fields {
-		parts = append(parts, fmt.Sprintf("%s=%v", f.Key, f.Value))
+	for i := 0; i < len(args); {
+		if key, ok := args[i].(string); ok && i+1 < len(args) {
+			parts = append(parts, fmt.Sprintf("%s=%v", key, args[i+1]))
+			i += 2
+			continue
+		}
+		parts = append(parts, fmt.Sprint(args[i]))
+		i++
 	}
 	entry := fmt.Sprintf("%s %s %s", level, msg, strings.Join(parts, " "))
 	l.entries = append(l.entries, strings.TrimSpace(entry))
