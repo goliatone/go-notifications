@@ -74,7 +74,7 @@ func New(deps Dependencies) (*Service, error) {
 		deps.Cache = &cache.Nop{}
 	}
 	if deps.Logger == nil {
-		deps.Logger = &logger.Nop{}
+		deps.Logger = logger.Default()
 	}
 	if deps.CacheTTL <= 0 {
 		deps.CacheTTL = time.Minute
@@ -258,7 +258,7 @@ func (s *Service) readCache(ctx context.Context, key string) *domain.Notificatio
 	}
 	value, ok, err := s.cache.Get(ctx, key)
 	if err != nil {
-		s.logger.Warn("templates cache get failed", logger.Field{Key: "error", Value: err})
+		s.logger.Warn("templates cache get failed", "error", err)
 		return nil
 	}
 	if !ok {
@@ -275,7 +275,7 @@ func (s *Service) readCache(ctx context.Context, key string) *domain.Notificatio
 		clone := cloneTemplate(*v)
 		return &clone
 	default:
-		s.logger.Warn("templates cache returned unexpected type", logger.Field{Key: "type", Value: fmt.Sprintf("%T", value)})
+		s.logger.Warn("templates cache returned unexpected type", "type", fmt.Sprintf("%T", value))
 		return nil
 	}
 }
@@ -289,7 +289,7 @@ func (s *Service) writeCache(ctx context.Context, tpl domain.NotificationTemplat
 		return
 	}
 	if err := s.cache.Set(ctx, key, cloneTemplate(tpl), s.cacheTTL); err != nil {
-		s.logger.Warn("templates cache set failed", logger.Field{Key: "error", Value: err})
+		s.logger.Warn("templates cache set failed", "error", err)
 	}
 }
 
