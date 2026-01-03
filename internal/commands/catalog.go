@@ -74,7 +74,7 @@ func NewCatalog(deps Dependencies) (*Catalog, error) {
 		return nil, errors.New("commands: events service is required")
 	}
 	if deps.Logger == nil {
-		deps.Logger = &logger.Nop{}
+		deps.Logger = logger.Default()
 	}
 
 	return &Catalog{
