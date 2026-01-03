@@ -88,7 +88,7 @@ func openDatabase(ctx context.Context, cfg config.PersistenceConfig, lgr logger.
 	db := bun.NewDB(sqldb, sqlitedialect.New())
 
 	if _, err := sqldb.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil && lgr != nil {
-		lgr.Warn("persistence: enable sqlite foreign keys", logger.Field{Key: "error", Value: err})
+		lgr.Warn("persistence: enable sqlite foreign keys", "error", err)
 	}
 
 	if err := ensureSchema(ctx, db); err != nil {
