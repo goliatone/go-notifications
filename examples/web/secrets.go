@@ -18,7 +18,7 @@ func buildSecretsProvider(db *bun.DB, lgr logger.Logger) (secrets.Provider, secr
 	key := os.Getenv("DEMO_SECRET_KEY")
 	if len(key) != chacha20poly1305.KeySize {
 		if key != "" && lgr != nil {
-			lgr.Warn("invalid DEMO_SECRET_KEY length, using default", logger.Field{Key: "length", Value: len(key)})
+			lgr.Warn("invalid DEMO_SECRET_KEY length, using default", "length", len(key))
 		}
 		key = defaultSecretKey
 	}
