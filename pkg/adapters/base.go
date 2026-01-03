@@ -9,23 +9,23 @@ type BaseAdapter struct {
 
 func NewBaseAdapter(l logger.Logger) BaseAdapter {
 	if l == nil {
-		l = &logger.Nop{}
+		l = logger.Default()
 	}
 	return BaseAdapter{logger: l}
 }
 
 func (b BaseAdapter) LogSuccess(name string, msg Message) {
-	b.logger.Info("adapter delivered message", logger.Field{Key: "adapter", Value: name}, logger.Field{Key: "channel", Value: msg.Channel}, logger.Field{Key: "to", Value: msg.To})
+	b.logger.Info("adapter delivered message", "adapter", name, "channel", msg.Channel, "to", msg.To)
 }
 
 func (b BaseAdapter) LogFailure(name string, msg Message, err error) {
-	b.logger.Error("adapter delivery failed", logger.Field{Key: "adapter", Value: name}, logger.Field{Key: "channel", Value: msg.Channel}, logger.Field{Key: "to", Value: msg.To}, logger.Field{Key: "error", Value: err})
+	b.logger.Error("adapter delivery failed", "adapter", name, "channel", msg.Channel, "to", msg.To, "error", err)
 }
 
 // Logger exposes the adapter logger for structured diagnostics.
 func (b BaseAdapter) Logger() logger.Logger {
 	if b.logger == nil {
-		return &logger.Nop{}
+		return logger.Default()
 	}
 	return b.logger
 }
