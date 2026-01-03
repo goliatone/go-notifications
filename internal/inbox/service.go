@@ -64,7 +64,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		deps.Broadcaster = &broadcaster.Nop{}
 	}
 	if deps.Logger == nil {
-		deps.Logger = &logger.Nop{}
+		deps.Logger = logger.Default()
 	}
 	return &Service{
 		repo:        deps.Repository,
@@ -245,7 +245,7 @@ func (s *Service) DeliverFromMessage(ctx context.Context, msg *domain.Notificati
 	if err != nil {
 		return err
 	}
-	s.logger.Info("inbox delivery created", logger.Field{Key: "user_id", Value: item.UserID})
+	s.logger.Info("inbox delivery created", "user_id", item.UserID)
 	return nil
 }
 
@@ -265,7 +265,7 @@ func (s *Service) emit(ctx context.Context, topic string, item *domain.InboxItem
 		},
 	}
 	if err := s.broadcaster.Broadcast(ctx, payload); err != nil {
-		s.logger.Warn("broadcast inbox event failed", logger.Field{Key: "error", Value: err})
+		s.logger.Warn("broadcast inbox event failed", "error", err)
 	}
 }
 
