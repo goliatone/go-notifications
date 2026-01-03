@@ -97,8 +97,8 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[webhook:during-dry-run] send skipped",
-			logger.Field{Key: "url", Value: a.cfg.URL},
-			logger.Field{Key: "channel", Value: msg.Channel},
+			"url", a.cfg.URL,
+			"channel", msg.Channel,
 		)
 		return nil
 	}
