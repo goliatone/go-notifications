@@ -92,8 +92,8 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[firebase:during-dry-run] send skipped",
-			logger.Field{Key: "to", Value: msg.To},
-			logger.Field{Key: "subject", Value: msg.Subject},
+			"to", msg.To,
+			"subject", msg.Subject,
 		)
 		return nil
 	}
