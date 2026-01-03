@@ -86,7 +86,7 @@ func New(deps Dependencies) (*Service, error) {
 	}
 
 	if deps.Logger == nil {
-		deps.Logger = &logger.Nop{}
+		deps.Logger = logger.Default()
 	}
 
 	if deps.Config.MaxWorkers <= 0 {
@@ -177,7 +177,7 @@ func (s *Service) Dispatch(ctx context.Context, event *domain.NotificationEvent,
 	for err := range errCh {
 		if err != nil {
 			failed = true
-			s.logger.Error("dispatcher delivery failed", logger.Field{Key: "error", Value: err})
+			s.logger.Error("dispatcher delivery failed", "error", err)
 		}
 	}
 
@@ -273,9 +273,9 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 		return fmt.Errorf("preferences evaluation: %w", err)
 	} else if !allowed {
 		s.logger.Debug("delivery skipped by preferences",
-			logger.Field{Key: "recipient", Value: job.recipient},
-			logger.Field{Key: "channel", Value: channelType},
-			logger.Field{Key: "reason", Value: reason},
+			"recipient", job.recipient,
+			"channel", channelType,
+			"reason", reason,
 		)
 		return nil
 	} else if providerOverride != "" {
@@ -305,12 +305,12 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 	})
 	if err != nil {
 		s.logger.Error("dispatcher render failed",
-			logger.Field{Key: "template", Value: job.templateCode},
-			logger.Field{Key: "channel", Value: channelType},
-			logger.Field{Key: "recipient", Value: job.recipient},
-			logger.Field{Key: "definition", Value: def.Code},
-			logger.Field{Key: "event_id", Value: event.ID},
-			logger.Field{Key: "error", Value: err},
+			"template", job.templateCode,
+			"channel", channelType,
+			"recipient", job.recipient,
+			"definition", def.Code,
+			"event_id", event.ID,
+			"error", err,
 		)
 		s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, nil, "failed", provider, renderLocale, err))
 		return fmt.Errorf("render template %s: %w", job.templateCode, err)
@@ -457,7 +457,7 @@ func (s *Service) deliverWithRetries(ctx context.Context, messenger adapters.Mes
 			}
 			return nil
 		}
-		s.logger.Warn("delivery error", logger.Field{Key: "attempt", Value: attempt}, logger.Field{Key: "error", Value: lastErr})
+		s.logger.Warn("delivery error", "attempt", attempt, "error", lastErr)
 		_ = s.recordAttempt(ctx, messenger.Name(), message, domain.AttemptStatusFailed, lastErr.Error(), attempt)
 		time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
 	}
