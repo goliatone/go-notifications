@@ -128,16 +128,26 @@ func main() {
 // stdoutLogger is a minimal logger that prints to stdout for the example.
 type stdoutLogger struct{}
 
-func (l *stdoutLogger) With(fields ...logger.Field) logger.Logger { return l }
-func (l *stdoutLogger) Debug(msg string, fields ...logger.Field)  { l.log("debug", msg, fields...) }
-func (l *stdoutLogger) Info(msg string, fields ...logger.Field)   { l.log("info", msg, fields...) }
-func (l *stdoutLogger) Warn(msg string, fields ...logger.Field)   { l.log("warn", msg, fields...) }
-func (l *stdoutLogger) Error(msg string, fields ...logger.Field)  { l.log("error", msg, fields...) }
+func (l *stdoutLogger) Trace(msg string, args ...any) { l.log("trace", msg, args...) }
+func (l *stdoutLogger) Debug(msg string, args ...any) { l.log("debug", msg, args...) }
+func (l *stdoutLogger) Info(msg string, args ...any)  { l.log("info", msg, args...) }
+func (l *stdoutLogger) Warn(msg string, args ...any)  { l.log("warn", msg, args...) }
+func (l *stdoutLogger) Error(msg string, args ...any) { l.log("error", msg, args...) }
+func (l *stdoutLogger) Fatal(msg string, args ...any) { l.log("fatal", msg, args...) }
+func (l *stdoutLogger) WithContext(ctx context.Context) logger.Logger {
+	return l
+}
 
-func (l *stdoutLogger) log(level, msg string, fields ...logger.Field) {
+func (l *stdoutLogger) log(level, msg string, args ...any) {
 	parts := []string{msg}
-	for _, f := range fields {
-		parts = append(parts, fmt.Sprintf("%s=%v", f.Key, f.Value))
+	for i := 0; i < len(args); {
+		if key, ok := args[i].(string); ok && i+1 < len(args) {
+			parts = append(parts, fmt.Sprintf("%s=%v", key, args[i+1]))
+			i += 2
+			continue
+		}
+		parts = append(parts, fmt.Sprint(args[i]))
+		i++
 	}
 	log.Printf("[%s] %s", level, strings.Join(parts, " "))
 }
