@@ -81,7 +81,7 @@ func New(opts Options) (*Container, error) {
 
 	lgr := opts.Logger
 	if lgr == nil {
-		lgr = &logger.Nop{}
+		lgr = logger.Default()
 	}
 
 	c := opts.Cache
