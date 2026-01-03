@@ -1,19 +1,26 @@
 package logger
 
-// Field represents a structured logging key/value pair.
-type Field struct {
-	Key   string
-	Value any
+import "context"
+
+// Logger matches the go-logger contract so external implementations can be used directly.
+type Logger interface {
+	Trace(msg string, args ...any)
+	Debug(msg string, args ...any)
+	Info(msg string, args ...any)
+	Warn(msg string, args ...any)
+	Error(msg string, args ...any)
+	Fatal(msg string, args ...any)
+	WithContext(ctx context.Context) Logger
 }
 
-// Logger is the minimal contract expected by go-notifications services.
-// Implementations may forward to go-logger, zap, logrus, etc.
-type Logger interface {
-	With(fields ...Field) Logger
-	Debug(msg string, fields ...Field)
-	Info(msg string, fields ...Field)
-	Warn(msg string, fields ...Field)
-	Error(msg string, fields ...Field)
+// LoggerProvider exposes named logger retrieval (mirrors go-logger).
+type LoggerProvider interface {
+	GetLogger(name string) Logger
+}
+
+// FieldsLogger is an optional extension for attaching structured fields.
+type FieldsLogger interface {
+	WithFields(map[string]any) Logger
 }
 
 // Nop is a no-op logger implementation useful for tests.
@@ -22,8 +29,12 @@ type Nop struct{}
 // Ensure Nop satisfies Logger.
 var _ Logger = (*Nop)(nil)
 
-func (n *Nop) With(fields ...Field) Logger       { return n }
-func (n *Nop) Debug(msg string, fields ...Field) {}
-func (n *Nop) Info(msg string, fields ...Field)  {}
-func (n *Nop) Warn(msg string, fields ...Field)  {}
-func (n *Nop) Error(msg string, fields ...Field) {}
+func (n *Nop) Trace(msg string, args ...any) {}
+func (n *Nop) Debug(msg string, args ...any) {}
+func (n *Nop) Info(msg string, args ...any)  {}
+func (n *Nop) Warn(msg string, args ...any)  {}
+func (n *Nop) Error(msg string, args ...any) {}
+func (n *Nop) Fatal(msg string, args ...any) {}
+func (n *Nop) WithContext(ctx context.Context) Logger {
+	return n
+}
