@@ -92,7 +92,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		return nil, errRepositoryRequired
 	}
 	if deps.Logger == nil {
-		deps.Logger = &logger.Nop{}
+		deps.Logger = logger.Default()
 	}
 	if deps.Clock == nil {
 		deps.Clock = time.Now
