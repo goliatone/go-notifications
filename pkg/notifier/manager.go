@@ -74,7 +74,7 @@ func NewWithDispatcher(deps Dependencies, dispatcherSvc *dispatcher.Service) (*M
 		return nil, ErrMissingEventsRepository
 	}
 	if deps.Logger == nil {
-		deps.Logger = &logger.Nop{}
+		deps.Logger = logger.Default()
 	}
 	if dispatcherSvc == nil {
 		var err error
