@@ -152,8 +152,8 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.cfg.DryRun || token == "" {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[slack:during-dry-run] send skipped",
-			logger.Field{Key: "channel", Value: channel},
-			logger.Field{Key: "text", Value: text},
+			"channel", channel,
+			"text", text,
 		)
 		return nil
 	}
