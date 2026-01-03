@@ -103,7 +103,7 @@ func (m ResolvingMessenger) resolveSecretStrings(userID, channel, provider strin
 	}
 	resolved, err := m.secrets.Resolve(refs...)
 	if err != nil && !errors.Is(err, secrets.ErrNotFound) {
-		m.logger.Warn("resolve secrets failed", logger.Field{Key: "error", Value: err}, logger.Field{Key: "provider", Value: provider})
+		m.logger.Warn("resolve secrets failed", "error", err, "provider", provider)
 		return out
 	}
 	for _, key := range keys {
