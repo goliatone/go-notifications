@@ -164,7 +164,7 @@ module, _ := notifier.NewModule(notifier.ModuleOptions{
 _ = module
 ```
 
-Templates can access resolved links directly (`action_url`) or via `secure_link(...)` once the helper is registered in your renderer stack.
+Templates can access resolved links directly (`action_url`) or via `secure_link(...)` (registered by default by the templates service).
 
 ---
 
