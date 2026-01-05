@@ -68,9 +68,8 @@ func (s *captureStore) Save(ctx context.Context, records []links.LinkRecord) err
 }
 
 type captureObserver struct {
-	mu        sync.Mutex
-	calls     []links.LinkResolution
-	storeHits *int
+	mu    sync.Mutex
+	calls []links.LinkResolution
 }
 
 func (o *captureObserver) OnLinksResolved(ctx context.Context, info links.LinkResolution) {
