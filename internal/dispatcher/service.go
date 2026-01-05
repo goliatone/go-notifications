@@ -333,7 +333,7 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 	if preferredProvider != "" {
 		resolvedProvider = preferredProvider
 	}
-	linkReq, resolvedLinks, builderOK, err := s.resolveLinks(ctx, event, def, job, basePayload, payload, channelType, resolvedProvider, renderLocale, messageID)
+	linkReq, resolvedLinks, builderAttempted, builderOK, err := s.resolveLinks(ctx, event, def, job, basePayload, payload, channelType, resolvedProvider, renderLocale, messageID)
 	if err != nil {
 		s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, nil, "failed", resolvedProvider, renderLocale, err))
 		return err
@@ -372,8 +372,8 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 	}
 	applyChannelOverrides(payload, channelType, message)
 	applyResolvedLinksToMessage(message, resolvedLinks)
-	if builderOK {
-		if err := s.invokeLinkHooks(ctx, linkReq, resolvedLinks); err != nil {
+	if builderAttempted {
+		if err := s.invokeLinkHooks(ctx, linkReq, resolvedLinks, builderOK, true); err != nil {
 			s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "failed", resolvedProvider, renderLocale, err))
 			return err
 		}
@@ -737,7 +737,40 @@ func normalizeFailureMode(mode, fallback links.FailureMode) links.FailureMode {
 	return mode
 }
 
-func (s *Service) resolveLinks(ctx context.Context, event *domain.NotificationEvent, def *domain.NotificationDefinition, job deliveryJob, basePayload, payload domain.JSONMap, channel, provider, locale string, messageID uuid.UUID) (links.LinkRequest, links.ResolvedLinks, bool, error) {
+func linkMetadataFromPayload(payload domain.JSONMap, channel string) map[string]any {
+	if len(payload) == 0 {
+		return nil
+	}
+	var metadata map[string]any
+	if raw, ok := payload["metadata"]; ok {
+		switch typed := raw.(type) {
+		case map[string]any:
+			metadata = cloneAnyMap(typed)
+		case domain.JSONMap:
+			metadata = cloneAnyMap(typed)
+		}
+	}
+	overrides := extractOverrides(payload, channel)
+	if len(overrides) > 0 {
+		keys := []string{"html_body", "text_body", "icon", "badge", "cta_label"}
+		for _, key := range keys {
+			if val, ok := overrides[key]; ok {
+				if str, ok := val.(string); ok && strings.TrimSpace(str) != "" {
+					if metadata == nil {
+						metadata = make(map[string]any)
+					}
+					metadata[key] = str
+				}
+			}
+		}
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
+}
+
+func (s *Service) resolveLinks(ctx context.Context, event *domain.NotificationEvent, def *domain.NotificationDefinition, job deliveryJob, basePayload, payload domain.JSONMap, channel, provider, locale string, messageID uuid.UUID) (links.LinkRequest, links.ResolvedLinks, bool, bool, error) {
 	// Precedence: overrides > original (builder wins later).
 	baseResolved := mergeResolvedLinks(
 		resolvedLinksFromPayload(basePayload),
@@ -745,7 +778,7 @@ func (s *Service) resolveLinks(ctx context.Context, event *domain.NotificationEv
 	)
 	baseResolved = normalizeResolvedLinks(baseResolved)
 	if s.linkBuilder == nil {
-		return links.LinkRequest{}, baseResolved, false, nil
+		return links.LinkRequest{}, baseResolved, false, false, nil
 	}
 	req := links.LinkRequest{
 		EventID:      event.ID.String(),
@@ -757,7 +790,7 @@ func (s *Service) resolveLinks(ctx context.Context, event *domain.NotificationEv
 		MessageID:    messageID.String(),
 		Locale:       locale,
 		Payload:      cloneJSONMap(payload),
-		Metadata:     nil,
+		Metadata:     linkMetadataFromPayload(payload, channel),
 		ResolvedURLs: resolvedURLsFromPayload(payload),
 	}
 	resolved, err := s.linkBuilder.Build(ctx, req)
@@ -769,19 +802,20 @@ func (s *Service) resolveLinks(ctx context.Context, event *domain.NotificationEv
 				"recipient", job.recipient,
 				"error", err,
 			)
-			return req, baseResolved, false, nil
+			baseResolved = ensureResolvedLinkRecords(req, baseResolved)
+			return req, baseResolved, true, false, nil
 		}
-		return req, links.ResolvedLinks{}, false, err
+		return req, links.ResolvedLinks{}, true, false, err
 	}
 	resolved = normalizeResolvedLinks(resolved)
 	merged := mergeResolvedLinks(baseResolved, resolved)
 	merged = normalizeResolvedLinks(merged)
 	merged = ensureResolvedLinkRecords(req, merged)
-	return req, merged, true, nil
+	return req, merged, true, true, nil
 }
 
-func (s *Service) invokeLinkHooks(ctx context.Context, req links.LinkRequest, resolved links.ResolvedLinks) error {
-	if s.linkStore != nil {
+func (s *Service) invokeLinkHooks(ctx context.Context, req links.LinkRequest, resolved links.ResolvedLinks, allowStore, allowObserver bool) error {
+	if allowStore && s.linkStore != nil && len(resolved.Records) > 0 {
 		if err := s.linkStore.Save(ctx, resolved.Records); err != nil {
 			if s.linkPolicy.Store == links.FailureLenient {
 				s.logger.Warn("link store save failed; continuing",
@@ -795,12 +829,33 @@ func (s *Service) invokeLinkHooks(ctx context.Context, req links.LinkRequest, re
 			}
 		}
 	}
-	if s.linkObserver != nil {
-		s.linkObserver.OnLinksResolved(ctx, links.LinkResolution{
-			Request:  req,
-			Resolved: resolved,
-		})
+	if allowObserver && s.linkObserver != nil {
+		if err := s.notifyLinkObserver(ctx, req, resolved); err != nil {
+			if s.linkPolicy.Observer == links.FailureLenient {
+				s.logger.Warn("link observer failed; continuing",
+					"definition", req.Definition,
+					"channel", req.Channel,
+					"recipient", req.Recipient,
+					"error", err,
+				)
+			} else {
+				return err
+			}
+		}
 	}
+	return nil
+}
+
+func (s *Service) notifyLinkObserver(ctx context.Context, req links.LinkRequest, resolved links.ResolvedLinks) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("link observer panic: %v", recovered)
+		}
+	}()
+	s.linkObserver.OnLinksResolved(ctx, links.LinkResolution{
+		Request:  req,
+		Resolved: resolved,
+	})
 	return nil
 }
 
