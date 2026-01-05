@@ -18,7 +18,7 @@ All tables embed the `BaseModel` struct:
 | `notification_definitions` | Master list of notification types | `code` (unique), `name`, `severity`, `channels` (JSON array), `template_keys` (JSON array), `policy` (JSON) |
 | `notification_templates` | Channel + locale specific templates | `code`, `channel`, `locale`, `format`, `revision`, `subject`, `body`, `source` (JSON), `schema` (JSON), `metadata` (JSON) |
 | `notification_events` | Incoming events awaiting fan-out | `definition_code`, `tenant_id`, `actor_id`, `recipients` (JSON array), `context` (JSON), `scheduled_at`, `status` |
-| `notification_messages` | Expanded, rendered messages | `event_id` (FK), `channel`, `locale`, `subject`, `body`, `receiver`, `status`, `metadata` (JSON) |
+| `notification_messages` | Expanded, rendered messages | `event_id` (FK), `channel`, `locale`, `subject`, `body`, `action_url`, `manifest_url`, `url` (deprecated), `receiver`, `status`, `metadata` (JSON) |
 | `notification_delivery_attempts` | Adapter executions per message | `message_id` (FK), `adapter`, `status`, `error`, `payload` (JSON) |
 | `notification_preferences` | User/tenant overrides | `subject_type`, `subject_id`, `definition_code`, `channel`, `locale`, `enabled`, `quiet_hours` (JSON), `additional_rules` (JSON) |
 | `notification_subscription_groups` | Named cohorts | `code` (unique), `name`, `description`, `metadata` (JSON) |
