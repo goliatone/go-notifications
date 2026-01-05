@@ -87,8 +87,8 @@ func TestOnReadyNotifierSendsEmail(t *testing.T) {
 	if msgs.Total == 0 {
 		t.Fatalf("expected stored message")
 	}
-	if msgs.Items[0].Metadata["action_url"] == "" {
-		t.Fatalf("expected action_url metadata to be set")
+	if msgs.Items[0].ActionURL == "" {
+		t.Fatalf("expected action_url to be set")
 	}
 
 	sent := registry.List("email")
@@ -289,8 +289,8 @@ func TestOnReadyNotifierSendsInApp(t *testing.T) {
 		t.Fatalf("expected stored message")
 	}
 	meta := msgs.Items[0].Metadata
-	if meta["action_url"] != "https://cdn.example.com/accounts.xlsx" {
-		t.Fatalf("expected action_url override, got %v", meta["action_url"])
+	if msgs.Items[0].ActionURL != "https://cdn.example.com/accounts.xlsx" {
+		t.Fatalf("expected action_url override, got %v", msgs.Items[0].ActionURL)
 	}
 	if meta["icon"] != "inbox" || meta["badge"] != "ready" {
 		t.Fatalf("expected icon/badge overrides, got %v", meta)

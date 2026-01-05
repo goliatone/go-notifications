@@ -87,9 +87,7 @@ func TestDeliverFromMessage(t *testing.T) {
 		Subject:    "Subject",
 		Body:       "Body",
 		Locale:     "en",
-		Metadata: domain.JSONMap{
-			"action_url": "https://example.com",
-		},
+		ActionURL:  "https://example.com",
 	}
 	if err := svc.DeliverFromMessage(ctx, msg); err != nil {
 		t.Fatalf("deliver: %v", err)
