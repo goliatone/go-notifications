@@ -17,6 +17,7 @@ func defaultHelperFuncs() map[string]any {
 func secureLink(args ...any) string {
 	var data map[string]any
 	var key string
+	var keySet bool
 	for _, arg := range args {
 		switch v := arg.(type) {
 		case map[string]any:
@@ -24,16 +25,22 @@ func secureLink(args ...any) string {
 		case domain.JSONMap:
 			data = map[string]any(v)
 		case string:
-			if key == "" {
+			if !keySet {
 				key = v
+				keySet = true
 			}
 		}
 	}
+	if data == nil {
+		for _, arg := range args {
+			if value := stringFromTemplateValue(arg); value != "" {
+				return value
+			}
+		}
+		return ""
+	}
 	if key == "" {
 		key = links.ResolvedURLActionKey
-	}
-	if data == nil {
-		return ""
 	}
 	if value := stringFromTemplateValue(data[key]); value != "" {
 		return value
