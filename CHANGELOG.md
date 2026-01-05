@@ -1,5 +1,24 @@
 # Changelog
 
+# [0.10.0](https://github.com/goliatone/go-notifications/compare/v0.9.0...v0.10.0) - (2026-01-05)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Template helper ([d97151c](https://github.com/goliatone/go-notifications/commit/d97151c8198da31452137ab0e0fb058ad8043da7))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.10.0 ([5a61f64](https://github.com/goliatone/go-notifications/commit/5a61f64c28e39e46254d3ed8a46c517932e6f48f))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.9.0 ([cf8feea](https://github.com/goliatone/go-notifications/commit/cf8feeaeee1e30d262c49e212a4d11f2b6f581c5))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update docs ([1307a61](https://github.com/goliatone/go-notifications/commit/1307a61ab162797dcb705d3084ae5bf1ee964b84))  - (goliatone)
+- Update tests ([5087d77](https://github.com/goliatone/go-notifications/commit/5087d778a90a8720c72c7a7195c7b03add55c68c))  - (goliatone)
+
 # [0.9.0](https://github.com/goliatone/go-notifications/compare/v0.8.0...v0.9.0) - (2026-01-05)
 
 ## <!-- 1 -->🐛 Bug Fixes
