@@ -238,8 +238,10 @@ func (s *Service) DeliverFromMessage(ctx context.Context, msg *domain.Notificati
 		Body:      msg.Body,
 		Locale:    msg.Locale,
 	}
-	if action, ok := msg.Metadata["action_url"].(string); ok {
-		input.ActionURL = action
+	if msg.ActionURL != "" {
+		input.ActionURL = msg.ActionURL
+	} else if msg.URL != "" {
+		input.ActionURL = msg.URL
 	}
 	item, err := s.Create(ctx, input)
 	if err != nil {
