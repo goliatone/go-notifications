@@ -216,14 +216,17 @@ type NotificationMessage struct {
 	bun.BaseModel `bun:"table:notification_messages"`
 	RecordMeta
 
-	EventID  uuid.UUID `bun:",nullzero,notnull"`
-	Channel  string    `bun:",nullzero,notnull"`
-	Locale   string    `bun:",nullzero"`
-	Subject  string    `bun:",nullzero"`
-	Body     string    `bun:",nullzero"`
-	Receiver string    `bun:",nullzero,notnull"`
-	Status   string    `bun:",nullzero"`
-	Metadata JSONMap   `bun:"type:jsonb,nullzero"`
+	EventID     uuid.UUID `bun:",nullzero,notnull"`
+	Channel     string    `bun:",nullzero,notnull"`
+	Locale      string    `bun:",nullzero"`
+	Subject     string    `bun:",nullzero"`
+	Body        string    `bun:",nullzero"`
+	ActionURL   string    `bun:",nullzero" json:"action_url"`
+	ManifestURL string    `bun:",nullzero" json:"manifest_url"`
+	URL         string    `bun:",nullzero" json:"url"`
+	Receiver    string    `bun:",nullzero,notnull"`
+	Status      string    `bun:",nullzero"`
+	Metadata    JSONMap   `bun:"type:jsonb,nullzero"`
 }
 
 // DeliveryAttempt tracks adapter executions.
