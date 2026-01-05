@@ -112,8 +112,8 @@ func TestServiceSecureLinkHelper(t *testing.T) {
 		Code:    "links.helper",
 		Channel: "email",
 		Locale:  "en",
-		Subject: `{{ secure_link . }}`,
-		Body:    `{{ secure_link . "manifest_url" }}`,
+		Subject: `{{ secure_link(action_url, url) }}`,
+		Body:    `{{ secure_link(manifest_url) }}`,
 		Format:  "text/plain",
 	})
 
