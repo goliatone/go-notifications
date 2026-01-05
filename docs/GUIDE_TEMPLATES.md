@@ -79,6 +79,21 @@ type TemplateInput struct {
 
 Templates use [Pongo2](https://github.com/flosch/pongo2), a Django-style template engine for Go.
 
+### Helper Functions
+
+Built-in helpers include:
+
+- `t(locale, key, args...)` for translations
+- `secure_link(data, key)` for resolved links (`action_url` by default)
+
+Example:
+
+```text
+{{ t(locale, "welcome.subject", Name) }}
+{{ secure_link . }}
+{{ secure_link . "manifest_url" }}
+```
+
 ### Variable Interpolation
 
 ```django
