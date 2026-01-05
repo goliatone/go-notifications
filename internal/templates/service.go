@@ -155,6 +155,7 @@ func NewService(translator i18n.Translator, opts ...Option) (*Service, error) {
 		OnMissing:         settings.missingHandler,
 	}
 	service.helpers.Register(i18n.TemplateHelpers(translator, helperCfg))
+	service.helpers.Register(defaultHelperFuncs())
 
 	for _, funcs := range settings.helperFuncs {
 		service.helpers.Register(funcs)
