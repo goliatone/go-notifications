@@ -12,7 +12,9 @@ import (
 	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
+	"github.com/goliatone/go-notifications/pkg/links"
 	prefsvc "github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/retry"
 	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
@@ -43,19 +45,24 @@ type inboxDeliverer interface {
 }
 
 type Dependencies struct {
-	Definitions store.NotificationDefinitionRepository
-	Events      store.NotificationEventRepository
-	Messages    store.NotificationMessageRepository
-	Attempts    store.DeliveryAttemptRepository
-	Templates   *templates.Service
-	Adapters    *adapters.Registry
-	Attachments adapters.AttachmentResolver
-	Logger      logger.Logger
-	Config      config.DispatcherConfig
-	Preferences *prefsvc.Service
-	Inbox       inboxDeliverer
-	Secrets     secrets.Resolver
-	Activity    activity.Hooks
+	Definitions  store.NotificationDefinitionRepository
+	Events       store.NotificationEventRepository
+	Messages     store.NotificationMessageRepository
+	Attempts     store.DeliveryAttemptRepository
+	Templates    *templates.Service
+	Adapters     *adapters.Registry
+	Attachments  adapters.AttachmentResolver
+	LinkBuilder  links.LinkBuilder
+	LinkStore    links.LinkStore
+	LinkObserver links.LinkObserver
+	LinkPolicy   links.FailurePolicy
+	Logger       logger.Logger
+	Config       config.DispatcherConfig
+	Preferences  *prefsvc.Service
+	Inbox        inboxDeliverer
+	Secrets      secrets.Resolver
+	Backoff      retry.Backoff
+	Activity     activity.Hooks
 }
 
 var (
@@ -79,19 +86,24 @@ func NewWithDispatcher(deps Dependencies, dispatcherSvc *dispatcher.Service) (*M
 	if dispatcherSvc == nil {
 		var err error
 		dispatcherSvc, err = dispatcher.New(dispatcher.Dependencies{
-			Definitions: deps.Definitions,
-			Events:      deps.Events,
-			Messages:    deps.Messages,
-			Attempts:    deps.Attempts,
-			Templates:   deps.Templates,
-			Registry:    deps.Adapters,
-			Attachments: deps.Attachments,
-			Logger:      deps.Logger,
-			Config:      deps.Config,
-			Preferences: deps.Preferences,
-			Inbox:       deps.Inbox,
-			Secrets:     deps.Secrets,
-			Activity:    deps.Activity,
+			Definitions:  deps.Definitions,
+			Events:       deps.Events,
+			Messages:     deps.Messages,
+			Attempts:     deps.Attempts,
+			Templates:    deps.Templates,
+			Registry:     deps.Adapters,
+			Attachments:  deps.Attachments,
+			LinkBuilder:  deps.LinkBuilder,
+			LinkStore:    deps.LinkStore,
+			LinkObserver: deps.LinkObserver,
+			LinkPolicy:   deps.LinkPolicy,
+			Logger:       deps.Logger,
+			Config:       deps.Config,
+			Preferences:  deps.Preferences,
+			Inbox:        deps.Inbox,
+			Secrets:      deps.Secrets,
+			Backoff:      deps.Backoff,
+			Activity:     deps.Activity,
 		})
 		if err != nil {
 			return nil, err
