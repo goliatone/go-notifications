@@ -16,7 +16,9 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/cache"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/queue"
+	"github.com/goliatone/go-notifications/pkg/links"
 	"github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/retry"
 	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/storage"
 	"github.com/goliatone/go-notifications/pkg/templates"
@@ -24,18 +26,23 @@ import (
 
 // Options configure the DI container.
 type Options struct {
-	Config      config.Config
-	Storage     storage.Providers
-	Logger      logger.Logger
-	Cache       cache.Cache
-	Translator  i18n.Translator
-	Fallbacks   i18n.FallbackResolver
-	Queue       queue.Queue
-	Broadcaster broadcaster.Broadcaster
-	Adapters    []adapters.Messenger
-	Attachments adapters.AttachmentResolver
-	Secrets     secrets.Resolver
-	Activity    activity.Hooks
+	Config       config.Config
+	Storage      storage.Providers
+	Logger       logger.Logger
+	Cache        cache.Cache
+	Translator   i18n.Translator
+	Fallbacks    i18n.FallbackResolver
+	Queue        queue.Queue
+	Broadcaster  broadcaster.Broadcaster
+	Adapters     []adapters.Messenger
+	Attachments  adapters.AttachmentResolver
+	LinkBuilder  links.LinkBuilder
+	LinkStore    links.LinkStore
+	LinkObserver links.LinkObserver
+	LinkPolicy   links.FailurePolicy
+	Secrets      secrets.Resolver
+	Backoff      retry.Backoff
+	Activity     activity.Hooks
 }
 
 // Container wires repositories, services, dispatcher, commands, and manager.
@@ -137,19 +144,24 @@ func New(opts Options) (*Container, error) {
 	}
 
 	dispatcherSvc, err := dispatcher.New(dispatcher.Dependencies{
-		Definitions: providers.Definitions,
-		Events:      providers.Events,
-		Messages:    providers.Messages,
-		Attempts:    providers.DeliveryAttempts,
-		Templates:   tplSvc,
-		Registry:    adapterRegistry,
-		Attachments: opts.Attachments,
-		Logger:      lgr,
-		Config:      cfg.Dispatcher,
-		Preferences: prefSvc,
-		Inbox:       inboxSvc,
-		Secrets:     secretsResolver,
-		Activity:    hooks,
+		Definitions:  providers.Definitions,
+		Events:       providers.Events,
+		Messages:     providers.Messages,
+		Attempts:     providers.DeliveryAttempts,
+		Templates:    tplSvc,
+		Registry:     adapterRegistry,
+		Attachments:  opts.Attachments,
+		LinkBuilder:  opts.LinkBuilder,
+		LinkStore:    opts.LinkStore,
+		LinkObserver: opts.LinkObserver,
+		LinkPolicy:   opts.LinkPolicy,
+		Logger:       lgr,
+		Config:       cfg.Dispatcher,
+		Preferences:  prefSvc,
+		Inbox:        inboxSvc,
+		Secrets:      secretsResolver,
+		Backoff:      opts.Backoff,
+		Activity:     hooks,
 	})
 	if err != nil {
 		return nil, err
