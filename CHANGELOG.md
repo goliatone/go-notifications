@@ -1,5 +1,34 @@
 # Changelog
 
+# [0.9.0](https://github.com/goliatone/go-notifications/compare/v0.8.0...v0.9.0) - (2026-01-05)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Link metadata imp ([8244788](https://github.com/goliatone/go-notifications/commit/824478865f128da12b292f09802397caa0a27909))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.9.0 ([2f672db](https://github.com/goliatone/go-notifications/commit/2f672dbf6acc72a37ca30d5f82576dea1afbce77))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Template helper for notifications ([4748677](https://github.com/goliatone/go-notifications/commit/47486774105dd63f2f9b2a93d9ea0cf74dfbd764))  - (goliatone)
+- Link manager ([59e41af](https://github.com/goliatone/go-notifications/commit/59e41af961f0f12c6319ef65b5e0dfd44a9e9aa3))  - (goliatone)
+- Action URL for inbox service ([459c0f0](https://github.com/goliatone/go-notifications/commit/459c0f0e9f7f056101c67bac6209926dc1b831da))  - (goliatone)
+- Retry implementation ([530f824](https://github.com/goliatone/go-notifications/commit/530f824bc6dde2ab83796cf0ad8b71586f41b603))  - (goliatone)
+- Links handler ([3ebd52f](https://github.com/goliatone/go-notifications/commit/3ebd52fa6b2cc599303d9151c6f1c18ac80ace00))  - (goliatone)
+- Securelink adapter ([66ffcce](https://github.com/goliatone/go-notifications/commit/66ffcceaf25e37c890df1215a64890e633e386d3))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.8.0 ([40a4436](https://github.com/goliatone/go-notifications/commit/40a443681871a724d70581896cf918d972b97b8e))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update docs ([d4465ed](https://github.com/goliatone/go-notifications/commit/d4465edff53d89096a5b727a09386d9bff7333b0))  - (goliatone)
+- Update tests ([550d65b](https://github.com/goliatone/go-notifications/commit/550d65b188023d67c85bf479cc14e724a8a567bc))  - (goliatone)
+- Update guides ([cfe4ed6](https://github.com/goliatone/go-notifications/commit/cfe4ed6e625d75052d683362f1d8dd3444d5079c))  - (goliatone)
+
 # [0.8.0](https://github.com/goliatone/go-notifications/compare/v0.7.0...v0.8.0) - (2026-01-03)
 
 ## <!-- 1 -->🐛 Bug Fixes
