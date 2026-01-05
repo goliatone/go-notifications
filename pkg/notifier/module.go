@@ -13,7 +13,9 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/cache"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/queue"
+	"github.com/goliatone/go-notifications/pkg/links"
 	"github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/retry"
 	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/storage"
 	"github.com/goliatone/go-notifications/pkg/templates"
@@ -21,17 +23,22 @@ import (
 
 // ModuleOptions configure the notifier module facade.
 type ModuleOptions struct {
-	Config      config.Config
-	Storage     storage.Providers
-	Logger      logger.Logger
-	Cache       cache.Cache
-	Translator  i18n.Translator
-	Fallbacks   i18n.FallbackResolver
-	Queue       queue.Queue
-	Broadcaster broadcaster.Broadcaster
-	Adapters    []adapters.Messenger
-	Secrets     secrets.Resolver
-	Activity    activity.Hooks
+	Config       config.Config
+	Storage      storage.Providers
+	Logger       logger.Logger
+	Cache        cache.Cache
+	Translator   i18n.Translator
+	Fallbacks    i18n.FallbackResolver
+	Queue        queue.Queue
+	Broadcaster  broadcaster.Broadcaster
+	Adapters     []adapters.Messenger
+	LinkBuilder  links.LinkBuilder
+	LinkStore    links.LinkStore
+	LinkObserver links.LinkObserver
+	LinkPolicy   links.FailurePolicy
+	Secrets      secrets.Resolver
+	Backoff      retry.Backoff
+	Activity     activity.Hooks
 }
 
 // Module bundles the container and exposes high-level accessors.
@@ -43,17 +50,22 @@ type Module struct {
 // NewModule assembles repositories, services, dispatcher, manager, and commands.
 func NewModule(opts ModuleOptions) (*Module, error) {
 	container, err := di.New(di.Options{
-		Config:      opts.Config,
-		Storage:     opts.Storage,
-		Logger:      opts.Logger,
-		Cache:       opts.Cache,
-		Translator:  opts.Translator,
-		Fallbacks:   opts.Fallbacks,
-		Queue:       opts.Queue,
-		Broadcaster: opts.Broadcaster,
-		Adapters:    opts.Adapters,
-		Secrets:     opts.Secrets,
-		Activity:    opts.Activity,
+		Config:       opts.Config,
+		Storage:      opts.Storage,
+		Logger:       opts.Logger,
+		Cache:        opts.Cache,
+		Translator:   opts.Translator,
+		Fallbacks:    opts.Fallbacks,
+		Queue:        opts.Queue,
+		Broadcaster:  opts.Broadcaster,
+		Adapters:     opts.Adapters,
+		LinkBuilder:  opts.LinkBuilder,
+		LinkStore:    opts.LinkStore,
+		LinkObserver: opts.LinkObserver,
+		LinkPolicy:   opts.LinkPolicy,
+		Secrets:      opts.Secrets,
+		Backoff:      opts.Backoff,
+		Activity:     opts.Activity,
 	})
 	if err != nil {
 		return nil, err
