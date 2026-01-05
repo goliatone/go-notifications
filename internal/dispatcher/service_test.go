@@ -322,6 +322,69 @@ func TestDispatcherLinkHooksErrorHandling(t *testing.T) {
 		}
 	})
 
+	t.Run("lenient builder error triggers observer only", func(t *testing.T) {
+		ctx := context.Background()
+		builder := &captureLinkBuilder{
+			buildFn: func(req links.LinkRequest) (links.ResolvedLinks, error) {
+				return links.ResolvedLinks{}, errors.New("builder failed")
+			},
+		}
+		adapter := &testAdapter{name: "test", channels: []string{"email"}}
+		storeSpy := &captureStore{}
+		observer := &captureObserver{}
+		svc, msgRepo, tplSvc := newTestDispatcher(t, builder, storeSpy, observer, links.FailurePolicy{
+			Builder: links.FailureLenient,
+		}, adapter)
+		storeSpy.messageRepo = msgRepo
+
+		seedTemplate(t, tplSvc, "welcome-email", "email")
+
+		def := &domain.NotificationDefinition{
+			Code:         "welcome",
+			Channels:     domain.StringList{"email"},
+			TemplateKeys: domain.StringList{"email:welcome-email"},
+		}
+		event := &domain.NotificationEvent{
+			RecordMeta:     domain.RecordMeta{ID: uuid.New()},
+			DefinitionCode: def.Code,
+			Recipients:     domain.StringList{testRecipient},
+			Context: domain.JSONMap{
+				"action_url": "fallback-url",
+			},
+		}
+
+		job := deliveryJob{
+			event:        event,
+			channel:      "email",
+			templateCode: "welcome-email",
+			recipient:    testRecipient,
+			locale:       "en",
+		}
+		if err := svc.processDelivery(ctx, event, def, job); err != nil {
+			t.Fatalf("expected delivery to continue, got %v", err)
+		}
+
+		list, err := msgRepo.List(ctx, store.ListOptions{})
+		if err != nil {
+			t.Fatalf("list messages: %v", err)
+		}
+		if list.Total != 1 {
+			t.Fatalf("expected 1 message, got %d", list.Total)
+		}
+		if adapter.Count() != 1 {
+			t.Fatalf("expected adapter send, got %d", adapter.Count())
+		}
+		if storeSpy.calls != 0 {
+			t.Fatalf("expected no store calls, got %d", storeSpy.calls)
+		}
+		observer.mu.Lock()
+		observerCalls := len(observer.calls)
+		observer.mu.Unlock()
+		if observerCalls != 1 {
+			t.Fatalf("expected observer call, got %d", observerCalls)
+		}
+	})
+
 	t.Run("strict store error stops delivery", func(t *testing.T) {
 		ctx := context.Background()
 		builder := &captureLinkBuilder{

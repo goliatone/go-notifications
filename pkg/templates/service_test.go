@@ -103,6 +103,55 @@ func TestServiceSchemaValidation(t *testing.T) {
 	}
 }
 
+func TestServiceSecureLinkHelper(t *testing.T) {
+	ctx := context.Background()
+	repo := memstore.NewTemplateRepository()
+	svc := newTestService(t, repo, &cache.Nop{}, i18n.NewStaticFallbackResolver())
+
+	seedTemplate(t, repo, domain.NotificationTemplate{
+		Code:    "links.helper",
+		Channel: "email",
+		Locale:  "en",
+		Subject: `{{ secure_link . }}`,
+		Body:    `{{ secure_link . "manifest_url" }}`,
+		Format:  "text/plain",
+	})
+
+	result, err := svc.Render(ctx, RenderRequest{
+		Code:    "links.helper",
+		Channel: "email",
+		Locale:  "en",
+		Data: map[string]any{
+			"action_url":   "https://example.com/action",
+			"manifest_url": "https://example.com/manifest",
+		},
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if result.Subject != "https://example.com/action" {
+		t.Fatalf("expected action_url subject, got %s", result.Subject)
+	}
+	if result.Body != "https://example.com/manifest" {
+		t.Fatalf("expected manifest_url body, got %s", result.Body)
+	}
+
+	result, err = svc.Render(ctx, RenderRequest{
+		Code:    "links.helper",
+		Channel: "email",
+		Locale:  "en",
+		Data: map[string]any{
+			"url": "https://example.com/fallback",
+		},
+	})
+	if err != nil {
+		t.Fatalf("render fallback: %v", err)
+	}
+	if result.Subject != "https://example.com/fallback" {
+		t.Fatalf("expected url fallback, got %s", result.Subject)
+	}
+}
+
 func TestServiceSupportsGoCMSPayloads(t *testing.T) {
 	ctx := context.Background()
 	repo := memstore.NewTemplateRepository()
