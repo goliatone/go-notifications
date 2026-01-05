@@ -90,8 +90,8 @@ Example:
 
 ```text
 {{ t(locale, "welcome.subject", Name) }}
-{{ secure_link . }}
-{{ secure_link . "manifest_url" }}
+{{ secure_link(action_url, url) }}
+{{ secure_link(manifest_url) }}
 ```
 
 ### Variable Interpolation
