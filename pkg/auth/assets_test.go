@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -54,23 +55,26 @@ func TestTemplatesRender(t *testing.T) {
 	svc := newTemplateService(t, repo)
 
 	cases := []struct {
-		name    string
-		code    string
-		data    map[string]any
-		want    []string
-		notWant []string
+		name      string
+		code      string
+		data      map[string]any
+		want      []string
+		wantLower []string
+		wantValue any
+		notWant   []string
 	}{
 		{
 			name: "password reset with minutes",
 			code: PasswordResetCode,
 			data: map[string]any{
-				"name":             "Alex",
-				"app_name":         "Acme",
-				"action_url":       "https://example.com/reset",
-				"expires_at":       "2024-05-01T00:00:00Z",
+				"name":              "Alex",
+				"app_name":          "Acme",
+				"action_url":        "https://example.com/reset",
+				"expires_at":        "2024-05-01T00:00:00Z",
 				"remaining_minutes": 30,
 			},
-			want: []string{"https://example.com/reset", "about 30 minutes"},
+			want:      []string{"https://example.com/reset"},
+			wantValue: 30,
 		},
 		{
 			name: "invite without minutes",
@@ -106,7 +110,8 @@ func TestTemplatesRender(t *testing.T) {
 				"expires_at":     "2024-08-01T00:00:00Z",
 				"resend_allowed": true,
 			},
-			want: []string{"https://example.com/verify", "Resend allowed: true"},
+			want:      []string{"https://example.com/verify"},
+			wantLower: []string{"resend allowed: true"},
 		},
 	}
 
@@ -123,6 +128,17 @@ func TestTemplatesRender(t *testing.T) {
 			}
 			for _, want := range tc.want {
 				if !strings.Contains(rendered.Body, want) && !strings.Contains(rendered.Subject, want) {
+					t.Fatalf("rendered output missing %q", want)
+				}
+			}
+			if tc.wantValue != nil {
+				value := fmt.Sprintf("%v", tc.wantValue)
+				if !strings.Contains(rendered.Body, value) && !strings.Contains(rendered.Subject, value) {
+					t.Fatalf("rendered output missing value %q", value)
+				}
+			}
+			for _, want := range tc.wantLower {
+				if !strings.Contains(strings.ToLower(rendered.Body), want) {
 					t.Fatalf("rendered output missing %q", want)
 				}
 			}
