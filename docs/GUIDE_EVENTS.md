@@ -140,10 +140,15 @@ By default, events are processed synchronously:
 
 ```go
 // Blocks until delivery completes or fails
+expiresAt := time.Now().Add(30 * time.Minute).Format(time.RFC3339)
 err := manager.Send(ctx, notifier.Event{
     DefinitionCode: "password-reset",
     Recipients:     []string{"user@example.com"},
-    Context:        map[string]any{"reset_link": link},
+    Context: map[string]any{
+        "action_url":        link,
+        "expires_at":        expiresAt,
+        "remaining_minutes": 30,
+    },
 })
 if err != nil {
     // Handle delivery failure
@@ -179,6 +184,47 @@ func (q *MyQueue) Enqueue(ctx context.Context, job queue.Job) error {
     // Worker polls and calls ProcessScheduled when RunAt is reached
     return nil
 }
+```
+
+---
+
+## Auth + Onboarding Payload Contracts
+
+Use consistent payload keys for auth/onboarding notifications. All timestamps are RFC3339 strings.
+
+| Definition code | Required context keys | Optional context keys |
+| --- | --- | --- |
+| password-reset | action_url, expires_at | remaining_minutes |
+| invite | action_url, expires_at | remaining_minutes |
+| account-lockout | reason, lockout_until, unlock_url | |
+| email-verification | verify_url, expires_at, resend_allowed | |
+
+`action_url` should point to the primary CTA link. For lockout and verification notices, you can mirror the link into `unlock_url` or `verify_url`.
+
+Example payloads:
+
+```go
+err := manager.Send(ctx, notifier.Event{
+    DefinitionCode: "account-lockout",
+    Recipients:     []string{"user@example.com"},
+    Context: map[string]any{
+        "reason":        "Too many failed login attempts",
+        "lockout_until": lockoutUntil.Format(time.RFC3339),
+        "unlock_url":    unlockURL,
+    },
+})
+```
+
+```go
+err := manager.Send(ctx, notifier.Event{
+    DefinitionCode: "email-verification",
+    Recipients:     []string{"user@example.com"},
+    Context: map[string]any{
+        "verify_url":     verifyURL,
+        "expires_at":     expiresAt,
+        "resend_allowed": true,
+    },
+})
 ```
 
 ---

@@ -583,7 +583,7 @@ func main() {
             Code:    "password-reset",
             Channel: "console",
             Subject: "Password Reset Request",
-            Body:    "Click here to reset: {{ reset_link }}",
+            Body:    "Reset your password here (expires at {{ expires_at }}, about {{ remaining_minutes }} minutes from now): {{ action_url }}",
         },
         {
             Code:    "order-shipped",

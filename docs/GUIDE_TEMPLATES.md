@@ -525,20 +525,96 @@ templates.TemplateInput{
     Locale:  "en",
     Subject: "Reset Your Password",
     Body: `
-Hi {{ Name }},
+Hi {{ name }},
 
 We received a request to reset your password.
 
-Click the link below to set a new password (expires in {{ ExpiresIn }}):
-{{ ResetURL }}
+Click the link below to set a new password (expires at {{ expires_at }}, about {{ remaining_minutes }} minutes from now):
+{{ action_url }}
 
 If you didn't request this, you can ignore this email.
 
-- The {{ AppName }} Team
+- The {{ app_name }} Team
     `,
     Format: "text/plain",
     Schema: domain.TemplateSchema{
-        Required: []string{"Name", "ResetURL", "ExpiresIn", "AppName"},
+        Required: []string{"name", "action_url", "expires_at", "remaining_minutes", "app_name"},
+    },
+}
+```
+
+### Invite
+
+```go
+templates.TemplateInput{
+    Code:    "invite",
+    Channel: "email",
+    Locale:  "en",
+    Subject: "You're invited",
+    Body: `
+Hi {{ name }},
+
+You've been invited to join {{ app_name }}.
+
+Accept your invite here (expires at {{ expires_at }}, about {{ remaining_minutes }} minutes from now):
+{{ action_url }}
+
+- The {{ app_name }} Team
+    `,
+    Format: "text/plain",
+    Schema: domain.TemplateSchema{
+        Required: []string{"name", "app_name", "action_url", "expires_at", "remaining_minutes"},
+    },
+}
+```
+
+### Account Lockout
+
+```go
+templates.TemplateInput{
+    Code:    "account-lockout",
+    Channel: "email",
+    Locale:  "en",
+    Subject: "Account Locked",
+    Body: `
+Hi {{ name }},
+
+Your account was locked due to {{ reason }} until {{ lockout_until }}.
+
+Unlock your account here:
+{{ unlock_url }}
+
+- The {{ app_name }} Team
+    `,
+    Format: "text/plain",
+    Schema: domain.TemplateSchema{
+        Required: []string{"name", "reason", "lockout_until", "unlock_url", "app_name"},
+    },
+}
+```
+
+### Email Verification
+
+```go
+templates.TemplateInput{
+    Code:    "email-verification",
+    Channel: "email",
+    Locale:  "en",
+    Subject: "Verify Your Email",
+    Body: `
+Hi {{ name }},
+
+Please verify your email address:
+{{ verify_url }}
+
+This link expires at {{ expires_at }}.
+Resend allowed: {{ resend_allowed }}
+
+- The {{ app_name }} Team
+    `,
+    Format: "text/plain",
+    Schema: domain.TemplateSchema{
+        Required: []string{"name", "verify_url", "expires_at", "resend_allowed", "app_name"},
     },
 }
 ```
