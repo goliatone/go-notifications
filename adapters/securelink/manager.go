@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	urlkit "github.com/goliatone/go-urlkit/securelink"
 	"github.com/goliatone/go-notifications/pkg/links"
+	urlkit "github.com/goliatone/go-urlkit/securelink"
 )
 
 // Manager adapts go-urlkit securelink managers to go-notifications interfaces.
