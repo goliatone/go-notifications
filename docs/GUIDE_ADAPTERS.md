@@ -150,10 +150,13 @@ Secure links are generated before adapters send messages. Inject a `LinkBuilder`
 import (
 	linksecure "github.com/goliatone/go-notifications/adapters/securelink"
 	"github.com/goliatone/go-notifications/pkg/notifier"
-	"github.com/goliatone/go-urlkit/securelink"
+	urlsecure "github.com/goliatone/go-urlkit/securelink"
 )
 
-manager := securelink.NewManager(cfg)
+cfg := urlsecure.Config{
+	// SigningKey, BaseURL, Routes, QueryKey...
+}
+manager, _ := linksecure.NewManager(cfg)
 builder := linksecure.NewBuilder(manager)
 store := linksecure.NewMemoryStore()
 
