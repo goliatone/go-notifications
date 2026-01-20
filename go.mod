@@ -6,15 +6,15 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.5
 	github.com/aws/aws-sdk-go-v2/service/ses v1.34.17
-	github.com/goliatone/go-command v0.10.0
-	github.com/goliatone/go-config v0.7.0
+	github.com/goliatone/go-command v0.13.0
+	github.com/goliatone/go-config v0.8.0
 	github.com/goliatone/go-i18n v0.2.0
 	github.com/goliatone/go-masker v0.1.0
-	github.com/goliatone/go-options v0.5.0
-	github.com/goliatone/go-persistence-bun v0.7.0
-	github.com/goliatone/go-repository-bun v0.10.0
+	github.com/goliatone/go-options v0.7.0
+	github.com/goliatone/go-persistence-bun v0.10.0
+	github.com/goliatone/go-repository-bun v0.12.0
 	github.com/goliatone/go-template v0.3.1
-	github.com/goliatone/go-users v0.3.0
+	github.com/goliatone/go-users v0.11.0
 	github.com/google/uuid v1.6.0
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056
 	github.com/uptrace/bun v1.2.16
@@ -53,7 +53,7 @@ require (
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/goliatone/go-errors v0.9.0 // indirect
+	github.com/goliatone/go-errors v0.10.0 // indirect
 	github.com/goliatone/hashid v0.1.1 // indirect
 	github.com/google/cel-go v0.26.1 // indirect
 	github.com/google/pprof v0.0.0-20251208000136-3d256cb9ff16 // indirect
