@@ -81,6 +81,8 @@ github.com/go-sourcemap/sourcemap v2.1.4+incompatible h1:a+iTbH5auLKxaNwQFg0B+TC
 github.com/go-sourcemap/sourcemap v2.1.4+incompatible/go.mod h1:F8jJfvm2KbVjc5NqelyYJmf/v5J0dwNLS2mL4sNA1Jg=
 github.com/go-viper/mapstructure/v2 v2.4.0 h1:EBsztssimR/CONLSZZ04E8qAkxNYq4Qp9LvH92wZUgs=
 github.com/go-viper/mapstructure/v2 v2.4.0/go.mod h1:oJDH3BJKyqBA2TXFhDsKDGDTlndYOZ6rGS0BRZIxGhM=
+github.com/golang-jwt/jwt/v5 v5.3.0 h1:pv4AsKCKKZuqlgs5sUmn4x8UlGa0kEVt/puTpKx9vvo=
+github.com/golang-jwt/jwt/v5 v5.3.0/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/goliatone/go-command v0.13.0 h1:AQ8LHwkkt7BCDcAFdbkY/XAjnwGqBFPNfXSsWUfhh9g=
 github.com/goliatone/go-command v0.13.0/go.mod h1:E9/Yki61QfTWSdA4Mxh6XV+4ox84in0VSQz+ycVFr2E=
 github.com/goliatone/go-config v0.8.0 h1:LSrN3TFNNrFyR+7ZAMRrJratoY6+aIfYVAMsMc2FisY=
@@ -99,6 +101,8 @@ github.com/goliatone/go-repository-bun v0.12.0 h1:N5obOl75cPD4NVHblL+pizabSBUiGM
 github.com/goliatone/go-repository-bun v0.12.0/go.mod h1:ZG2ZKOpbHhgi81rUtVgdtNCCApu49ihPhHpce4qjaOI=
 github.com/goliatone/go-template v0.3.1 h1:x714biuWqtCyrtTmIrt2YjXWPYBOIS/Y2DPdWXtrAr8=
 github.com/goliatone/go-template v0.3.1/go.mod h1:2mFRGMnfvAn3r4ClMmlu4wBVkSKXgtXhVdmmmhhgSr4=
+github.com/goliatone/go-urlkit v0.3.0 h1:U0lG3ksfwGXgFwyTEPXbhQ8XmQD2HwTx6DW8bqivGpw=
+github.com/goliatone/go-urlkit v0.3.0/go.mod h1:QVCju3Z9io9mX+t2D7RCp+ja9PYrLNJoucWc124siFQ=
 github.com/goliatone/go-users v0.11.0 h1:E7BqZiXXG8swf5FT7nMZ7vWYB/e7KH1lOum8J/5/O8Q=
 github.com/goliatone/go-users v0.11.0/go.mod h1:+nndpqJAaMXi/clhnwhRG+dsb2JlLvDvhmTNfLTU44M=
 github.com/goliatone/hashid v0.1.1 h1:VfZZf7s0uM+JZ3ZBkqaEM1mL/CJfiTmFOzZ1QuXY3EM=

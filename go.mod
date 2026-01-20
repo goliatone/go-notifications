@@ -14,6 +14,7 @@ require (
 	github.com/goliatone/go-persistence-bun v0.10.0
 	github.com/goliatone/go-repository-bun v0.12.0
 	github.com/goliatone/go-template v0.3.1
+	github.com/goliatone/go-urlkit v0.3.0
 	github.com/goliatone/go-users v0.11.0
 	github.com/google/uuid v1.6.0
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056
@@ -53,6 +54,7 @@ require (
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/goliatone/go-errors v0.10.0 // indirect
 	github.com/goliatone/hashid v0.1.1 // indirect
 	github.com/google/cel-go v0.26.1 // indirect
