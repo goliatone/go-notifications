@@ -39,7 +39,7 @@ func Templates() []domain.NotificationTemplate {
 			Format:      "text/plain",
 			Schema:      passwordResetSchema,
 			Metadata: domain.JSONMap{
-				"category": "auth",
+				"category":  "auth",
 				"cta_label": "Reset password",
 			},
 		},
@@ -53,7 +53,7 @@ func Templates() []domain.NotificationTemplate {
 			Format:      "text/plain",
 			Schema:      inviteSchema,
 			Metadata: domain.JSONMap{
-				"category": "onboarding",
+				"category":  "onboarding",
 				"cta_label": "Accept invite",
 			},
 		},
@@ -67,7 +67,7 @@ func Templates() []domain.NotificationTemplate {
 			Format:      "text/plain",
 			Schema:      accountLockoutSchema,
 			Metadata: domain.JSONMap{
-				"category": "auth",
+				"category":  "auth",
 				"cta_label": "Unlock account",
 			},
 		},
@@ -81,7 +81,7 @@ func Templates() []domain.NotificationTemplate {
 			Format:      "text/plain",
 			Schema:      emailVerificationSchema,
 			Metadata: domain.JSONMap{
-				"category": "auth",
+				"category":  "auth",
 				"cta_label": "Verify email",
 			},
 		},
