@@ -1,5 +1,31 @@
 # Changelog
 
+# [0.11.0](https://github.com/goliatone/go-notifications/compare/v0.10.0...v0.11.0) - (2026-01-20)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Linter error ([47ea94c](https://github.com/goliatone/go-notifications/commit/47ea94c8d06fc9346d0864b866ea322747c655df))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.11.0 ([9e70dd9](https://github.com/goliatone/go-notifications/commit/9e70dd9fcf2452a6b9278e49673d875c0cae7ad4))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Auth handler ([f893d7b](https://github.com/goliatone/go-notifications/commit/f893d7b0b800fc0f430c4aa15964138c7487308f))  - (goliatone)
+- Secure link adapter ([8208206](https://github.com/goliatone/go-notifications/commit/82082066459c96048b848a990760034704dffe3a))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.10.0 ([93cd580](https://github.com/goliatone/go-notifications/commit/93cd580ca6fb5545056da730679001c661ac5c1b))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([8c31ddb](https://github.com/goliatone/go-notifications/commit/8c31ddb4b95abca038a34296a841aae8dfb5caf0))  - (goliatone)
+- Update format ([0a74110](https://github.com/goliatone/go-notifications/commit/0a7411012468d3bc6dba604beea6f4dfc3436a33))  - (goliatone)
+- Update guides ([57c5e9d](https://github.com/goliatone/go-notifications/commit/57c5e9d202482ca0a3e4f4a51149a7ee61b3d56a))  - (goliatone)
+- Update tasks ([c9b8ee2](https://github.com/goliatone/go-notifications/commit/c9b8ee2452e633f23aa9a2ae6847f1288a5df3d9))  - (goliatone)
+
 # [0.10.0](https://github.com/goliatone/go-notifications/compare/v0.9.0...v0.10.0) - (2026-01-05)
 
 ## <!-- 1 -->🐛 Bug Fixes
