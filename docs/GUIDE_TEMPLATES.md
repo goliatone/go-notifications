@@ -529,7 +529,7 @@ Hi {{ name }},
 
 We received a request to reset your password.
 
-Click the link below to set a new password (expires at {{ expires_at }}, about {{ remaining_minutes }} minutes from now):
+Click the link below to set a new password{% if remaining_minutes %} (expires at {{ expires_at }}, about {{ remaining_minutes }} minutes from now){% else %} (expires at {{ expires_at }}){% endif %}:
 {{ action_url }}
 
 If you didn't request this, you can ignore this email.
@@ -538,7 +538,8 @@ If you didn't request this, you can ignore this email.
     `,
     Format: "text/plain",
     Schema: domain.TemplateSchema{
-        Required: []string{"name", "action_url", "expires_at", "remaining_minutes", "app_name"},
+        Required: []string{"name", "action_url", "expires_at", "app_name"},
+        Optional: []string{"remaining_minutes"},
     },
 }
 ```
@@ -556,14 +557,15 @@ Hi {{ name }},
 
 You've been invited to join {{ app_name }}.
 
-Accept your invite here (expires at {{ expires_at }}, about {{ remaining_minutes }} minutes from now):
+Accept your invite here{% if remaining_minutes %} (expires at {{ expires_at }}, about {{ remaining_minutes }} minutes from now){% else %} (expires at {{ expires_at }}){% endif %}:
 {{ action_url }}
 
 - The {{ app_name }} Team
     `,
     Format: "text/plain",
     Schema: domain.TemplateSchema{
-        Required: []string{"name", "app_name", "action_url", "expires_at", "remaining_minutes"},
+        Required: []string{"name", "app_name", "action_url", "expires_at"},
+        Optional: []string{"remaining_minutes"},
     },
 }
 ```
