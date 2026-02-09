@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+## <!-- 16 -->➕ Add
+
+- Securelink interop test coverage for adapter wrapping of `go-urlkit/securelink.Manager` and adapter-backed link builder runtime paths.  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Add `WrapManager` integration examples to show direct use of existing `go-urlkit` managers with notifications link builders.  - (goliatone)
+
 # [0.11.0](https://github.com/goliatone/go-notifications/compare/v0.10.0...v0.11.0) - (2026-01-20)
 
 ## <!-- 1 -->🐛 Bug Fixes
@@ -301,5 +311,4 @@
 - Update examples ([c3553b2](https://github.com/goliatone/go-notifications/commit/c3553b244dd41eb1513b9d3e65bd64e55fd66c7d))  - (goliatone)
 - Clean up ([0571c72](https://github.com/goliatone/go-notifications/commit/0571c72dcc0cee1b884f86f41aebeeffca16b0c3))  - (goliatone)
 - Initial commit ([9a8eb26](https://github.com/goliatone/go-notifications/commit/9a8eb26019ceb07b26fda728351d193e984cd27c))  - (goliatone)
-
 
