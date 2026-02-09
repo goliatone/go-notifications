@@ -11,7 +11,8 @@
 //	cfg := urlsecure.Config{
 //		// SigningKey, BaseURL, Routes, QueryKey...
 //	}
-//	manager, _ := linksecure.NewManager(cfg)
+//	rawManager, _ := urlsecure.NewManager(cfg)
+//	manager := linksecure.WrapManager(rawManager)
 //	builder := linksecure.NewBuilder(manager,
 //		linksecure.WithActionRoute("reset"),
 //		linksecure.WithManifestRoute("export"),
@@ -22,4 +23,8 @@
 //		LinkBuilder: builder,
 //		LinkStore:   store,
 //	})
+//
+// If you only have config and want the adapter to build the manager:
+//
+//	manager, _ := linksecure.NewManager(cfg)
 package securelink
