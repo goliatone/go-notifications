@@ -156,7 +156,8 @@ import (
 cfg := urlsecure.Config{
 	// SigningKey, BaseURL, Routes, QueryKey...
 }
-manager, _ := linksecure.NewManager(cfg)
+rawManager, _ := urlsecure.NewManager(cfg)
+manager := linksecure.WrapManager(rawManager) // Use existing go-urlkit manager directly.
 builder := linksecure.NewBuilder(manager)
 store := linksecure.NewMemoryStore()
 
@@ -166,6 +167,8 @@ module, _ := notifier.NewModule(notifier.ModuleOptions{
 })
 _ = module
 ```
+
+If you only have config and want the notifications adapter to construct the manager for you, use `linksecure.NewManager(cfg)` instead.
 
 Templates can access resolved links directly (`action_url`) or via `secure_link(...)` (registered by default by the templates service).
 
