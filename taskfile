@@ -127,6 +127,16 @@ function lint {
     golangci-lint run --timeout="${timeout}" ./...
 }
 
+##
+## -----
+##
+## lint:errcheck
+##
+## Run errcheck to ensure critical errors are not silently ignored.
+function lint:errcheck {
+    go run github.com/kisielk/errcheck@v1.9.0 ./...
+}
+
 
 function go:mod:update {
     local modules
@@ -256,7 +266,7 @@ function test:onready {
 ##
 ## Run linters, tests, and docs checks
 function ci {
-    lint && test && samples && ci:onready
+    lint && lint:errcheck && test && samples && ci:onready
 }
 
 ##
