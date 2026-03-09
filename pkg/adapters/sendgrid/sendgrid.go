@@ -1,8 +1,8 @@
 package sendgrid
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,6 +31,7 @@ type Config struct {
 	From       string
 	ReplyTo    string
 	TimeoutSec int
+	Transport  adapters.HTTPTransportConfig
 }
 
 func WithName(name string) Option {
@@ -103,7 +104,7 @@ func New(l logger.Logger, opts ...Option) *Adapter {
 		}
 	}
 	if adapter.client == nil {
-		adapter.client = &http.Client{Timeout: time.Duration(adapter.cfg.TimeoutSec) * time.Second}
+		adapter.client = adapters.NewHTTPClient(time.Duration(adapter.cfg.TimeoutSec)*time.Second, adapter.cfg.Transport)
 	}
 	return adapter
 }
@@ -181,8 +182,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		personalization["bcc"] = bccList
 	}
 
-	bodyBytes, _ := json.Marshal(requestBody)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.BaseURL+"/mail/send", strings.NewReader(string(bodyBytes)))
+	bodyBytes, err := adapters.EncodeJSONPayload("sendgrid", requestBody)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.BaseURL+"/mail/send", bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("sendgrid: build request: %w", err)
 	}
@@ -196,10 +200,10 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("sendgrid: unexpected status %d", resp.StatusCode)
+		return adapters.HTTPStatusError("sendgrid", resp.StatusCode, respBody)
 	}
 
 	a.base.LogSuccess(a.name, msg)
