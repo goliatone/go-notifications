@@ -1,9 +1,8 @@
 package whatsapp
 
 import (
+	"bytes"
 	"context"
-	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +30,7 @@ type Config struct {
 	PhoneNumberID string
 	APIBase       string
 	Timeout       time.Duration
-	SkipTLSVerify bool
+	Transport     adapters.HTTPTransportConfig
 	PlainOnly     bool // force text/plain when HTML is provided
 }
 
@@ -77,12 +76,7 @@ func New(l logger.Logger, opts ...Option) *Adapter {
 		}
 	}
 	if adapter.client == nil {
-		adapter.client = &http.Client{
-			Timeout: adapter.cfg.Timeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: adapter.cfg.SkipTLSVerify},
-			},
-		}
+		adapter.client = adapters.NewHTTPClient(adapter.cfg.Timeout, adapter.cfg.Transport)
 	}
 	return adapter
 }
@@ -144,9 +138,12 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		}
 	}
 
-	bodyBytes, _ := json.Marshal(payload)
+	bodyBytes, err := adapters.EncodeJSONPayload("whatsapp", payload)
+	if err != nil {
+		return err
+	}
 	endpoint := fmt.Sprintf("%s/%s/messages", strings.TrimRight(a.cfg.APIBase, "/"), strings.TrimSpace(a.cfg.PhoneNumberID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(bodyBytes)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("whatsapp: build request: %w", err)
 	}
@@ -160,9 +157,9 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("whatsapp: unexpected status %d", resp.StatusCode)
+		return adapters.HTTPStatusError("whatsapp", resp.StatusCode, respBody)
 	}
 
 	a.base.LogSuccess(a.name, msg)
