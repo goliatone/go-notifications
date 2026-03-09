@@ -1,8 +1,8 @@
 package firebase
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +28,7 @@ type Config struct {
 	ServerKey string
 	Endpoint  string
 	Timeout   time.Duration
+	Transport adapters.HTTPTransportConfig
 	DryRun    bool
 }
 
@@ -79,7 +80,7 @@ func New(l logger.Logger, opts ...Option) *Adapter {
 		}
 	}
 	if adapter.client == nil {
-		adapter.client = &http.Client{Timeout: adapter.cfg.Timeout}
+		adapter.client = adapters.NewHTTPClient(adapter.cfg.Timeout, adapter.cfg.Transport)
 	}
 	return adapter
 }
@@ -89,18 +90,6 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	if a.cfg.DryRun {
-		a.base.LogSuccess(a.name, msg)
-		a.base.Logger().Info("[firebase:during-dry-run] send skipped",
-			"to", msg.To,
-			"subject", msg.Subject,
-		)
-		return nil
-	}
-	if strings.TrimSpace(a.cfg.ServerKey) == "" {
-		return fmt.Errorf("firebase: server key required")
-	}
-
 	target := strings.TrimSpace(msg.To)
 	if token := stringValue(msg.Metadata, "token"); token != "" {
 		target = token
@@ -155,9 +144,23 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	} else {
 		payload["to"] = target
 	}
+	if a.cfg.DryRun {
+		a.base.LogSuccess(a.name, msg)
+		a.base.Logger().Info("[firebase:during-dry-run] send skipped",
+			"to", target,
+			"subject", msg.Subject,
+		)
+		return nil
+	}
+	if strings.TrimSpace(a.cfg.ServerKey) == "" {
+		return fmt.Errorf("firebase: server key required")
+	}
 
-	bodyBytes, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.Endpoint, strings.NewReader(string(bodyBytes)))
+	bodyBytes, err := adapters.EncodeJSONPayload("firebase", payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.Endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("firebase: build request: %w", err)
 	}
@@ -171,10 +174,10 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("firebase: unexpected status %d", resp.StatusCode)
+		return adapters.HTTPStatusError("firebase", resp.StatusCode, respBody)
 	}
 
 	a.base.LogSuccess(a.name, msg)
