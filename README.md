@@ -10,6 +10,7 @@
 - Dispatcher, channel adapters, and delivery attempt tracking (`pkg/notifier`, `pkg/adapters`, `internal/dispatcher`).
 - Preference evaluation with [go-options](https://github.com/goliatone/go-options), inbox services, and realtime broadcaster bridges.
 - Command catalog (`pkg/commands`) so transports can call command handlers without touching `internal` packages.
+- Reminder cadence primitives (`pkg/reminders`) for deterministic scheduling, cooldown windows, and no-spam evaluation in host-managed sweep jobs.
 - Optional adapters (`adapters/gocms`, future `adapters/goadmin`) that translate external schemas into notification templates without adding direct dependencies.
 
 ## Using the module
@@ -42,11 +43,13 @@ func send(ctx context.Context) error {
 - `pkg/storage` builds Bun or in memory repositories depending on the configuration.
 - `pkg/templates.Service` manages template CRUD and rendering, adapters can call it through the exported interface
 - `pkg/commands.Registry` exposes typed command handlers so HTTP, CLI, or queue transports share execution paths
+- `pkg/reminders` provides pure policy/state evaluation helpers for recurring reminder workflows owned by the host app
 - `adapters/gocms` includes helper structs to convert [go-cms](https://github.com/goliatone/go-cms) snapshots into `templates.TemplateInput` values, see `docs/NTF_ADAPTERS.md`
 
 ## Documentation map
 
 - `docs/NTF_TDD.md`: complete technical design.
+- `docs/GUIDE_REMINDERS.md`: reminder cadence primitives (`pkg/reminders`) and host sweep integration pattern.
 - `docs/NTF_TEMPLATES.md`: template authoring, schema validation, and go-cms imports.
 - `docs/NTF_OPTIONS.md`, `docs/NTF_ENTITIES.md`, `docs/NTF_REALTIME.md`: supporting guides.
 - `docs/NTF_TSK.md`: implementation roadmap with progress for each phase.
