@@ -1,9 +1,8 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
-	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,7 +33,7 @@ type Config struct {
 	DisableWebPagePreview bool
 	DisableNotification   bool
 	Timeout               time.Duration
-	SkipTLSVerify         bool
+	Transport             adapters.HTTPTransportConfig
 	PlainOnly             bool // force text/plain even when HTML is provided
 	DryRun                bool // when true, skip sending but still succeed
 }
@@ -83,12 +82,7 @@ func New(l logger.Logger, opts ...Option) *Adapter {
 		}
 	}
 	if adapter.client == nil {
-		adapter.client = &http.Client{
-			Timeout: adapter.cfg.Timeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: adapter.cfg.SkipTLSVerify},
-			},
-		}
+		adapter.client = adapters.NewHTTPClient(adapter.cfg.Timeout, adapter.cfg.Transport)
 	}
 	return adapter
 }
@@ -104,14 +98,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		secretString(msg.Metadata, "default"),
 		a.cfg.Token,
 	))
-	if token == "" {
-		return fmt.Errorf("telegram: bot token required")
-	}
 	chatID := strings.TrimSpace(firstNonEmptyStrings(stringValue(msg.Metadata, "chat_id"), msg.To))
 	if chatID == "" {
 		chatID = strings.TrimSpace(a.cfg.ChatID)
 	}
-	if chatID == "" && !a.cfg.DryRun {
+	if chatID == "" {
 		return fmt.Errorf("telegram: chat id required")
 	}
 
@@ -131,6 +122,17 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	attachment := firstURLAttachment(attachments)
 	if attachment == nil && body == "" {
 		return fmt.Errorf("telegram: message body required")
+	}
+	if a.cfg.DryRun {
+		a.base.LogSuccess(a.name, msg)
+		a.base.Logger().Info("[telegram:during-dry-run] send skipped",
+			"recipient", chatID,
+			"channel", msg.Channel,
+		)
+		return nil
+	}
+	if token == "" {
+		return fmt.Errorf("telegram: bot token required")
 	}
 
 	payload := map[string]any{
@@ -166,8 +168,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if replyTo := stringValue(msg.Metadata, "reply_to"); replyTo != "" {
 		payload["reply_to_message_id"] = replyTo
 	}
-	bodyBytes, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(bodyBytes)))
+	bodyBytes, err := adapters.EncodeJSONPayload("telegram", payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("telegram: build request: %w", err)
 	}
@@ -183,8 +188,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	bodyBytes, _ = io.ReadAll(resp.Body) // drain for keep-alive reuse
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Surface Telegram's response for easier troubleshooting (e.g., chat not found / bot blocked)
-		return fmt.Errorf("telegram: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+		return adapters.HTTPStatusError("telegram", resp.StatusCode, bodyBytes)
 	}
 
 	a.base.LogSuccess(a.name, msg)
