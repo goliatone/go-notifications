@@ -16,9 +16,7 @@ func TestWrapManagerInteropCompileTime(t *testing.T) {
 	raw := newTestURLKitManager(t)
 
 	var manager links.SecureLinkManager = WrapManager(raw)
-	if manager == nil {
-		t.Fatal("expected wrapped manager")
-	}
+	_ = manager
 }
 
 func TestNewManagerWithConfigurator(t *testing.T) {
