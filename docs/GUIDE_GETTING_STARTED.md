@@ -304,8 +304,9 @@ Now that you've sent your first notification, explore these guides:
 4. **[GUIDE_PREFERENCES.md](GUIDE_PREFERENCES.md)** - User opt-in/opt-out settings
 5. **[GUIDE_INBOX.md](GUIDE_INBOX.md)** - In-app notification center
 6. **[GUIDE_EVENTS.md](GUIDE_EVENTS.md)** - Event submission and scheduling
-7. **[GUIDE_INTEGRATION.md](GUIDE_INTEGRATION.md)** - Production deployment patterns
-8. **[GUIDE_SECRETS.md](GUIDE_SECRETS.md)** - Secure credential management
+7. **[GUIDE_REMINDERS.md](GUIDE_REMINDERS.md)** - Reminder cadence primitives for periodic no-spam sends
+8. **[GUIDE_INTEGRATION.md](GUIDE_INTEGRATION.md)** - Production deployment patterns
+9. **[GUIDE_SECRETS.md](GUIDE_SECRETS.md)** - Secure credential management
 
 ### Reference Documentation
 

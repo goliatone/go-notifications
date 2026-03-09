@@ -262,6 +262,38 @@ def := &domain.NotificationDefinition{
 }
 ```
 
+### Reminder Cadence Policy (Host-Managed)
+
+If your app runs periodic reminder sweeps, you can store reminder cadence settings in `Definition.Policy` and parse them with `pkg/reminders`.
+
+```go
+import "github.com/goliatone/go-notifications/pkg/reminders"
+
+def := &domain.NotificationDefinition{
+    Code: "agreement-reminder",
+    Policy: domain.JSONMap{
+        "reminders": map[string]any{
+            "enabled":                true,
+            "initial_delay":          "24h",
+            "interval":               "24h",
+            "max_count":              5,
+            "jitter_percent":         15,
+            "recent_view_grace":      "2h",
+            "manual_resend_cooldown": "4h",
+        },
+    },
+}
+
+raw, _ := def.Policy["reminders"].(map[string]any)
+policy, err := reminders.PolicyFromMap(raw)
+if err != nil {
+    return err
+}
+policy = reminders.NormalizePolicy(policy)
+```
+
+`go-notifications` does not enforce domain eligibility for reminders. Use `reminders.Evaluate` in host sweep jobs after your own domain checks.
+
 ### Throttle Configuration
 
 | Key | Type | Description |
@@ -670,5 +702,6 @@ TemplateKeys: domain.StringList{
 
 - [GUIDE_TEMPLATES.md](GUIDE_TEMPLATES.md) - Create templates for definitions
 - [GUIDE_EVENTS.md](GUIDE_EVENTS.md) - Send events using definitions
+- [GUIDE_REMINDERS.md](GUIDE_REMINDERS.md) - Reuse policy maps for reminder cadence
 - [GUIDE_PREFERENCES.md](GUIDE_PREFERENCES.md) - User opt-in/opt-out per definition
 - [GUIDE_ADAPTERS.md](GUIDE_ADAPTERS.md) - Configure delivery channels

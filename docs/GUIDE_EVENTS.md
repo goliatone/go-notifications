@@ -16,6 +16,7 @@ Events are the entry point for triggering notifications. When you submit an even
 6. Delivery attempts are tracked for retry and auditing
 
 The system supports both **synchronous** (immediate) and **asynchronous** (scheduled/queued) event submission.
+For recurring reminder workflows, pair scheduled workers with `pkg/reminders` cadence evaluation.
 
 ---
 
@@ -350,6 +351,41 @@ func (w *Worker) ProcessJob(ctx context.Context, job queue.Job) error {
     return nil
 }
 ```
+
+---
+
+## Reminder Sweeps with `pkg/reminders`
+
+For recurring reminders (for example "agreement still unsigned"), pair scheduled workers with `pkg/reminders` cadence evaluation.
+
+`pkg/reminders` decides cadence/no-spam only; your host service decides eligibility.
+
+```go
+import (
+    "time"
+
+    "github.com/goliatone/go-notifications/pkg/reminders"
+)
+
+func shouldSendReminder(now time.Time, policy reminders.Policy, state reminders.State) (bool, *time.Time) {
+    decision := reminders.Evaluate(now, policy, state)
+    if !decision.Due {
+        return false, decision.NextDueAt
+    }
+    next := reminders.ComputeNextDue(now, policy, "tenant|org|entity|recipient")
+    return true, &next
+}
+```
+
+Recommended flow:
+
+1. Claim due reminder rows from your store with lease semantics.
+2. Revalidate domain eligibility (status/stage/completion).
+3. Evaluate cadence with `reminders.Evaluate`.
+4. Send a notification event only when due.
+5. Persist `next_due_at` using `reminders.ComputeNextDue`.
+
+Use `reminders.PolicyFromMap` if policy values are stored in definition metadata.
 
 ---
 
@@ -702,6 +738,7 @@ func main() {
 ## Next Steps
 
 - [GUIDE_DEFINITIONS.md](GUIDE_DEFINITIONS.md) - Creating notification types
+- [GUIDE_REMINDERS.md](GUIDE_REMINDERS.md) - Cadence primitives for recurring reminder sweeps
 - [GUIDE_TEMPLATES.md](GUIDE_TEMPLATES.md) - Template rendering and localization
 - [GUIDE_PREFERENCES.md](GUIDE_PREFERENCES.md) - User opt-in/opt-out settings
 - [GUIDE_ADAPTERS.md](GUIDE_ADAPTERS.md) - Configuring delivery channels

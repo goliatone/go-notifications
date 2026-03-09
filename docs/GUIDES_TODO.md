@@ -217,6 +217,25 @@ This document tracks the planned user guides for `go-notifications`. Each guide 
 
 ---
 
+## 10. GUIDE_REMINDERS.md
+
+**Status**: `done`
+
+**Purpose**: Explain reminder cadence primitives in `pkg/reminders` and host sweep integration patterns.
+
+**Sections**:
+- Overview: host-owned eligibility vs primitive-owned cadence checks
+- `Policy`, `State`, and `Decision` contracts
+- `NormalizePolicy`, `Evaluate`, and `ComputeNextDue`
+- Deterministic jitter and stable hash keys
+- JSON map conversion helpers (`PolicyFromMap`, `StateFromMap`)
+- Recommended sweep flow with lease/claim + no-spam checks
+
+**Primary Audience**: Backend/platform developers
+**Complexity**: Intermediate
+
+---
+
 ## Summary
 
 | Guide | Audience | Complexity | Status |
@@ -230,6 +249,7 @@ This document tracks the planned user guides for `go-notifications`. Each guide 
 | GUIDE_DEFINITIONS | Content managers/devs | Beginner | `review` |
 | GUIDE_INTEGRATION | Platform engineers | Advanced | `review` |
 | GUIDE_SECRETS | DevOps/security | Intermediate | `review` |
+| GUIDE_REMINDERS | Backend/platform developers | Intermediate | `done` |
 
 ---
 

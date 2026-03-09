@@ -12,6 +12,7 @@ This guide covers integrating `go-notifications` with host applications, includi
 - **Storage providers** - Choose between in-memory (testing) or Bun/PostgreSQL (production)
 - **Dependency injection** - Connect your logger, cache, queue, and other services
 - **Command pattern** - Expose notification operations via `go-command` for HTTP/gRPC
+- **Reminder cadence primitives** - Reuse `pkg/reminders` for periodic no-spam reminder logic
 - **Activity hooks** - Integrate with audit logging and observability systems
 - **Testing** - Use in-memory repositories for fast, isolated tests
 
@@ -390,6 +391,39 @@ func CreateDefinitionHandler(mod *notifier.Module) http.HandlerFunc {
     }
 }
 ```
+
+---
+
+## Reminder Cadence Primitives (`pkg/reminders`)
+
+If your host app runs periodic reminder sweeps (for example, unsigned e-sign agreements), use `pkg/reminders` as the shared cadence engine while keeping domain eligibility in host services.
+
+```go
+import (
+    "time"
+
+    "github.com/goliatone/go-notifications/pkg/reminders"
+)
+
+func evaluateReminder(now time.Time, stableKey string, policy reminders.Policy, state reminders.State) (reminders.Decision, time.Time) {
+    decision := reminders.Evaluate(now, policy, state)
+    if !decision.Due {
+        return decision, time.Time{}
+    }
+    nextDue := reminders.ComputeNextDue(now, policy, stableKey)
+    return decision, nextDue
+}
+```
+
+Recommended host pattern:
+
+1. Claim due rows with lease semantics from your store.
+2. Re-check domain eligibility (status, stage, completion).
+3. Evaluate cadence with `reminders.Evaluate`.
+4. Send only when due and persist `next_due_at` using `ComputeNextDue`.
+5. Persist skip reason codes for observability and operator controls.
+
+Use `PolicyFromMap` and `StateFromMap` when policy/state values are stored as JSON maps in definition metadata or reminder-state rows.
 
 ---
 
@@ -818,4 +852,5 @@ func SendHandler(manager *notifier.Manager) http.HandlerFunc {
 - [GUIDE_GETTING_STARTED.md](GUIDE_GETTING_STARTED.md) - Quick start guide
 - [GUIDE_ADAPTERS.md](GUIDE_ADAPTERS.md) - Configure delivery channels
 - [GUIDE_TEMPLATES.md](GUIDE_TEMPLATES.md) - Template rendering
+- [GUIDE_REMINDERS.md](GUIDE_REMINDERS.md) - Recurring reminder cadence primitives
 - [GUIDE_SECRETS.md](GUIDE_SECRETS.md) - Credentials management
