@@ -2,7 +2,6 @@ package twilio
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,9 +32,9 @@ type Config struct {
 	MessagingServiceSID string
 	APIBaseURL          string
 	Timeout             time.Duration
-	SkipTLSVerify       bool
+	Transport           adapters.HTTPTransportConfig
 	PlainOnly           bool // Force text/plain when HTML is provided.
-	DryRun              bool // When true or missing credentials, log only.
+	DryRun              bool // When true, validates and logs but does not send.
 }
 
 func WithName(name string) Option {
@@ -82,12 +81,7 @@ func New(l logger.Logger, opts ...Option) *Adapter {
 		}
 	}
 	if adapter.client == nil {
-		adapter.client = &http.Client{
-			Timeout: adapter.cfg.Timeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: adapter.cfg.SkipTLSVerify},
-			},
-		}
+		adapter.client = adapters.NewHTTPClient(adapter.cfg.Timeout, adapter.cfg.Transport)
 	}
 	return adapter
 }
@@ -110,14 +104,6 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		a.cfg.AuthToken,
 	))
 
-	if a.cfg.DryRun || accountSID == "" || authToken == "" {
-		a.base.LogSuccess(a.name, msg)
-		a.base.Logger().Info("[twilio:during-dry-run] send skipped (dry-run or missing credentials)",
-			"to", msg.To,
-			"channel", msg.Channel,
-		)
-		return nil
-	}
 	to := strings.TrimSpace(msg.To)
 	if to == "" {
 		return fmt.Errorf("twilio: destination missing")
@@ -146,10 +132,12 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.cfg.MessagingServiceSID != "" {
 		form.Set("MessagingServiceSid", a.cfg.MessagingServiceSID)
 	} else {
-		if from == "" {
+		if from == "" && !a.cfg.DryRun {
 			return fmt.Errorf("twilio: from or messaging service SID required")
 		}
-		form.Set("From", from)
+		if from != "" {
+			form.Set("From", from)
+		}
 	}
 	form.Set("Body", body)
 
@@ -161,6 +149,20 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		for _, m := range media {
 			form.Add("MediaUrl", m)
 		}
+	}
+	if strings.TrimSpace(form.Get("Body")) == "" && len(media) == 0 {
+		return fmt.Errorf("twilio: body or media_urls required")
+	}
+	if a.cfg.DryRun {
+		a.base.LogSuccess(a.name, msg)
+		a.base.Logger().Info("[twilio:during-dry-run] send skipped",
+			"to", to,
+			"channel", msg.Channel,
+		)
+		return nil
+	}
+	if accountSID == "" || authToken == "" {
+		return fmt.Errorf("twilio: account sid and auth token required")
 	}
 
 	endpoint := fmt.Sprintf("%s/2010-04-01/Accounts/%s/Messages.json", strings.TrimRight(a.cfg.APIBaseURL, "/"), accountSID)
@@ -178,10 +180,10 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	_, _ = io.ReadAll(resp.Body) // drain for connection reuse
+	bodyBytes, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("twilio: unexpected status %d", resp.StatusCode)
+		return adapters.HTTPStatusError("twilio", resp.StatusCode, bodyBytes)
 	}
 
 	a.base.LogSuccess(a.name, msg)
