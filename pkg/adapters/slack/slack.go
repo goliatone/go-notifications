@@ -1,8 +1,8 @@
 package slack
 
 import (
+	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,12 +25,12 @@ type Adapter struct {
 
 // Config holds Slack API settings.
 type Config struct {
-	Token         string
-	Channel       string
-	BaseURL       string
-	Timeout       time.Duration
-	SkipTLSVerify bool
-	DryRun        bool
+	Token     string
+	Channel   string
+	BaseURL   string
+	Timeout   time.Duration
+	Transport adapters.HTTPTransportConfig
+	DryRun    bool
 }
 
 type Option func(*Adapter)
@@ -81,12 +81,7 @@ func New(l logger.Logger, opts ...Option) *Adapter {
 		}
 	}
 	if adapter.client == nil {
-		adapter.client = &http.Client{
-			Timeout: adapter.cfg.Timeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: adapter.cfg.SkipTLSVerify},
-			},
-		}
+		adapter.client = adapters.NewHTTPClient(adapter.cfg.Timeout, adapter.cfg.Transport)
 	}
 	return adapter
 }
@@ -112,7 +107,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 
 	text := firstNonEmpty(stringValue(msg.Metadata, "body"), msg.Body)
 	htmlBody := firstNonEmpty(stringValue(msg.Metadata, "html_body"))
-	if htmlBody != "" && !a.cfg.DryRun {
+	if htmlBody != "" {
 		// Slack uses mrkdwn; strip tags to keep content readable
 		text = stripHTML(htmlBody)
 	}
@@ -158,9 +153,12 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		return nil
 	}
 
-	bodyBytes, _ := json.Marshal(payload)
+	bodyBytes, err := adapters.EncodeJSONPayload("slack", payload)
+	if err != nil {
+		return err
+	}
 	endpoint := strings.TrimRight(a.cfg.BaseURL, "/") + "/chat.postMessage"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(bodyBytes)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("slack: build request: %w", err)
 	}
@@ -177,7 +175,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	data, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("slack: unexpected status %d", resp.StatusCode)
+		return adapters.HTTPStatusError("slack", resp.StatusCode, data)
 	}
 
 	// Slack returns ok=false on logical errors
@@ -185,7 +183,9 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		OK    bool   `json:"ok"`
 		Error string `json:"error"`
 	}
-	_ = json.Unmarshal(data, &apiResp)
+	if err := json.Unmarshal(data, &apiResp); err != nil {
+		return fmt.Errorf("slack: parse response: %w", err)
+	}
 	if !apiResp.OK {
 		return fmt.Errorf("slack: api error: %s", apiResp.Error)
 	}
