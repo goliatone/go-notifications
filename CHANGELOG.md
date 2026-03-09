@@ -1,5 +1,40 @@
 # Changelog
 
+# [0.14.0](https://github.com/goliatone/go-notifications/compare/v0.13.0...v0.14.0) - (2026-03-09)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Harden config loader ([f4d1a62](https://github.com/goliatone/go-notifications/commit/f4d1a621465d43da3f69a76729f636e7eac0d9c9))  - (goliatone)
+- Address parsing and other smtp issues ([abf641d](https://github.com/goliatone/go-notifications/commit/abf641dbdbb5be3da77a36accf9b1434c28f9612))  - (goliatone)
+- Make dry run consistent ([7d62111](https://github.com/goliatone/go-notifications/commit/7d62111fd4c00b5b680e8ff38122b2c000f9e743))  - (goliatone)
+- Static linter ([1ced19b](https://github.com/goliatone/go-notifications/commit/1ced19b3400fc135774f8c7faed0d14524f5f6d5))  - (goliatone)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.14.0 ([c5db45f](https://github.com/goliatone/go-notifications/commit/c5db45fb498bea20189139cc494a1358c711525e))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Http transport config ([15fce07](https://github.com/goliatone/go-notifications/commit/15fce078aea91167228f2a3c4412c2008abba681))  - (goliatone)
+- Http transport config and dry run aligment ([d437b05](https://github.com/goliatone/go-notifications/commit/d437b053d294fd4a2a045bea7e608e146a468038))  - (goliatone)
+- Http adapter ([06071fc](https://github.com/goliatone/go-notifications/commit/06071fcfa469dc3698a2accff527f3c1058cf6ac))  - (goliatone)
+
+## <!-- 2 -->🚜 Refactor
+
+- Aling to max attempts semantics ([fc2b122](https://github.com/goliatone/go-notifications/commit/fc2b1229fe716cf68934a782ca61034b9a9cab29))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.13.0 ([7cd21ec](https://github.com/goliatone/go-notifications/commit/7cd21ecc3f36b3551db8d98223982df46cb2f3a6))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tasks ([57101a0](https://github.com/goliatone/go-notifications/commit/57101a024807c859567709ae317d7ac51ce266c6))  - (goliatone)
+- Update examples ([c3999a4](https://github.com/goliatone/go-notifications/commit/c3999a4cdc596df509c76f1dfb5f4960c696ef35))  - (goliatone)
+- Update deps ([b2d8354](https://github.com/goliatone/go-notifications/commit/b2d8354dd3f64bee2cc8a6f419de45dba727f841))  - (goliatone)
+- Update tests ([6da1e6e](https://github.com/goliatone/go-notifications/commit/6da1e6e25a6429b4db51d862f7cd8ff9a50fc6aa))  - (goliatone)
+- Update docs ([7771106](https://github.com/goliatone/go-notifications/commit/777110603b4c8df5331cced356fb1fd0e8014d25))  - (goliatone)
+
 # [0.13.0](https://github.com/goliatone/go-notifications/compare/v0.12.0...v0.13.0) - (2026-03-09)
 
 ## <!-- 13 -->📦 Bumps
