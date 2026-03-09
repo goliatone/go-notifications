@@ -1,8 +1,8 @@
 package webhook
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,7 +28,7 @@ type Config struct {
 	Method          string
 	Headers         map[string]string
 	Timeout         time.Duration
-	SkipTLSVerify   bool
+	Transport       adapters.HTTPTransportConfig
 	BasicAuthUser   string
 	BasicAuthPass   string
 	DryRun          bool
@@ -84,7 +84,7 @@ func New(l logger.Logger, opts ...Option) *Adapter {
 		}
 	}
 	if adapter.client == nil {
-		adapter.client = &http.Client{Timeout: adapter.cfg.Timeout}
+		adapter.client = adapters.NewHTTPClient(adapter.cfg.Timeout, adapter.cfg.Transport)
 	}
 	return adapter
 }
@@ -94,21 +94,21 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
+	text := firstNonEmpty(stringValue(msg.Metadata, "body"), msg.Body)
+	html := firstNonEmpty(stringValue(msg.Metadata, "html_body"))
+	if text == "" && html == "" {
+		return fmt.Errorf("webhook: body or html_body required")
+	}
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[webhook:during-dry-run] send skipped",
-			"url", a.cfg.URL,
 			"channel", msg.Channel,
 		)
 		return nil
 	}
-
 	if strings.TrimSpace(a.cfg.URL) == "" {
 		return fmt.Errorf("webhook: url is required")
 	}
-
-	text := firstNonEmpty(stringValue(msg.Metadata, "body"), msg.Body)
-	html := firstNonEmpty(stringValue(msg.Metadata, "html_body"))
 	contentType := "application/json"
 
 	payload := map[string]any{
@@ -125,8 +125,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		payload["headers"] = msg.Headers
 	}
 
-	bodyBytes, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(a.cfg.Method), a.cfg.URL, strings.NewReader(string(bodyBytes)))
+	bodyBytes, err := adapters.EncodeJSONPayload("webhook", payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(a.cfg.Method), a.cfg.URL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("webhook: build request: %w", err)
 	}
@@ -148,10 +151,10 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook: unexpected status %d", resp.StatusCode)
+		return adapters.HTTPStatusError("webhook", resp.StatusCode, respBody)
 	}
 
 	a.base.LogSuccess(a.name, msg)
