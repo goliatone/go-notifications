@@ -1,5 +1,23 @@
 # Changelog
 
+# [0.13.0](https://github.com/goliatone/go-notifications/compare/v0.12.0...v0.13.0) - (2026-03-09)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.13.0 ([42f1249](https://github.com/goliatone/go-notifications/commit/42f124905c04071bdce0e48ee712f7f4e0dd88f1))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Reminders implementation ([f25c59c](https://github.com/goliatone/go-notifications/commit/f25c59c4b82958d7fe5bfbd94c6f17048b5510a0))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.12.0 ([e2b5dfb](https://github.com/goliatone/go-notifications/commit/e2b5dfbe37dcd0d49b8b2fc79ae3a5b4763dc60d))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([ac98196](https://github.com/goliatone/go-notifications/commit/ac98196e45d263402f96d05f8570694c3b5a248f))  - (goliatone)
+
 # [0.12.0](https://github.com/goliatone/go-notifications/compare/v0.11.0...v0.12.0) - (2026-02-09)
 
 ## <!-- 13 -->📦 Bumps
