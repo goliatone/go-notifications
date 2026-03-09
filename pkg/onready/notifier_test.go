@@ -43,8 +43,12 @@ func TestOnReadyNotifierSendsEmail(t *testing.T) {
 		Templates:   tplSvc,
 		Adapters:    registry,
 		Logger:      &logger.Nop{},
-		Config:      config.DispatcherConfig{EnvFallbackAllowlist: []string{"user-1", "user-2"}},
-		Inbox:       inboxSvc,
+		Config: config.DispatcherConfig{
+			MaxAttempts:          1,
+			MaxWorkers:           1,
+			EnvFallbackAllowlist: []string{"user-1", "user-2"},
+		},
+		Inbox: inboxSvc,
 	})
 	if err != nil {
 		t.Fatalf("build manager: %v", err)
@@ -148,8 +152,12 @@ func TestOnReadyNotifierChannelAttachmentsOverride(t *testing.T) {
 		Templates:   tplSvc,
 		Adapters:    registry,
 		Logger:      &logger.Nop{},
-		Config:      config.DispatcherConfig{EnvFallbackAllowlist: []string{"user-1"}},
-		Inbox:       inboxSvc,
+		Config: config.DispatcherConfig{
+			MaxAttempts:          1,
+			MaxWorkers:           1,
+			EnvFallbackAllowlist: []string{"user-1"},
+		},
+		Inbox: inboxSvc,
 	})
 	if err != nil {
 		t.Fatalf("build manager: %v", err)
@@ -237,8 +245,12 @@ func TestOnReadyNotifierSendsInApp(t *testing.T) {
 		Templates:   tplSvc,
 		Adapters:    registry,
 		Logger:      &logger.Nop{},
-		Config:      config.DispatcherConfig{EnvFallbackAllowlist: []string{"user-1", "user-2"}},
-		Inbox:       inboxSvc,
+		Config: config.DispatcherConfig{
+			MaxAttempts:          1,
+			MaxWorkers:           1,
+			EnvFallbackAllowlist: []string{"user-1", "user-2"},
+		},
+		Inbox: inboxSvc,
 	})
 	if err != nil {
 		t.Fatalf("build manager: %v", err)

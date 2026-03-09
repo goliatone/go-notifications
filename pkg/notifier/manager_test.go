@@ -80,7 +80,10 @@ func TestManagerSendMultiChannelSuccess(t *testing.T) {
 		t.Fatalf("create definition: %v", err)
 	}
 
-	registry := adapters.NewRegistry(console.New(&logger.Nop{}), twilio.New(&logger.Nop{}))
+	registry := adapters.NewRegistry(
+		console.New(&logger.Nop{}),
+		twilio.New(&logger.Nop{}, twilio.WithConfig(twilio.Config{DryRun: true})),
+	)
 
 	prefs := newPreferenceService(t, prefRepo)
 	inboxSvc := newInboxService(t, inboxRepo)
@@ -95,7 +98,7 @@ func TestManagerSendMultiChannelSuccess(t *testing.T) {
 		Logger:      &logger.Nop{},
 		Config: config.DispatcherConfig{
 			Enabled:              true,
-			MaxRetries:           2,
+			MaxAttempts:          2,
 			MaxWorkers:           4,
 			EnvFallbackAllowlist: []string{"user@example.com"},
 		},
@@ -219,9 +222,9 @@ func TestManagerEmitsActivityEvents(t *testing.T) {
 		Adapters:    registry,
 		Logger:      &logger.Nop{},
 		Config: config.DispatcherConfig{
-			Enabled:    true,
-			MaxRetries: 1,
-			MaxWorkers: 1,
+			Enabled:     true,
+			MaxAttempts: 1,
+			MaxWorkers:  1,
 		},
 		Preferences: prefs,
 		Inbox:       inboxSvc,
@@ -350,7 +353,7 @@ func TestManagerSendRecordsFailures(t *testing.T) {
 		Logger:      &logger.Nop{},
 		Config: config.DispatcherConfig{
 			Enabled:              true,
-			MaxRetries:           2,
+			MaxAttempts:          2,
 			MaxWorkers:           1,
 			EnvFallbackAllowlist: []string{"ops@example.com"},
 		},
@@ -375,7 +378,7 @@ func TestManagerSendRecordsFailures(t *testing.T) {
 		t.Fatalf("list attempts: %v", err)
 	}
 	if attemptList.Total != 2 {
-		t.Fatalf("expected 2 attempts due to retries, got %d", attemptList.Total)
+		t.Fatalf("expected 2 attempts, got %d", attemptList.Total)
 	}
 	for _, attempt := range attemptList.Items {
 		if attempt.Status != domain.AttemptStatusFailed {
@@ -448,9 +451,9 @@ func TestManagerSkipsBlockedPreferences(t *testing.T) {
 		Adapters:    registry,
 		Logger:      &logger.Nop{},
 		Config: config.DispatcherConfig{
-			Enabled:    true,
-			MaxRetries: 1,
-			MaxWorkers: 1,
+			Enabled:     true,
+			MaxAttempts: 1,
+			MaxWorkers:  1,
 		},
 		Preferences: prefs,
 		Inbox:       inboxSvc,

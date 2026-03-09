@@ -1,64 +1,72 @@
 package smtp
 
 import (
+	"net/mail"
 	"strings"
 	"testing"
 
 	"github.com/goliatone/go-notifications/pkg/adapters"
 )
 
-func TestBuildMessageWithAttachments(t *testing.T) {
-	body, headers := buildMessage(
-		"from@example.com",
-		"to@example.com",
-		"Subject",
-		nil,
-		nil,
-		"",
-		"<p>Hello</p>",
-		"",
-		false,
-		[]adapters.Attachment{
+func mustParseAddress(t *testing.T, value string) *mail.Address {
+	t.Helper()
+	addr, err := mail.ParseAddress(value)
+	if err != nil {
+		t.Fatalf("parse address %q: %v", value, err)
+	}
+	return addr
+}
+
+func TestComposeMessageWithAttachments(t *testing.T) {
+	message, err := composeMessage(composeMessageInput{
+		From:      mustParseAddress(t, "from@example.com"),
+		To:        mustParseAddress(t, "to@example.com"),
+		Subject:   "Subject",
+		TextBody:  "",
+		HTMLBody:  "<p>Hello</p>",
+		PlainOnly: false,
+		Attachments: []adapters.Attachment{
 			{
 				Filename:    "report.csv",
 				ContentType: "text/csv",
 				Content:     []byte("a,b"),
 			},
 		},
-	)
-
-	if !strings.Contains(headers, "multipart/mixed") {
-		t.Fatalf("expected multipart/mixed headers, got %s", headers)
+	})
+	if err != nil {
+		t.Fatalf("compose message: %v", err)
 	}
-	if !strings.Contains(body, "Content-Type: multipart/alternative") {
-		t.Fatalf("expected multipart/alternative body, got %s", body)
+	payload := string(message)
+	if !strings.Contains(payload, "multipart/mixed") {
+		t.Fatalf("expected multipart/mixed payload, got %s", payload)
 	}
-	if !strings.Contains(body, `Content-Disposition: attachment; filename="report.csv"`) {
-		t.Fatalf("expected attachment disposition, got %s", body)
+	if !strings.Contains(payload, "Content-Type: multipart/alternative") {
+		t.Fatalf("expected multipart/alternative part, got %s", payload)
 	}
-	if !strings.Contains(body, "Content-Transfer-Encoding: base64") {
-		t.Fatalf("expected base64 encoding, got %s", body)
+	if !strings.Contains(payload, `Content-Disposition: attachment; filename="report.csv"`) {
+		t.Fatalf("expected attachment disposition, got %s", payload)
 	}
-	if !strings.Contains(body, "YSxi") {
-		t.Fatalf("expected base64 content, got %s", body)
+	if !strings.Contains(payload, "Content-Transfer-Encoding: base64") {
+		t.Fatalf("expected base64 attachment encoding, got %s", payload)
+	}
+	if !strings.Contains(payload, "YSxi") {
+		t.Fatalf("expected base64 content, got %s", payload)
 	}
 }
 
-func TestBuildMessage_HTMLOnlyDerivesText(t *testing.T) {
-	body, headers := buildMessage(
-		"from@example.com",
-		"to@example.com",
-		"Subject",
-		nil,
-		nil,
-		"",
-		"<p>Hello <strong>world</strong></p>",
-		"",
-		false,
-		nil,
-	)
-
-	if !strings.Contains(headers, "multipart/alternative") {
+func TestComposeMessageHTMLOnlyDerivesText(t *testing.T) {
+	message, err := composeMessage(composeMessageInput{
+		From:      mustParseAddress(t, "from@example.com"),
+		To:        mustParseAddress(t, "to@example.com"),
+		Subject:   "Subject",
+		HTMLBody:  "<p>Hello <strong>world</strong></p>",
+		PlainOnly: false,
+	})
+	if err != nil {
+		t.Fatalf("compose message: %v", err)
+	}
+	body := string(message)
+	if !strings.Contains(body, "multipart/alternative") {
 		t.Fatalf("expected multipart/alternative headers")
 	}
 	if !strings.Contains(body, "Content-Type: text/plain") {
@@ -78,5 +86,39 @@ func TestBuildMessage_HTMLOnlyDerivesText(t *testing.T) {
 	plainLower := strings.ToLower(plainSection)
 	if !strings.Contains(plainLower, "hello") || !strings.Contains(plainLower, "world") {
 		t.Fatalf("expected derived text content")
+	}
+}
+
+func TestComposeMessageRejectsCRLFInSubject(t *testing.T) {
+	_, err := composeMessage(composeMessageInput{
+		From:     mustParseAddress(t, "from@example.com"),
+		To:       mustParseAddress(t, "to@example.com"),
+		Subject:  "ok\r\nInjected: bad",
+		TextBody: "hello",
+	})
+	if err == nil {
+		t.Fatalf("expected CRLF subject rejection")
+	}
+}
+
+func TestComposeMessageRejectsUnsafeAttachmentFilename(t *testing.T) {
+	_, err := composeMessage(composeMessageInput{
+		From:     mustParseAddress(t, "from@example.com"),
+		To:       mustParseAddress(t, "to@example.com"),
+		Subject:  "Subject",
+		TextBody: "hello",
+		Attachments: []adapters.Attachment{
+			{Filename: "evil\nfile.txt", Content: []byte("x")},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected unsafe filename rejection")
+	}
+}
+
+func TestParseAddressListRejectsCRLF(t *testing.T) {
+	_, err := parseAddressList([]string{"ok@example.com\r\nBcc:evil@example.com"})
+	if err == nil {
+		t.Fatalf("expected CRLF address rejection")
 	}
 }

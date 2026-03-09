@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	i18n "github.com/goliatone/go-i18n"
 	"github.com/goliatone/go-notifications/internal/storage/memory"
@@ -111,6 +112,26 @@ func (a *testAdapter) Count() int {
 	return len(a.sends)
 }
 
+type failingAttemptAdapter struct {
+	name  string
+	calls int
+}
+
+func (a *failingAttemptAdapter) Name() string { return a.name }
+
+func (a *failingAttemptAdapter) Capabilities() adapters.Capability {
+	return adapters.Capability{Name: a.name, Channels: []string{"email"}, Formats: []string{"text/plain"}}
+}
+
+func (a *failingAttemptAdapter) Send(context.Context, adapters.Message) error {
+	a.calls++
+	return errors.New("injected failure")
+}
+
+type zeroBackoff struct{}
+
+func (zeroBackoff) Next(int) time.Duration { return 0 }
+
 func TestApplyResolvedLinksToPayloadAndMessage(t *testing.T) {
 	payload := domain.JSONMap{
 		"keep": "value",
@@ -161,6 +182,96 @@ func TestApplyResolvedLinksToPayloadAndMessage(t *testing.T) {
 	}
 	if _, ok := message.Metadata[links.ResolvedURLKey]; ok {
 		t.Fatalf("did not expect url in message metadata")
+	}
+}
+
+func TestNewRejectsInvalidDispatcherConfig(t *testing.T) {
+	defRepo := memory.NewDefinitionRepository()
+	tplRepo := memory.NewTemplateRepository()
+	translator := newTestTranslator(t)
+	tplSvc, err := templates.New(templates.Dependencies{
+		Repository: tplRepo,
+		Cache:      &cache.Nop{},
+		Logger:     &logger.Nop{},
+		Translator: translator,
+	})
+	if err != nil {
+		t.Fatalf("template service: %v", err)
+	}
+	registry := adapters.NewRegistry(&testAdapter{name: "test", channels: []string{"email"}})
+
+	_, err = New(Dependencies{
+		Definitions: defRepo,
+		Templates:   tplSvc,
+		Registry:    registry,
+		Config: config.DispatcherConfig{
+			MaxAttempts: 0,
+			MaxWorkers:  1,
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected invalid config error")
+	}
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("expected ErrInvalidConfig, got %v", err)
+	}
+}
+
+func TestNewDoesNotMutateProvidedConfig(t *testing.T) {
+	defRepo := memory.NewDefinitionRepository()
+	tplRepo := memory.NewTemplateRepository()
+	translator := newTestTranslator(t)
+	tplSvc, err := templates.New(templates.Dependencies{
+		Repository: tplRepo,
+		Cache:      &cache.Nop{},
+		Logger:     &logger.Nop{},
+		Translator: translator,
+	})
+	if err != nil {
+		t.Fatalf("template service: %v", err)
+	}
+	registry := adapters.NewRegistry(&testAdapter{name: "test", channels: []string{"email"}})
+	inputCfg := config.DispatcherConfig{
+		Enabled:     true,
+		MaxAttempts: 2,
+		MaxWorkers:  3,
+	}
+
+	svc, err := New(Dependencies{
+		Definitions: defRepo,
+		Templates:   tplSvc,
+		Registry:    registry,
+		Config:      inputCfg,
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if inputCfg.MaxAttempts != 2 || inputCfg.MaxWorkers != 3 {
+		t.Fatalf("expected input config to remain unchanged: %+v", inputCfg)
+	}
+	if svc.cfg.MaxAttempts != 2 || svc.cfg.MaxWorkers != 3 {
+		t.Fatalf("expected service config to preserve provided values: %+v", svc.cfg)
+	}
+}
+
+func TestDeliverWithRetriesHonorsMaxAttempts(t *testing.T) {
+	messenger := &failingAttemptAdapter{name: "failing"}
+	svc := &Service{
+		cfg: config.DispatcherConfig{
+			MaxAttempts: 2,
+			MaxWorkers:  1,
+		},
+		backoff: zeroBackoff{},
+		logger:  &logger.Nop{},
+	}
+	msg := &domain.NotificationMessage{}
+
+	err := svc.deliverWithRetries(context.Background(), messenger, msg, adapters.Message{})
+	if err == nil {
+		t.Fatalf("expected delivery error")
+	}
+	if messenger.calls != 2 {
+		t.Fatalf("expected 2 attempts, got %d", messenger.calls)
 	}
 }
 
@@ -485,7 +596,7 @@ func newTestDispatcher(t *testing.T, builder links.LinkBuilder, store links.Link
 		Logger:       &logger.Nop{},
 		Config: config.DispatcherConfig{
 			Enabled:              true,
-			MaxRetries:           1,
+			MaxAttempts:          1,
 			MaxWorkers:           1,
 			EnvFallbackAllowlist: []string{testRecipient},
 		},
