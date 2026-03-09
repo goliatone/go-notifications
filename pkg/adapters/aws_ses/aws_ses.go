@@ -110,15 +110,6 @@ func (a *Adapter) ensureClient(ctx context.Context) error {
 }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	if a.cfg.DryRun {
-		a.base.LogSuccess(a.name, msg)
-		a.base.Logger().Info("[aws_ses:during-dry-run] send skipped",
-			"to", msg.To,
-			"subject", msg.Subject,
-		)
-		return nil
-	}
-
 	if strings.TrimSpace(msg.To) == "" {
 		return fmt.Errorf("aws_ses: destination required")
 	}
@@ -130,6 +121,14 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	htmlBody := firstNonEmpty(stringValue(msg.Metadata, "html_body"))
 	if textBody == "" && htmlBody == "" {
 		return fmt.Errorf("aws_ses: content empty")
+	}
+	if a.cfg.DryRun {
+		a.base.LogSuccess(a.name, msg)
+		a.base.Logger().Info("[aws_ses:during-dry-run] send skipped",
+			"to", msg.To,
+			"subject", msg.Subject,
+		)
+		return nil
 	}
 
 	if err := a.ensureClient(ctx); err != nil {
