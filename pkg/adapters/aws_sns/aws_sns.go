@@ -35,6 +35,7 @@ type Config struct {
 	TopicARN     string // optional; can be overridden per-message with metadata["topic_arn"]
 	DryRun       bool
 	Timeout      time.Duration
+	Transport    adapters.HTTPTransportConfig
 }
 
 type Option func(*Adapter)
@@ -85,7 +86,7 @@ func New(l logger.Logger, opts ...Option) *Adapter {
 		}
 	}
 	if adapter.client == nil {
-		adapter.client = &http.Client{Timeout: adapter.cfg.Timeout}
+		adapter.client = adapters.NewHTTPClient(adapter.cfg.Timeout, adapter.cfg.Transport)
 	}
 	return adapter
 }
@@ -95,15 +96,6 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	if a.cfg.DryRun {
-		a.base.LogSuccess(a.name, msg)
-		a.base.Logger().Info("[aws_sns:during-dry-run] send skipped",
-			"to", msg.To,
-			"channel", msg.Channel,
-			"subject", msg.Subject,
-		)
-		return nil
-	}
 	body := firstNonEmpty(stringValue(msg.Metadata, "body"), msg.Body)
 	htmlBody := firstNonEmpty(stringValue(msg.Metadata, "html_body"))
 	if htmlBody != "" && body == "" {
@@ -132,6 +124,16 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		params.Set("PhoneNumber", to)
 	}
 
+	if a.cfg.DryRun {
+		a.base.LogSuccess(a.name, msg)
+		a.base.Logger().Info("[aws_sns:during-dry-run] send skipped",
+			"to", msg.To,
+			"channel", msg.Channel,
+			"subject", msg.Subject,
+		)
+		return nil
+	}
+
 	creds := a.loadCredentials()
 	if creds.AccessKey == "" || creds.SecretKey == "" {
 		return fmt.Errorf("aws_sns: aws credentials required")
@@ -156,10 +158,10 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	_, _ = io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("aws_sns: unexpected status %d", resp.StatusCode)
+		return adapters.HTTPStatusError("aws_sns", resp.StatusCode, respBody)
 	}
 	a.base.LogSuccess(a.name, msg)
 	return nil
