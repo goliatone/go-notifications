@@ -31,6 +31,7 @@ type Config struct {
 	APIBase    string
 	From       string
 	TimeoutSec int
+	Transport  adapters.HTTPTransportConfig
 }
 
 type Option func(*Adapter)
@@ -79,7 +80,7 @@ func New(l logger.Logger, opts ...Option) *Adapter {
 		}
 	}
 	if adapter.client == nil {
-		adapter.client = &http.Client{Timeout: time.Duration(adapter.cfg.TimeoutSec) * time.Second}
+		adapter.client = adapters.NewHTTPClient(time.Duration(adapter.cfg.TimeoutSec)*time.Second, adapter.cfg.Transport)
 	}
 	return adapter
 }
@@ -189,10 +190,10 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("mailgun: unexpected status %d", resp.StatusCode)
+		return adapters.HTTPStatusError("mailgun", resp.StatusCode, respBody)
 	}
 
 	a.base.LogSuccess(a.name, msg)
