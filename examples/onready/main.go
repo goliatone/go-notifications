@@ -85,6 +85,8 @@ func main() {
 		Logger:      stdlog,
 		// Allow env fallback so the console adapter works without a secrets resolver.
 		Config: config.DispatcherConfig{
+			MaxAttempts:          3,
+			MaxWorkers:           2,
 			EnvFallbackAllowlist: []string{"user-1"},
 		},
 		Inbox: inboxSvc,

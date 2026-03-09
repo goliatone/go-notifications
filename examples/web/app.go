@@ -173,8 +173,8 @@ func notifierConfig() notifierconfig.Config {
 			DefaultLocale: "en",
 		},
 		Dispatcher: notifierconfig.DispatcherConfig{
-			MaxRetries: 3,
-			MaxWorkers: 4,
+			MaxAttempts: 3,
+			MaxWorkers:  4,
 		},
 	}
 }
