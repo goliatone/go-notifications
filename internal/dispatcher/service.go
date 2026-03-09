@@ -82,6 +82,7 @@ var (
 	ErrMissingDefinitions = errors.New("dispatcher: definition repository is required")
 	ErrMissingTemplates   = errors.New("dispatcher: templates service is required")
 	ErrMissingRegistry    = errors.New("dispatcher: adapter registry is required")
+	ErrInvalidConfig      = errors.New("dispatcher: invalid config")
 )
 
 // New builds the dispatcher service.
@@ -112,11 +113,10 @@ func New(deps Dependencies) (*Service, error) {
 	}
 
 	if deps.Config.MaxWorkers <= 0 {
-		deps.Config.MaxWorkers = 4
+		return nil, fmt.Errorf("%w: max_workers must be > 0", ErrInvalidConfig)
 	}
-
-	if deps.Config.MaxRetries <= 0 {
-		deps.Config.MaxRetries = 3
+	if deps.Config.MaxAttempts <= 0 {
+		return nil, fmt.Errorf("%w: max_attempts must be > 0", ErrInvalidConfig)
 	}
 
 	linkPolicy := normalizeLinkPolicy(deps.LinkPolicy)
@@ -495,7 +495,7 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 
 func (s *Service) deliverWithRetries(ctx context.Context, messenger adapters.Messenger, message *domain.NotificationMessage, sendMsg adapters.Message) error {
 	var lastErr error
-	for attempt := 1; attempt <= s.cfg.MaxRetries; attempt++ {
+	for attempt := 1; attempt <= s.cfg.MaxAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -524,7 +524,7 @@ func (s *Service) deliverWithRetries(ctx context.Context, messenger adapters.Mes
 	if s.messages != nil {
 		_ = s.messages.Update(ctx, message)
 	}
-	return fmt.Errorf("dispatcher: delivery failed after %d attempts: %w", s.cfg.MaxRetries, lastErr)
+	return fmt.Errorf("dispatcher: delivery failed after %d attempts: %w", s.cfg.MaxAttempts, lastErr)
 }
 
 func (s *Service) recordAttempt(ctx context.Context, adapterName string, message *domain.NotificationMessage, status, errMsg string, attempt int) error {
