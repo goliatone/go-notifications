@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -463,8 +464,6 @@ func cloneJSONMap(src domain.JSONMap) domain.JSONMap {
 		return nil
 	}
 	dst := make(domain.JSONMap, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 	return dst
 }

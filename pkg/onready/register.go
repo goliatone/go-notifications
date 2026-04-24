@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 
@@ -232,12 +233,8 @@ func mergeJSON(primary, secondary domain.JSONMap) domain.JSONMap {
 		return nil
 	}
 	out := make(domain.JSONMap, len(primary)+len(secondary))
-	for k, v := range secondary {
-		out[k] = v
-	}
-	for k, v := range primary {
-		out[k] = v
-	}
+	maps.Copy(out, secondary)
+	maps.Copy(out, primary)
 	return out
 }
 

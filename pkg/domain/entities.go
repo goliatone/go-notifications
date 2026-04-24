@@ -16,7 +16,7 @@ type RecordMeta struct {
 	ID        uuid.UUID `bun:",pk,type:uuid" json:"id"`
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
-	DeletedAt time.Time `bun:",soft_delete,nullzero" json:"deleted_at,omitempty"`
+	DeletedAt time.Time `bun:",soft_delete,nullzero" json:"deleted_at"`
 }
 
 // EnsureID assigns a UUID when the struct is about to be persisted.
@@ -281,9 +281,9 @@ type InboxItem struct {
 	Pinned       bool      `bun:",nullzero" json:"pinned"`
 	ActionURL    string    `bun:",nullzero" json:"action_url"`
 	Metadata     JSONMap   `bun:"type:jsonb,nullzero" json:"metadata,omitempty"`
-	ReadAt       time.Time `bun:",nullzero" json:"read_at,omitempty"`
-	DismissedAt  time.Time `bun:",nullzero" json:"dismissed_at,omitempty"`
-	SnoozedUntil time.Time `bun:",nullzero" json:"snoozed_until,omitempty"`
+	ReadAt       time.Time `bun:",nullzero" json:"read_at"`
+	DismissedAt  time.Time `bun:",nullzero" json:"dismissed_at"`
+	SnoozedUntil time.Time `bun:",nullzero" json:"snoozed_until"`
 }
 
 // Domain constants for statuses.

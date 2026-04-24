@@ -16,8 +16,8 @@ func TestServiceUpsertCreatesAndUpdates(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewPreferenceRepository()
 	service := newTestService(t, repo)
-	enabled := boolPtr(false)
-	locale := strPtr("es")
+	enabled := new(false)
+	locale := new("es")
 
 	created, err := service.Upsert(ctx, PreferenceInput{
 		SubjectType:    "user",
@@ -42,7 +42,7 @@ func TestServiceUpsertCreatesAndUpdates(t *testing.T) {
 	}
 
 	// Update quiet hours and locale.
-	newLocale := strPtr("en")
+	newLocale := new("en")
 	updated, err := service.Upsert(ctx, PreferenceInput{
 		SubjectType:    "user",
 		SubjectID:      "u1",
@@ -245,6 +245,8 @@ func newTestService(t *testing.T, repo *memory.PreferenceRepository) *Service {
 	return svc
 }
 
-func boolPtr(v bool) *bool { return &v }
+//go:fix inline
+func boolPtr(v bool) *bool { return new(v) }
 
-func strPtr(v string) *string { return &v }
+//go:fix inline
+func strPtr(v string) *string { return new(v) }

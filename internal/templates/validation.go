@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"maps"
 	"strings"
 
 	"github.com/goliatone/go-notifications/pkg/domain"
@@ -61,7 +62,7 @@ func hasField(data map[string]any, path string) bool {
 		return false
 	}
 	current := any(data)
-	for _, part := range strings.Split(path, ".") {
+	for part := range strings.SplitSeq(path, ".") {
 		switch typed := current.(type) {
 		case map[string]any:
 			val, ok := typed[part]
@@ -81,9 +82,7 @@ func cloneJSONMap(input domain.JSONMap) domain.JSONMap {
 		return nil
 	}
 	out := make(domain.JSONMap, len(input))
-	for k, v := range input {
-		out[k] = v
-	}
+	maps.Copy(out, input)
 	return out
 }
 
@@ -92,8 +91,6 @@ func cloneData(input map[string]any) map[string]any {
 		return make(map[string]any)
 	}
 	out := make(map[string]any, len(input))
-	for k, v := range input {
-		out[k] = v
-	}
+	maps.Copy(out, input)
 	return out
 }

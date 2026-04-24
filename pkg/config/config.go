@@ -11,12 +11,12 @@ import (
 // Config captures module-level configuration knobs. Feature packages (dispatcher,
 // inbox, templates, etc.) pull from these nested structs.
 type Config struct {
-	Localization LocalizationConfig `mapstructure:"localization" json:"localization,omitempty"`
-	Dispatcher   DispatcherConfig   `mapstructure:"dispatcher" json:"dispatcher,omitempty"`
-	Inbox        InboxConfig        `mapstructure:"inbox" json:"inbox,omitempty"`
-	Templates    TemplateConfig     `mapstructure:"templates" json:"templates,omitempty"`
-	Realtime     RealtimeConfig     `mapstructure:"realtime" json:"realtime,omitempty"`
-	Options      OptionsConfig      `mapstructure:"options" json:"options,omitempty"`
+	Localization LocalizationConfig `mapstructure:"localization" json:"localization"`
+	Dispatcher   DispatcherConfig   `mapstructure:"dispatcher" json:"dispatcher"`
+	Inbox        InboxConfig        `mapstructure:"inbox" json:"inbox"`
+	Templates    TemplateConfig     `mapstructure:"templates" json:"templates"`
+	Realtime     RealtimeConfig     `mapstructure:"realtime" json:"realtime"`
+	Options      OptionsConfig      `mapstructure:"options" json:"options"`
 }
 
 // LocalizationConfig controls default locale + fallback chains.

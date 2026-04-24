@@ -429,7 +429,7 @@ func TestManagerSkipsBlockedPreferences(t *testing.T) {
 
 	prefs := newPreferenceService(t, prefRepo)
 	inboxSvc := newInboxService(t, inboxRepo)
-	enabled := boolPtr(false)
+	enabled := new(false)
 	if _, err := prefs.Upsert(ctx, prefsvc.PreferenceInput{
 		SubjectType:    "user",
 		SubjectID:      "blocked@example.com",
@@ -491,7 +491,8 @@ func newPreferenceService(t *testing.T, repo *memory.PreferenceRepository) *pref
 	return svc
 }
 
-func boolPtr(v bool) *bool { return &v }
+//go:fix inline
+func boolPtr(v bool) *bool { return new(v) }
 
 func newInboxService(t *testing.T, repo *memory.InboxRepository) *inbox.Service {
 	t.Helper()

@@ -3,6 +3,7 @@ package inbox
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 	"time"
 
@@ -289,8 +290,6 @@ func cloneJSON(src domain.JSONMap) domain.JSONMap {
 		return nil
 	}
 	out := make(domain.JSONMap, len(src))
-	for key, value := range src {
-		out[key] = value
-	}
+	maps.Copy(out, src)
 	return out
 }

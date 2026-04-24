@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -131,9 +132,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	}
 	if dataMeta, ok := msg.Metadata["data"].(map[string]any); ok {
 		if data, ok := payload["data"].(map[string]any); ok {
-			for k, v := range dataMeta {
-				data[k] = v
-			}
+			maps.Copy(data, dataMeta)
 		}
 	}
 

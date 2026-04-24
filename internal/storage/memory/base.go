@@ -97,10 +97,7 @@ func (r *baseMemoryRepo[T]) list(ctx context.Context, opts store.ListOptions) (s
 	})
 
 	total := len(filtered)
-	start := opts.Offset
-	if start > total {
-		start = total
-	}
+	start := min(opts.Offset, total)
 	end := total
 	if opts.Limit > 0 && start+opts.Limit < end {
 		end = start + opts.Limit

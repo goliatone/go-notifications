@@ -15,7 +15,7 @@ func TestServiceResolveWithTrace(t *testing.T) {
 	repo := memory.NewPreferenceRepository()
 	service := newPublicService(t, repo)
 
-	enabled := boolPtr(false)
+	enabled := new(false)
 	if _, err := service.Upsert(ctx, PreferenceInput{
 		SubjectType:    "user",
 		SubjectID:      "user-99",
@@ -70,4 +70,5 @@ func newPublicService(t *testing.T, repo *memory.PreferenceRepository) *Service 
 	return svc
 }
 
-func boolPtr(v bool) *bool { return &v }
+//go:fix inline
+func boolPtr(v bool) *bool { return new(v) }

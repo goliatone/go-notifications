@@ -596,10 +596,7 @@ func encodeBase64Lines(data []byte) string {
 	encoded := base64.StdEncoding.EncodeToString(data)
 	var sb strings.Builder
 	for i := 0; i < len(encoded); i += 76 {
-		end := i + 76
-		if end > len(encoded) {
-			end = len(encoded)
-		}
+		end := min(i+76, len(encoded))
 		sb.WriteString(encoded[i:end])
 		if end < len(encoded) {
 			sb.WriteString("\r\n")

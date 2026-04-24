@@ -3,6 +3,7 @@ package logger
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -39,9 +40,7 @@ func (l *BasicLogger) WithFields(fields map[string]any) Logger {
 		return l
 	}
 	next := l.clone()
-	for k, v := range fields {
-		next.fields[k] = v
-	}
+	maps.Copy(next.fields, fields)
 	return next
 }
 
@@ -82,9 +81,7 @@ func (l *BasicLogger) clone() *BasicLogger {
 		ctx:    l.ctx,
 		fields: make(map[string]any, len(l.fields)),
 	}
-	for k, v := range l.fields {
-		out.fields[k] = v
-	}
+	maps.Copy(out.fields, l.fields)
 	return out
 }
 

@@ -2,6 +2,7 @@ package activity
 
 import (
 	"context"
+	"maps"
 	"time"
 )
 
@@ -56,8 +57,6 @@ func CloneMetadata(src map[string]any) map[string]any {
 		return nil
 	}
 	dst := make(map[string]any, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 	return dst
 }

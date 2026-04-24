@@ -69,8 +69,8 @@ func TestPreferenceSnapshotStoreSaveCreatesAndUpdates(t *testing.T) {
 		Channel:        "sms",
 	}
 
-	enabled := boolPtr(false)
-	locale := stringPtr("en")
+	enabled := new(false)
+	locale := new("en")
 	created, err := store.Save(ctx, PreferenceSnapshotInput{
 		Scope:      scope,
 		Enabled:    enabled,
@@ -109,6 +109,8 @@ func TestPreferenceSnapshotStoreSaveCreatesAndUpdates(t *testing.T) {
 	}
 }
 
-func boolPtr(v bool) *bool { return &v }
+//go:fix inline
+func boolPtr(v bool) *bool { return new(v) }
 
-func stringPtr(v string) *string { return &v }
+//go:fix inline
+func stringPtr(v string) *string { return new(v) }

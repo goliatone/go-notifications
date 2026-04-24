@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -171,9 +172,7 @@ func (s *Service) Dispatch(ctx context.Context, event *domain.NotificationEvent,
 	workerCount := min(s.cfg.MaxWorkers, len(channels)*len(recipients))
 
 	for range workerCount {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for job := range jobs {
 				if ctx.Err() != nil {
 					errCh <- ctx.Err()
@@ -183,7 +182,7 @@ func (s *Service) Dispatch(ctx context.Context, event *domain.NotificationEvent,
 					errCh <- err
 				}
 			}
-		}()
+		})
 	}
 
 	for _, channel := range channels {
@@ -625,9 +624,7 @@ func cloneJSONMap(src domain.JSONMap) domain.JSONMap {
 		return nil
 	}
 	dst := make(domain.JSONMap, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 
@@ -636,9 +633,7 @@ func cloneAnyMap(src map[string]any) map[string]any {
 		return nil
 	}
 	dst := make(map[string]any, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 
@@ -951,9 +946,7 @@ func mergeResolvedLinks(base, override links.ResolvedLinks) links.ResolvedLinks 
 		if base.Metadata == nil {
 			base.Metadata = make(map[string]any, len(override.Metadata))
 		}
-		for key, value := range override.Metadata {
-			base.Metadata[key] = value
-		}
+		maps.Copy(base.Metadata, override.Metadata)
 	}
 	if len(override.Records) > 0 {
 		base.Records = override.Records
@@ -993,9 +986,7 @@ func applyResolvedLinksToMessage(message *domain.NotificationMessage, resolved l
 		if message.Metadata == nil {
 			message.Metadata = make(domain.JSONMap, len(resolved.Metadata))
 		}
-		for key, value := range resolved.Metadata {
-			message.Metadata[key] = value
-		}
+		maps.Copy(message.Metadata, resolved.Metadata)
 	}
 }
 
@@ -1171,13 +1162,6 @@ func eventSubscriptions(event *domain.NotificationEvent) []string {
 	default:
 		return nil
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func isInboxChannel(channel string) bool {

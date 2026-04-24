@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"maps"
 	"sync"
 
 	gotemplate "github.com/goliatone/go-template"
@@ -43,8 +44,6 @@ func (r *helperRegistry) Funcs() map[string]any {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make(map[string]any, len(r.funcs))
-	for k, v := range r.funcs {
-		out[k] = v
-	}
+	maps.Copy(out, r.funcs)
 	return out
 }
