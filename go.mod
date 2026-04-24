@@ -6,15 +6,15 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.5
 	github.com/aws/aws-sdk-go-v2/service/ses v1.34.17
-	github.com/goliatone/go-command v0.16.1
-	github.com/goliatone/go-i18n v0.2.0
+	github.com/goliatone/go-command v0.19.0
+	github.com/goliatone/go-i18n v0.5.0
 	github.com/goliatone/go-masker v0.1.0
 	github.com/goliatone/go-options v0.7.1
-	github.com/goliatone/go-persistence-bun v0.13.0
+	github.com/goliatone/go-persistence-bun v0.14.0
 	github.com/goliatone/go-repository-bun v0.15.1
 	github.com/goliatone/go-template v0.3.1
-	github.com/goliatone/go-urlkit v0.5.0
-	github.com/goliatone/go-users v0.17.0
+	github.com/goliatone/go-urlkit v0.6.0
+	github.com/goliatone/go-users v0.23.0
 	github.com/google/uuid v1.6.0
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056
 	github.com/uptrace/bun v1.2.18
