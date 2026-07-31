@@ -166,7 +166,7 @@ func seedDefinitions(ctx context.Context, app *App) error {
 
 	for _, def := range definitions {
 		if err := app.Catalog.CreateDefinition.Execute(ctx, def); err != nil {
-			// app.Logger.Error("failed to seed definition", "code", def.Code, "error", err)
+			return fmt.Errorf("seed definition %s: %w", def.Code, err)
 		}
 	}
 
@@ -395,7 +395,7 @@ func seedTemplates(ctx context.Context, app *App) error {
 
 	for _, tmpl := range templateData {
 		if err := app.Catalog.SaveTemplate.Execute(ctx, tmpl); err != nil {
-			// app.Logger.Error("failed to seed template", "code", tmpl.Code, "error", err)
+			return fmt.Errorf("seed template %s/%s/%s: %w", tmpl.Code, tmpl.Channel, tmpl.Locale, err)
 		}
 	}
 
@@ -497,7 +497,7 @@ func seedPreferences(ctx context.Context, app *App) error {
 			Enabled:        &enabled,
 		})
 		if err != nil {
-			// app.Logger.Error("failed to create preference", "error", err)
+			return fmt.Errorf("seed Bob system alert preference: %w", err)
 		}
 	}
 
@@ -513,7 +513,7 @@ func seedPreferences(ctx context.Context, app *App) error {
 			Enabled:        &enabled,
 		})
 		if err != nil {
-			// app.Logger.Error("failed to create preference", "error", err)
+			return fmt.Errorf("seed Carlos comment reply preference: %w", err)
 		}
 	}
 
@@ -532,7 +532,7 @@ func seedPreferences(ctx context.Context, app *App) error {
 			},
 		})
 		if err != nil {
-			// app.Logger.Error("failed to set provider preference", "error", err)
+			return fmt.Errorf("seed Bob provider preference: %w", err)
 		}
 	}
 
@@ -550,7 +550,7 @@ func seedPreferences(ctx context.Context, app *App) error {
 			},
 		})
 		if err != nil {
-			// app.Logger.Error("failed to set provider preference", "error", err)
+			return fmt.Errorf("seed Carlos provider preference: %w", err)
 		}
 	}
 

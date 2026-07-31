@@ -36,7 +36,7 @@ func (l *routerLoggerAdapter) Error(format string, args ...any) {
 	l.log(l.base.Error, format, args...)
 }
 
-func (l *routerLoggerAdapter) log(fn func(string, ...appLogger.Field), format string, args ...any) {
+func (l *routerLoggerAdapter) log(fn func(string, ...any), format string, args ...any) {
 	if l == nil || l.base == nil || fn == nil {
 		return
 	}

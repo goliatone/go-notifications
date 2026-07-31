@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -77,11 +78,16 @@ func (h *WebSocketHub) Run() {
 
 		case message := <-h.broadcast:
 			recipients := 0
-			h.mu.RLock()
+			encoded, err := h.marshalMessage(message)
+			if err != nil {
+				wsLog("marshal broadcast event=%s err=%v", message.Event, err)
+				continue
+			}
+			h.mu.Lock()
 			for _, client := range h.clients {
 				if message.UserID == "" || client.UserID == message.UserID {
 					select {
-					case client.Send <- h.marshalMessage(message):
+					case client.Send <- encoded:
 						recipients++
 					default:
 						wsLog("dropping client id=%s user=%s: send buffer full", client.ID, client.UserID)
@@ -90,7 +96,7 @@ func (h *WebSocketHub) Run() {
 					}
 				}
 			}
-			h.mu.RUnlock()
+			h.mu.Unlock()
 			wsLog("broadcast event=%s user=%s recipients=%d", message.Event, message.UserID, recipients)
 
 		case <-h.done:
@@ -112,7 +118,10 @@ func (h *WebSocketHub) Broadcast(ctx context.Context, event broadcaster.Event) e
 		}
 	}
 
-	payload, _ := event.Payload.(map[string]any)
+	payload, ok := event.Payload.(map[string]any)
+	if !ok {
+		payload = map[string]any{"value": event.Payload}
+	}
 	msg := BroadcastMessage{
 		UserID:  userID,
 		Event:   event.Topic,
@@ -130,12 +139,15 @@ func (h *WebSocketHub) Broadcast(ctx context.Context, event broadcaster.Event) e
 	}
 }
 
-func (h *WebSocketHub) marshalMessage(msg BroadcastMessage) []byte {
-	data, _ := json.Marshal(map[string]any{
+func (h *WebSocketHub) marshalMessage(msg BroadcastMessage) ([]byte, error) {
+	data, err := json.Marshal(map[string]any{
 		"event":   msg.Event,
 		"payload": msg.Payload,
 	})
-	return data
+	if err != nil {
+		return nil, fmt.Errorf("marshal websocket message: %w", err)
+	}
+	return data, nil
 }
 
 func (h *WebSocketHub) RegisterClient(client *WebSocketClient) {
@@ -172,7 +184,9 @@ func (a *App) HandleWebSocket(ws router.WebSocketContext) error {
 func (c *WebSocketClient) HandleConnection() {
 	defer func() {
 		c.hub.UnregisterClient(c)
-		c.Conn.Close()
+		if err := c.Conn.Close(); err != nil {
+			wsLog("close client conn=%s user=%s err=%v", c.ID, c.UserID, err)
+		}
 		wsLog("client cleanup conn=%s user=%s", c.ID, c.UserID)
 	}()
 
@@ -193,7 +207,9 @@ func (c *WebSocketClient) writePump() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer func() {
 		ticker.Stop()
-		c.Conn.Close()
+		if err := c.Conn.Close(); err != nil {
+			wsLog("close writer conn=%s user=%s err=%v", c.ID, c.UserID, err)
+		}
 	}()
 
 	for {
@@ -201,7 +217,9 @@ func (c *WebSocketClient) writePump() {
 		case message, ok := <-c.Send:
 			if !ok {
 				wsLog("send channel closed conn=%s user=%s", c.ID, c.UserID)
-				c.Conn.CloseWithStatus(1000, "hub closed channel")
+				if err := c.Conn.CloseWithStatus(1000, "hub closed channel"); err != nil {
+					wsLog("close status conn=%s user=%s err=%v", c.ID, c.UserID, err)
+				}
 				return
 			}
 			if err := c.Conn.WriteMessage(router.TextMessage, message); err != nil {

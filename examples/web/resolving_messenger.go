@@ -80,7 +80,9 @@ func (m ResolvingMessenger) Send(ctx context.Context, msg adapters.Message) erro
 			DefinitionCode: fmt.Sprint(msg.Metadata["definition_code"]),
 			CreatedAt:      time.Now().UTC(),
 		}
-		_ = m.logs.Record(ctx, entry)
+		if logErr := m.logs.Record(ctx, entry); logErr != nil {
+			err = errors.Join(err, fmt.Errorf("record delivery log: %w", logErr))
+		}
 	}
 	return err
 }

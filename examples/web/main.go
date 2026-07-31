@@ -25,7 +25,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create app: %v", err)
 	}
-	defer app.Close()
+	defer func() {
+		if closeErr := app.Close(); closeErr != nil {
+			log.Printf("failed to close app: %v", closeErr)
+		}
+	}()
 
 	srv, err := buildServer(app)
 	if err != nil {

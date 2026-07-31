@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
@@ -48,7 +49,7 @@ func (s *DeliveryLogStore) LastForUser(ctx context.Context, userID string, limit
 		Limit(limit).
 		Scan(ctx)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return []deliveryLogRecord{}, nil
 		}
 		return nil, err
