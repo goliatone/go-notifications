@@ -1,5 +1,21 @@
 # Changelog
 
+# [0.14.1](https://github.com/goliatone/go-notifications/compare/v0.14.0...v0.14.1) - (2026-07-31)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.14.1 ([e24b3e3](https://github.com/goliatone/go-notifications/commit/e24b3e335afe3c76b5ec3b1aa3874fe66f573166))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.14.0 ([3423bd7](https://github.com/goliatone/go-notifications/commit/3423bd7bec4d70a2e338f09ab30bc6e9d1667936))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([bd15265](https://github.com/goliatone/go-notifications/commit/bd15265f129af4e5cefb1dcd6beb86c420a170e4))  - (goliatone)
+- Udpate deps ([9762490](https://github.com/goliatone/go-notifications/commit/97624901f3db0ec7b5c69b5de80a01c38e63af95))  - (goliatone)
+- Code quality ([b40bc91](https://github.com/goliatone/go-notifications/commit/b40bc91ede933bc0f675101ce26658622265a023))  - (goliatone)
+
 # [0.14.0](https://github.com/goliatone/go-notifications/compare/v0.13.0...v0.14.0) - (2026-03-09)
 
 ## <!-- 1 -->🐛 Bug Fixes
