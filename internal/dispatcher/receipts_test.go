@@ -8,6 +8,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/privacy"
+	"github.com/goliatone/go-notifications/pkg/receipts"
 )
 
 func TestReceiptOutcomesPreserveRecipientChannelAndRegistryOrder(t *testing.T) {
@@ -22,7 +23,9 @@ func TestReceiptOutcomesPreserveRecipientChannelAndRegistryOrder(t *testing.T) {
 	}
 	event := &domain.NotificationEvent{
 		DefinitionCode: "ordered", Recipients: domain.StringList{"subject-b", "subject-a"},
+		Status: domain.EventStatusPartial,
 	}
+	event.EnsureID()
 	for _, recipient := range event.Recipients {
 		message := &domain.NotificationMessage{
 			EventID: event.ID, Receiver: recipient, Channel: "email",
@@ -32,8 +35,12 @@ func TestReceiptOutcomesPreserveRecipientChannelAndRegistryOrder(t *testing.T) {
 			t.Fatalf("create message: %v", err)
 		}
 		for _, provider := range []string{"provider-a", "provider-b"} {
+			status := domain.AttemptStatusSucceeded
+			if recipient == "subject-b" && provider == "provider-b" {
+				status = domain.AttemptStatusFailed
+			}
 			if err := attempts.Create(ctx, &domain.DeliveryAttempt{
-				MessageID: message.ID, Adapter: provider, Status: domain.AttemptStatusSucceeded,
+				MessageID: message.ID, Adapter: provider, Status: status,
 			}); err != nil {
 				t.Fatalf("create attempt: %v", err)
 			}
@@ -57,6 +64,13 @@ func TestReceiptOutcomesPreserveRecipientChannelAndRegistryOrder(t *testing.T) {
 		if outcomes[idx].SubjectID != expectedSubjects[idx] || outcomes[idx].Provider != expectedProviders[idx] {
 			t.Fatalf("outcome %d order mismatch: %+v", idx, outcomes)
 		}
+	}
+	receipt, err := service.ReceiptForEvent(ctx, event)
+	if err != nil {
+		t.Fatalf("reconstruct receipt: %v", err)
+	}
+	if receipt.Status != receipts.StatusPartial || len(receipt.Outcomes) != 4 {
+		t.Fatalf("unexpected reconstructed receipt: %+v", receipt)
 	}
 }
 

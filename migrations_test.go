@@ -3,26 +3,25 @@ package notifications_test
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"io/fs"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 
 	notifications "github.com/goliatone/go-notifications"
+	"github.com/goliatone/go-notifications/pkg/domain"
+	"github.com/goliatone/go-notifications/pkg/storage"
 	persistence "github.com/goliatone/go-persistence-bun"
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/driver/sqliteshim"
 )
 
 func TestSQLiteMigrationsApplyBaselineAndUpgrades(t *testing.T) {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file:migrations?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	db := bun.NewDB(sqldb, sqlitedialect.New())
-	t.Cleanup(func() {
-		if closeErr := db.Close(); closeErr != nil {
-			t.Errorf("close database: %v", closeErr)
-		}
-	})
+	db, sqldb := newSQLiteMigrationDB(t)
 	ctx := context.Background()
 
 	manager := persistence.NewMigrations()
@@ -32,37 +31,310 @@ func TestSQLiteMigrationsApplyBaselineAndUpgrades(t *testing.T) {
 	if err := manager.Migrate(ctx, db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	if err := manager.Migrate(ctx, db); err != nil {
+		t.Fatalf("repeat migration graph: %v", err)
+	}
 
-	for _, table := range []string{
-		"notification_definitions", "notification_templates", "notification_events",
-		"notification_messages", "notification_delivery_attempts", "notification_preferences",
-		"notification_subscription_groups", "notification_inbox_items",
-		"notification_publications", "notification_retry_operations",
-	} {
-		var count int
-		if err := sqldb.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table,
-		).Scan(&count); err != nil {
-			t.Fatalf("inspect table %s: %v", table, err)
-		}
-		if count != 1 {
-			t.Fatalf("expected table %s", table)
+	schema := map[string][]string{
+		"notification_definitions":         {"id", "code", "name", "channels", "metadata", "template_keys", "policy"},
+		"notification_templates":           {"id", "code", "channel", "locale", "body", "subject", "source", "schema", "metadata"},
+		"notification_events":              {"id", "definition_code", "recipients", "context", "correlation_id", "request_id", "idempotency_scope", "idempotency_key", "request_fingerprint", "transient_dependent", "publication_id", "digest_key", "retry_claim_until", "scheduled_at", "status"},
+		"notification_messages":            {"id", "event_id", "retry_operation_id", "channel", "receiver", "status", "metadata"},
+		"notification_delivery_attempts":   {"id", "message_id", "retry_operation_id", "adapter", "status", "error", "error_code", "payload"},
+		"notification_preferences":         {"id", "subject_id", "subject_type", "definition_code", "channel", "enabled"},
+		"notification_subscription_groups": {"id", "code", "name", "metadata"},
+		"notification_inbox_items":         {"id", "user_id", "message_id", "title", "body", "unread", "action_url"},
+		"notification_publications":        {"id", "kind", "digest_key", "queue_key", "run_at", "status", "claim_until", "attempts", "error_code"},
+		"notification_retry_operations":    {"id", "event_id", "retry_scope", "idempotency_key", "correlation_id", "request_id", "status", "claim_until", "error_code"},
+	}
+	for table, columns := range schema {
+		assertSQLiteTable(ctx, t, sqldb, table)
+		for _, column := range columns {
+			assertSQLiteColumn(ctx, t, sqldb, table, column)
 		}
 	}
 
-	assertSQLiteColumn(ctx, t, sqldb, "notification_events", "request_fingerprint")
-	assertSQLiteColumn(ctx, t, sqldb, "notification_events", "retry_claim_until")
-	assertSQLiteColumn(ctx, t, sqldb, "notification_delivery_attempts", "error_code")
+	for _, index := range []string{
+		"notification_templates_lookup_idx",
+		"notification_messages_event_idx",
+		"notification_delivery_attempts_message_idx",
+		"notification_preferences_subject_idx",
+		"notification_inbox_items_user_idx",
+		"notification_events_idempotency_uidx",
+		"notification_events_publication_idx",
+		"notification_publications_pending_idx",
+		"notification_publications_digest_idx",
+		"notification_publications_open_digest_uidx",
+		"notification_retry_operations_identity_uidx",
+		"notification_retry_operations_event_idx",
+	} {
+		assertSQLiteIndex(ctx, t, sqldb, index)
+	}
+
+	assertSQLiteForeignKey(ctx, t, sqldb, "notification_messages", "event_id", "notification_events")
+	assertSQLiteForeignKey(ctx, t, sqldb, "notification_delivery_attempts", "message_id", "notification_messages")
+	assertSQLiteForeignKey(ctx, t, sqldb, "notification_inbox_items", "message_id", "notification_messages")
+}
+
+func TestSQLiteMigrationsPreservePreUpgradeRecords(t *testing.T) {
+	db, sqldb := newSQLiteMigrationDB(t)
+	ctx := context.Background()
+	root, err := notifications.GetMigrationsFS()
+	if err != nil {
+		t.Fatalf("migration filesystem: %v", err)
+	}
+	baseline, err := fs.ReadFile(root, "sqlite/001_notifications_core.up.sql")
+	if err != nil {
+		t.Fatalf("read baseline: %v", err)
+	}
+	if _, err := sqldb.ExecContext(ctx, string(baseline)); err != nil {
+		t.Fatalf("apply pre-upgrade schema: %v", err)
+	}
+
+	definitionID := uuid.NewString()
+	templateID := uuid.NewString()
+	eventID := uuid.NewString()
+	messageID := uuid.NewString()
+	fixtures := []string{
+		`INSERT INTO notification_definitions (id, code, name) VALUES ('` + definitionID + `', 'account.notice', 'Account notice')`,
+		`INSERT INTO notification_templates (id, code, channel, locale, body) VALUES ('` + templateID + `', 'account.notice', 'email', 'en', 'hello')`,
+		`INSERT INTO notification_events (id, definition_code, recipients, context, status) VALUES ('` + eventID + `', 'account.notice', '["subject-1"]', '{"safe":"value"}', 'pending')`,
+		`INSERT INTO notification_messages (id, event_id, channel, body, receiver, status) VALUES ('` + messageID + `', '` + eventID + `', 'email', 'hello', 'subject-1', 'pending')`,
+		`INSERT INTO notification_delivery_attempts (id, message_id, adapter, status) VALUES ('` + uuid.NewString() + `', '` + messageID + `', 'fake', 'pending')`,
+		`INSERT INTO notification_preferences (id, subject_id, subject_type, enabled) VALUES ('` + uuid.NewString() + `', 'subject-1', 'user', 1)`,
+		`INSERT INTO notification_subscription_groups (id, code, name) VALUES ('` + uuid.NewString() + `', 'admins', 'Admins')`,
+		`INSERT INTO notification_inbox_items (id, user_id, message_id, title, body, unread) VALUES ('` + uuid.NewString() + `', 'subject-1', '` + messageID + `', 'Title', 'Body', 1)`,
+	}
+	for _, statement := range fixtures {
+		if _, err := sqldb.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("insert fixture: %v", err)
+		}
+	}
+
+	manager := persistence.NewMigrations()
+	if err := notifications.RegisterMigrations(manager); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := manager.Migrate(ctx, db); err != nil {
+		t.Fatalf("upgrade pre-existing schema: %v", err)
+	}
+
+	for _, table := range []string{
+		"notification_definitions",
+		"notification_templates",
+		"notification_events",
+		"notification_messages",
+		"notification_delivery_attempts",
+		"notification_preferences",
+		"notification_subscription_groups",
+		"notification_inbox_items",
+	} {
+		var count int
+		if err := sqldb.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected one preserved row in %s, got %d", table, count)
+		}
+	}
+	var body, fingerprint string
+	if err := sqldb.QueryRowContext(ctx,
+		`SELECT m.body, COALESCE(e.request_fingerprint, '') FROM notification_messages m JOIN notification_events e ON e.id = m.event_id WHERE m.id = ?`,
+		messageID,
+	).Scan(&body, &fingerprint); err != nil {
+		t.Fatalf("read upgraded fixture: %v", err)
+	}
+	if body != "hello" || fingerprint != "" {
+		t.Fatalf("fixture changed during upgrade: body=%q fingerprint=%q", body, fingerprint)
+	}
 }
 
 func TestOrderedMigrationSourceIdentityIsStable(t *testing.T) {
-	source, err := notifications.OrderedMigrationSource()
+	source, err := notifications.OrderedMigrationSource("go-users", "host-core")
 	if err != nil {
 		t.Fatalf("source: %v", err)
 	}
 	if source.Name != "go-notifications" || source.SourceKey != "go-notifications" || source.Order != 50 {
 		t.Fatalf("unexpected source identity: %+v", source)
 	}
+	if strings.Join(source.DependsOn, ",") != "go-users,host-core" {
+		t.Fatalf("unexpected dependencies: %v", source.DependsOn)
+	}
+	if source.IdentityMode != persistence.OrderedMigrationIdentitySourceStable {
+		t.Fatalf("unexpected identity mode: %s", source.IdentityMode)
+	}
+}
+
+func TestMigrationDialectsHaveVersionParity(t *testing.T) {
+	root, err := notifications.GetMigrationsFS()
+	if err != nil {
+		t.Fatalf("migration filesystem: %v", err)
+	}
+	versions := make(map[string][]string)
+	for _, dialect := range []string{"postgres", "sqlite"} {
+		entries, err := fs.ReadDir(root, dialect)
+		if err != nil {
+			t.Fatalf("read %s migrations: %v", dialect, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".up.sql") {
+				continue
+			}
+			version, _, _ := strings.Cut(entry.Name(), "_")
+			versions[dialect] = append(versions[dialect], version)
+		}
+		sort.Strings(versions[dialect])
+	}
+	if strings.Join(versions["postgres"], ",") != strings.Join(versions["sqlite"], ",") {
+		t.Fatalf("migration version mismatch: postgres=%v sqlite=%v", versions["postgres"], versions["sqlite"])
+	}
+	if strings.Join(versions["sqlite"], ",") != "001,002" {
+		t.Fatalf("unexpected released migration versions: %v", versions["sqlite"])
+	}
+}
+
+func TestSQLiteBunScopedIdempotencyIsAtomic(t *testing.T) {
+	db, sqldb := newSQLiteMigrationDB(t)
+	sqldb.SetMaxOpenConns(1)
+	ctx := context.Background()
+	manager := persistence.NewMigrations()
+	if err := notifications.RegisterMigrations(manager); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := manager.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := storage.NewBunProviders(db).Events
+
+	const callers = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	createdCount := 0
+	ids := make(map[uuid.UUID]struct{})
+	errs := make(chan error, callers)
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			stored, created, err := repo.CreateIdempotent(ctx, &domain.NotificationEvent{
+				DefinitionCode:     "account.notice",
+				IdempotencyScope:   "tenant:one",
+				IdempotencyKey:     "Key-A",
+				RequestFingerprint: "fingerprint",
+			})
+			if err != nil {
+				errs <- err
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if created {
+				createdCount++
+			}
+			ids[stored.ID] = struct{}{}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		root := err
+		for unwrapped := errors.Unwrap(root); unwrapped != nil; unwrapped = errors.Unwrap(root) {
+			root = unwrapped
+		}
+		t.Errorf("concurrent create: %v (root: %T %v)", err, root, root)
+	}
+	if createdCount != 1 || len(ids) != 1 {
+		t.Fatalf("expected one created event ID, created=%d ids=%v", createdCount, ids)
+	}
+
+	var eventID uuid.UUID
+	for id := range ids {
+		eventID = id
+	}
+	if err := repo.SoftDelete(ctx, eventID); err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+	replayed, created, err := repo.CreateIdempotent(ctx, &domain.NotificationEvent{
+		DefinitionCode:     "account.notice",
+		IdempotencyScope:   "tenant:one",
+		IdempotencyKey:     "Key-A",
+		RequestFingerprint: "fingerprint",
+	})
+	if err != nil || created || replayed.ID != eventID {
+		t.Fatalf("soft-deleted Bun identity was reused: replayed=%+v created=%v err=%v", replayed, created, err)
+	}
+}
+
+func newSQLiteMigrationDB(t *testing.T) (*bun.DB, *sql.DB) {
+	t.Helper()
+	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
+	sqldb, err := sql.Open(sqliteshim.DriverName(), dsn)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db := bun.NewDB(sqldb, sqlitedialect.New())
+	t.Cleanup(func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Errorf("close database: %v", closeErr)
+		}
+	})
+	return db, sqldb
+}
+
+func assertSQLiteTable(ctx context.Context, t *testing.T, db *sql.DB, table string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table,
+	).Scan(&count); err != nil {
+		t.Fatalf("inspect table %s: %v", table, err)
+	}
+	if count != 1 {
+		t.Fatalf("expected table %s", table)
+	}
+}
+
+func assertSQLiteIndex(ctx context.Context, t *testing.T, db *sql.DB, index string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, index,
+	).Scan(&count); err != nil {
+		t.Fatalf("inspect index %s: %v", index, err)
+	}
+	if count != 1 {
+		t.Fatalf("expected index %s", index)
+	}
+}
+
+func assertSQLiteForeignKey(ctx context.Context, t *testing.T, db *sql.DB, table, column, target string) {
+	t.Helper()
+	rows, err := db.QueryContext(ctx, `PRAGMA foreign_key_list(`+table+`)`)
+	if err != nil {
+		t.Fatalf("foreign keys for %s: %v", table, err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			t.Errorf("close foreign key rows: %v", closeErr)
+		}
+	}()
+	for rows.Next() {
+		var id, seq int
+		var referencedTable, from, to, onUpdate, onDelete, match string
+		if err := rows.Scan(&id, &seq, &referencedTable, &from, &to, &onUpdate, &onDelete, &match); err != nil {
+			t.Fatalf("scan foreign key for %s: %v", table, err)
+		}
+		if from == column && referencedTable == target {
+			return
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate foreign keys for %s: %v", table, err)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate foreign keys for %s: %v", table, err)
+	}
+	t.Fatalf("expected %s.%s to reference %s", table, column, target)
 }
 
 func assertSQLiteColumn(ctx context.Context, t *testing.T, db *sql.DB, table, column string) {

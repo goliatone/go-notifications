@@ -30,9 +30,10 @@ func TestDefinitionPolicyResolvesExplicitModes(t *testing.T) {
 func TestTransientOverlayAlwaysDisablesContentAndLinks(t *testing.T) {
 	decision := WithTransientOverlay(Decision{
 		MessageMode: Full, InboxMode: Full, PersistLinkURLs: true, PersistLinkRecords: true,
+		AllowedMetadata: []string{"rendered_secret"},
 	}, true)
 	if decision.MessageMode != MetadataOnly || decision.InboxMode != StateOnly ||
-		decision.PersistLinkURLs || decision.PersistLinkRecords {
+		decision.PersistLinkURLs || decision.PersistLinkRecords || len(decision.AllowedMetadata) != 0 {
 		t.Fatalf("transient overlay did not fail closed: %+v", decision)
 	}
 }

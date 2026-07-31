@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/goliatone/go-notifications/pkg/domain"
 )
 
 func TestDefaultPolicyMasksAddressesAndDropsSensitiveFields(t *testing.T) {
@@ -14,7 +16,9 @@ func TestDefaultPolicyMasksAddressesAndDropsSensitiveFields(t *testing.T) {
 	}
 	safe := policy.SafeMetadata(map[string]any{
 		"provider": "smtp", "authorization": "secret", "action_url": "https://private",
-		"nested": map[string]any{"token": "private", "result": "ok"},
+		"nested":  domain.JSONMap{"token": "private", "result": "ok"},
+		"result":  "https://private.example/path",
+		"contact": "person@example.com",
 	})
 	if safe["provider"] != "smtp" || safe["authorization"] != nil || safe["action_url"] != nil {
 		t.Fatalf("unexpected safe metadata: %#v", safe)
@@ -25,6 +29,9 @@ func TestDefaultPolicyMasksAddressesAndDropsSensitiveFields(t *testing.T) {
 	}
 	if nested["token"] != nil || nested["result"] != "ok" {
 		t.Fatalf("nested metadata was not sanitized: %#v", nested)
+	}
+	if safe["result"] != "[redacted]" || safe["contact"] != "[redacted]" {
+		t.Fatalf("sensitive string values were not sanitized: %#v", safe)
 	}
 }
 

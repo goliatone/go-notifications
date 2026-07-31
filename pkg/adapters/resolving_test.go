@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/goliatone/go-notifications/pkg/privacy"
@@ -38,6 +39,28 @@ func TestResolvingMessengerReturnsSafeResolverError(t *testing.T) {
 	}
 }
 
+func TestResolvingMessengerSanitizesInnerDeliveryError(t *testing.T) {
+	raw := errors.New("smtp rejected resolved destination person@example.com")
+	inner := &captureMessenger{name: "smtp", err: raw}
+	diagnostic := &captureDiagnostic{}
+	messenger := ResolvingMessenger{
+		Inner: inner,
+		Resolver: staticResolver{result: ResolvedRecipient{
+			Destination: "person@example.com",
+		}},
+		Privacy: privacy.DefaultPolicy{}, Diagnostic: diagnostic,
+	}
+	err := messenger.Send(context.Background(), Message{ID: "message-1", To: "subject-123", Channel: "email"})
+	var safe privacy.SafeError
+	if !errors.As(err, &safe) || errors.Is(err, raw) ||
+		strings.Contains(err.Error(), "person@example.com") {
+		t.Fatalf("expected non-wrapping safe delivery error, got %v", err)
+	}
+	if !errors.Is(diagnostic.cause, raw) {
+		t.Fatalf("raw error did not reach privileged diagnostic sink: %v", diagnostic.cause)
+	}
+}
+
 type staticResolver struct {
 	result ResolvedRecipient
 	err    error
@@ -50,6 +73,15 @@ func (r staticResolver) Resolve(context.Context, RecipientRequest) (ResolvedReci
 type captureMessenger struct {
 	name    string
 	message Message
+	err     error
+}
+
+type captureDiagnostic struct {
+	cause error
+}
+
+func (d *captureDiagnostic) Report(_ context.Context, event privacy.DiagnosticEvent) {
+	d.cause = event.Cause
 }
 
 func (m *captureMessenger) Name() string { return m.name }
@@ -58,5 +90,5 @@ func (m *captureMessenger) Capabilities() Capability {
 }
 func (m *captureMessenger) Send(_ context.Context, message Message) error {
 	m.message = message
-	return nil
+	return m.err
 }

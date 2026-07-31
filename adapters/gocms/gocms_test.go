@@ -70,7 +70,17 @@ func TestTemplatesFromBlockSnapshot(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected en template")
 	}
+	assertEnglishSnapshot(t, en, spec)
 
+	es, ok := byLocale["es"]
+	if !ok {
+		t.Fatalf("expected es template")
+	}
+	assertSpanishSnapshot(t, es)
+}
+
+func assertEnglishSnapshot(t *testing.T, en templates.TemplateInput, spec TemplateSpec) {
+	t.Helper()
 	if en.Source.Type != TemplateSourceType {
 		t.Fatalf("unexpected source type: %s", en.Source.Type)
 	}
@@ -107,11 +117,10 @@ func TestTemplatesFromBlockSnapshot(t *testing.T) {
 	if spec.Metadata["source"] != "cms" {
 		t.Fatalf("expected spec metadata to remain unchanged")
 	}
+}
 
-	es, ok := byLocale["es"]
-	if !ok {
-		t.Fatalf("expected es template")
-	}
+func assertSpanishSnapshot(t *testing.T, es templates.TemplateInput) {
+	t.Helper()
 	esBody := mustValue[string](t, es.Source.Payload["body"], "body")
 	if esBody != "<p>Hola {{ Name }}</p>" {
 		t.Fatalf("expected override body, got %q", esBody)

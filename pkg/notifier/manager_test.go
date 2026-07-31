@@ -120,7 +120,17 @@ func TestManagerSendMultiChannelSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("send: %v", err)
 	}
+	assertSuccessfulDelivery(t, ctx, eventRepo, msgRepo, attemptRepo)
+}
 
+func assertSuccessfulDelivery(
+	t *testing.T,
+	ctx context.Context,
+	eventRepo *memory.EventRepository,
+	msgRepo *memory.MessageRepository,
+	attemptRepo *memory.DeliveryRepository,
+) {
+	t.Helper()
 	eventList, err := eventRepo.List(ctx, store.ListOptions{})
 	if err != nil {
 		t.Fatalf("list events: %v", err)
@@ -156,6 +166,36 @@ func TestManagerSendMultiChannelSuccess(t *testing.T) {
 
 func TestManagerEmitsActivityEvents(t *testing.T) {
 	ctx := context.Background()
+	manager, hook := newActivityManager(t, ctx)
+	err := manager.Send(ctx, Event{
+		DefinitionCode: "activity",
+		Recipients:     []string{"user@example.com"},
+		Context:        map[string]any{"Name": "Rosa"},
+		ActorID:        "actor-1",
+		TenantID:       "tenant-1",
+		Locale:         "en",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if len(hook.events) == 0 {
+		t.Fatalf("expected activity events to be emitted")
+	}
+
+	created, delivered := notificationActivities(hook.events)
+	if len(created) != 1 {
+		t.Fatalf("expected 1 notification.created activity, got %d", len(created))
+	}
+	if len(delivered) != 1 {
+		t.Fatalf("expected 1 notification.delivered activity, got %d", len(delivered))
+	}
+
+	assertDeliveredActivity(t, delivered[0])
+}
+
+func newActivityManager(t *testing.T, ctx context.Context) (*Manager, *captureHook) {
+	t.Helper()
 	defRepo := memory.NewDefinitionRepository()
 	eventRepo := memory.NewEventRepository()
 	msgRepo := memory.NewMessageRepository()
@@ -234,41 +274,23 @@ func TestManagerEmitsActivityEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager: %v", err)
 	}
+	return manager, hook
+}
 
-	err = manager.Send(ctx, Event{
-		DefinitionCode: "activity",
-		Recipients:     []string{"user@example.com"},
-		Context:        map[string]any{"Name": "Rosa"},
-		ActorID:        "actor-1",
-		TenantID:       "tenant-1",
-		Locale:         "en",
-	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
-
-	if len(hook.events) == 0 {
-		t.Fatalf("expected activity events to be emitted")
-	}
-
-	var created []activity.Event
-	var delivered []activity.Event
-	for _, evt := range hook.events {
-		switch evt.Verb {
+func notificationActivities(events []activity.Event) (created, delivered []activity.Event) {
+	for _, event := range events {
+		switch event.Verb {
 		case "notification.created":
-			created = append(created, evt)
+			created = append(created, event)
 		case "notification.delivered":
-			delivered = append(delivered, evt)
+			delivered = append(delivered, event)
 		}
 	}
-	if len(created) != 1 {
-		t.Fatalf("expected 1 notification.created activity, got %d", len(created))
-	}
-	if len(delivered) != 1 {
-		t.Fatalf("expected 1 notification.delivered activity, got %d", len(delivered))
-	}
+	return created, delivered
+}
 
-	deliveredEvt := delivered[0]
+func assertDeliveredActivity(t *testing.T, deliveredEvt activity.Event) {
+	t.Helper()
 	if deliveredEvt.UserID == "user@example.com" || deliveredEvt.UserID == "" {
 		t.Fatalf("expected a non-empty privacy-safe delivered user_id, got %s", deliveredEvt.UserID)
 	}
@@ -372,13 +394,17 @@ func TestManagerSendRecordsFailures(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected send failure")
 	}
+	assertFailedAttempts(t, ctx, attemptRepo, 2)
+}
 
+func assertFailedAttempts(t *testing.T, ctx context.Context, attemptRepo *memory.DeliveryRepository, want int) {
+	t.Helper()
 	attemptList, err := attemptRepo.List(ctx, store.ListOptions{})
 	if err != nil {
 		t.Fatalf("list attempts: %v", err)
 	}
-	if attemptList.Total != 2 {
-		t.Fatalf("expected 2 attempts, got %d", attemptList.Total)
+	if attemptList.Total != want {
+		t.Fatalf("expected %d attempts, got %d", want, attemptList.Total)
 	}
 	for _, attempt := range attemptList.Items {
 		if attempt.Status != domain.AttemptStatusFailed {

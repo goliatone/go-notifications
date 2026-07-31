@@ -29,13 +29,20 @@ func TestNoSecretFieldsLoggedDirectly(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(root, secretLogFileVisitor(secretSet))
+	if err != nil {
+		t.Fatalf("log-safety lint failed: %v", err)
+	}
+}
+
+func secretLogFileVisitor(secretSet map[string]struct{}) fs.WalkDirFunc {
+	return func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", "tmp", "vendor", "node_modules":
+			case ".git", ".tmp", "tmp", "vendor", "node_modules":
 				return filepath.SkipDir
 			}
 			return nil
@@ -56,49 +63,61 @@ func TestNoSecretFieldsLoggedDirectly(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		var lintErr error
-		ast.Inspect(file, func(n ast.Node) bool {
-			if lintErr != nil {
-				return false
-			}
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			switch sel.Sel.Name {
-			case "Trace", "Debug", "Info", "Warn", "Error", "Fatal":
-			default:
-				return true
-			}
-			for i, arg := range call.Args {
-				if i == 0 {
-					continue
-				}
-				lit, ok := arg.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					continue
-				}
-				key, err := strconv.Unquote(lit.Value)
-				if err != nil {
-					continue
-				}
-				if _, exists := secretSet[key]; exists {
-					lintErr = fmt.Errorf("secret-like field %q logged in %s; mask it or drop the field", key, path)
-					return false
-				}
-			}
-			return true
-		})
+		lintErr := inspectSecretLogCalls(file, path, secretSet)
 		if lintErr != nil {
 			return lintErr
 		}
 		return nil
-	})
-	if err != nil {
-		t.Fatalf("log-safety lint failed: %v", err)
 	}
+}
+
+func inspectSecretLogCalls(file *ast.File, path string, secretSet map[string]struct{}) error {
+	var lintErr error
+	ast.Inspect(file, func(node ast.Node) bool {
+		if lintErr != nil {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok || !isLoggerCall(call) {
+			return true
+		}
+		if key := loggedSecretKey(call.Args, secretSet); key != "" {
+			lintErr = fmt.Errorf("secret-like field %q logged in %s; mask it or drop the field", key, path)
+			return false
+		}
+		return true
+	})
+	return lintErr
+}
+
+func isLoggerCall(call *ast.CallExpr) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	switch selector.Sel.Name {
+	case "Trace", "Debug", "Info", "Warn", "Error", "Fatal":
+		return true
+	default:
+		return false
+	}
+}
+
+func loggedSecretKey(args []ast.Expr, secretSet map[string]struct{}) string {
+	for index, argument := range args {
+		if index == 0 {
+			continue
+		}
+		literal, ok := argument.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			continue
+		}
+		key, err := strconv.Unquote(literal.Value)
+		if err == nil {
+			if _, exists := secretSet[key]; exists {
+				return key
+			}
+		}
+	}
+	return ""
 }

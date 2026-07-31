@@ -12,14 +12,21 @@ func TestProjectMessagePersistenceModes(t *testing.T) {
 		Subject: "private subject", Body: "private body",
 		ActionURL: "https://private/action", ManifestURL: "https://private/manifest",
 		URL: "https://private", Receiver: "person@example.com",
-		Metadata: domain.JSONMap{"campaign_id": "campaign-1", "secret": "private"},
+		Metadata: domain.JSONMap{
+			"campaign_id": "campaign-1",
+			"secret":      "private",
+			"html_body":   "private html",
+		},
 	}
 
 	metadataOnly := projectMessage(message, persistencepolicy.Decision{
-		MessageMode: persistencepolicy.MetadataOnly, AllowedMetadata: []string{"campaign_id"},
+		MessageMode:     persistencepolicy.MetadataOnly,
+		AllowedMetadata: []string{"campaign_id", "secret", "html_body"},
 	})
 	if metadataOnly.Subject != "" || metadataOnly.Body != "" || metadataOnly.ActionURL != "" ||
-		metadataOnly.Metadata["campaign_id"] != "campaign-1" || metadataOnly.Metadata["secret"] != nil {
+		metadataOnly.Metadata["campaign_id"] != "campaign-1" ||
+		metadataOnly.Metadata["secret"] != nil ||
+		metadataOnly.Metadata["html_body"] != nil {
 		t.Fatalf("metadata-only projection leaked content: %+v", metadataOnly)
 	}
 

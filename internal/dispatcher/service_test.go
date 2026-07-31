@@ -2,7 +2,9 @@ package dispatcher
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +18,9 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	"github.com/goliatone/go-notifications/pkg/links"
+	"github.com/goliatone/go-notifications/pkg/persistencepolicy"
+	"github.com/goliatone/go-notifications/pkg/privacy"
+	"github.com/goliatone/go-notifications/pkg/receipts"
 	"github.com/goliatone/go-notifications/pkg/templates"
 	"github.com/google/uuid"
 )
@@ -115,6 +120,15 @@ func (a *testAdapter) Count() int {
 type failingAttemptAdapter struct {
 	name  string
 	calls int
+}
+
+type captureInbox struct {
+	messages []*domain.NotificationMessage
+}
+
+func (i *captureInbox) DeliverFromMessage(_ context.Context, message *domain.NotificationMessage) error {
+	i.messages = append(i.messages, message)
+	return nil
 }
 
 func (a *failingAttemptAdapter) Name() string { return a.name }
@@ -365,201 +379,526 @@ func TestDispatcherPerChannelLinkBuilderUsesOverrides(t *testing.T) {
 	}
 }
 
+func TestTransientDeliveryReachesAdapterButNotPersistence(t *testing.T) {
+	ctx := context.Background()
+	marker := "one-time-credential-marker"
+	builder := &captureLinkBuilder{
+		buildFn: func(req links.LinkRequest) (links.ResolvedLinks, error) {
+			return links.ResolvedLinks{
+				ActionURL: "https://private.invalid/" + marker,
+				Metadata:  map[string]any{"token": marker},
+				Records: []links.LinkRecord{{
+					ID: "link-1", URL: "https://private.invalid/" + marker,
+					Metadata: map[string]any{"token": marker},
+				}},
+			}, nil
+		},
+	}
+	storeSpy := &captureStore{}
+	observer := &captureObserver{}
+	adapter := &testAdapter{name: "test", channels: []string{"email"}}
+	svc, msgRepo, tplSvc := newTestDispatcher(t, builder, storeSpy, observer, links.FailurePolicy{}, adapter)
+	svc.cfg.EnvFallbackAllowlist = append(svc.cfg.EnvFallbackAllowlist, "subject-1")
+	seedTemplate(t, tplSvc, "secure-email", "email")
+	definition := &domain.NotificationDefinition{
+		Code:         "secure",
+		Channels:     domain.StringList{"email"},
+		TemplateKeys: domain.StringList{"email:secure-email"},
+	}
+	event := &domain.NotificationEvent{
+		RecordMeta:         domain.RecordMeta{ID: uuid.New()},
+		DefinitionCode:     definition.Code,
+		Recipients:         domain.StringList{"subject-1"},
+		Context:            domain.JSONMap{"safe": "persisted"},
+		TransientDependent: true,
+	}
+	decision := persistencepolicy.WithTransientOverlay(persistencepolicy.Decision{
+		MessageMode:        persistencepolicy.Full,
+		InboxMode:          persistencepolicy.Full,
+		PersistLinkURLs:    true,
+		PersistLinkRecords: true,
+		AllowedMetadata:    []string{"html_body"},
+	}, true)
+	job := deliveryJob{
+		event: event, channel: "email", templateCode: "secure-email",
+		recipient: "subject-1", locale: "en",
+		transient: map[string]any{
+			"channel_overrides": map[string]any{
+				"email": map[string]any{"body": marker, "html_body": marker},
+			},
+		},
+		persistence: decision,
+	}
+	if err := svc.processDelivery(ctx, event, definition, job); err != nil {
+		t.Fatalf("transient delivery: %v", err)
+	}
+	assertTransientDelivery(t, ctx, marker, svc, msgRepo, builder, storeSpy, observer, adapter)
+}
+
+func assertTransientDelivery(
+	t *testing.T,
+	ctx context.Context,
+	marker string,
+	svc *Service,
+	msgRepo *memory.MessageRepository,
+	builder *captureLinkBuilder,
+	storeSpy *captureStore,
+	observer *captureObserver,
+	adapter *testAdapter,
+) {
+	t.Helper()
+	if adapter.Count() != 1 || adapter.sends[0].Body != marker {
+		t.Fatalf("adapter did not receive transient render: %+v", adapter.sends)
+	}
+	builder.mu.Lock()
+	builderPayload := builder.calls[0].Payload
+	builder.mu.Unlock()
+	overrides, ok := builderPayload["channel_overrides"].(map[string]any)
+	if !ok || len(overrides) == 0 {
+		t.Fatalf("link builder did not receive transient payload: %+v", builderPayload)
+	}
+	messages, err := msgRepo.List(ctx, store.ListOptions{})
+	if err != nil || messages.Total != 1 {
+		t.Fatalf("list messages: %+v err=%v", messages, err)
+	}
+	assertRedactedMessage(t, messages.Items[0])
+	if storeSpy.calls != 0 {
+		t.Fatalf("transient delivery persisted %d link records", storeSpy.calls)
+	}
+	observer.mu.Lock()
+	observerCalls := len(observer.calls)
+	observer.mu.Unlock()
+	if observerCalls != 0 {
+		t.Fatalf("transient delivery emitted %d link observations", observerCalls)
+	}
+	attempts, err := svc.attempts.List(ctx, store.ListOptions{})
+	if err != nil {
+		t.Fatalf("list attempts: %v", err)
+	}
+	encoded, err := json.Marshal(attempts)
+	if err != nil || strings.Contains(string(encoded), marker) {
+		t.Fatalf("transient marker leaked into attempts: %s err=%v", encoded, err)
+	}
+}
+
+func assertRedactedMessage(t *testing.T, persisted domain.NotificationMessage) {
+	t.Helper()
+	if persisted.Subject != "" || persisted.Body != "" || persisted.ActionURL != "" ||
+		len(persisted.Metadata) != 0 || persisted.Receiver != "subject-1" {
+		t.Fatalf("transient content leaked into message projection: %+v", persisted)
+	}
+}
+
+func TestTransientInboxDeliveryFailsClosedBeforeInboxPersistence(t *testing.T) {
+	ctx := context.Background()
+	adapter := &testAdapter{name: "test", channels: []string{"email"}}
+	svc, msgRepo, tplSvc := newTestDispatcher(t, nil, nil, nil, links.FailurePolicy{}, adapter)
+	inboxSink := &captureInbox{}
+	svc.inbox = inboxSink
+	seedTemplate(t, tplSvc, "secure-inbox", "inbox")
+	definition := &domain.NotificationDefinition{
+		Code:         "secure-inbox",
+		Channels:     domain.StringList{"inbox"},
+		TemplateKeys: domain.StringList{"inbox:secure-inbox"},
+	}
+	event := &domain.NotificationEvent{
+		RecordMeta:         domain.RecordMeta{ID: uuid.New()},
+		DefinitionCode:     definition.Code,
+		Recipients:         domain.StringList{"subject-1"},
+		TransientDependent: true,
+	}
+	job := deliveryJob{
+		event: event, channel: "inbox", templateCode: "secure-inbox",
+		recipient: "subject-1", locale: "en",
+		transient: map[string]any{"private": "one-time-marker"},
+		persistence: persistencepolicy.WithTransientOverlay(persistencepolicy.Decision{
+			MessageMode: persistencepolicy.Full,
+			InboxMode:   persistencepolicy.Full,
+		}, true),
+	}
+	if err := svc.processDelivery(ctx, event, definition, job); err != nil {
+		t.Fatalf("transient inbox delivery: %v", err)
+	}
+	if len(inboxSink.messages) != 0 {
+		t.Fatalf("transient content reached inbox persistence: %+v", inboxSink.messages)
+	}
+	messages, err := msgRepo.List(ctx, store.ListOptions{})
+	if err != nil || messages.Total != 1 ||
+		messages.Items[0].Status != domain.MessageStatusSkipped ||
+		messages.Items[0].Body != "" {
+		t.Fatalf("unexpected durable inbox projection: %+v err=%v", messages, err)
+	}
+}
+
+type persistenceModeTestCase struct {
+	name            string
+	decision        persistencepolicy.Decision
+	wantBody        string
+	wantCampaign    bool
+	wantAnyMetadata bool
+}
+
+func TestPersistenceModesKeepAdapterContentAndUpdatesRedacted(t *testing.T) {
+	tests := []persistenceModeTestCase{
+		{
+			name: "full",
+			decision: persistencepolicy.Decision{
+				MessageMode:     persistencepolicy.Full,
+				InboxMode:       persistencepolicy.Full,
+				PersistLinkURLs: true, PersistLinkRecords: true,
+			},
+			wantBody: "Private body", wantCampaign: true, wantAnyMetadata: true,
+		},
+		{
+			name: "metadata only",
+			decision: persistencepolicy.Decision{
+				MessageMode:     persistencepolicy.MetadataOnly,
+				InboxMode:       persistencepolicy.MetadataOnly,
+				AllowedMetadata: []string{"campaign_id", "secret", "html_body"},
+			},
+			wantCampaign: true, wantAnyMetadata: true,
+		},
+		{
+			name: "state only",
+			decision: persistencepolicy.Decision{
+				MessageMode: persistencepolicy.StateOnly,
+				InboxMode:   persistencepolicy.StateOnly,
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { runPersistenceModeCase(t, tc) })
+	}
+}
+
+func runPersistenceModeCase(t *testing.T, tc persistenceModeTestCase) {
+	ctx := context.Background()
+	adapter := &testAdapter{name: "test", channels: []string{"email"}}
+	svc, msgRepo, tplSvc := newTestDispatcher(t, nil, nil, nil, links.FailurePolicy{}, adapter)
+	svc.cfg.EnvFallbackAllowlist = append(svc.cfg.EnvFallbackAllowlist, "subject-1")
+	_, err := tplSvc.Create(ctx, templates.TemplateInput{
+		Code: "policy-email", Channel: "email", Locale: "en",
+		Subject: "Private subject", Body: "Private body", Format: "text/plain",
+		Metadata: domain.JSONMap{
+			"campaign_id": "campaign-1",
+			"secret":      "private",
+			"html_body":   "private html",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+	definition := &domain.NotificationDefinition{
+		Code: "policy", Channels: domain.StringList{"email"},
+		TemplateKeys: domain.StringList{"email:policy-email"},
+	}
+	event := &domain.NotificationEvent{
+		RecordMeta:     domain.RecordMeta{ID: uuid.New()},
+		DefinitionCode: definition.Code, Recipients: domain.StringList{"subject-1"},
+	}
+	job := deliveryJob{
+		event: event, channel: "email", templateCode: "policy-email",
+		recipient: "subject-1", locale: "en", persistence: tc.decision,
+	}
+	if deliveryErr := svc.processDelivery(ctx, event, definition, job); deliveryErr != nil {
+		t.Fatalf("process delivery: %v", deliveryErr)
+	}
+	if adapter.Count() != 1 || adapter.sends[0].Body != "Private body" {
+		t.Fatalf("adapter did not receive full content: %+v", adapter.sends)
+	}
+	messages, err := msgRepo.List(ctx, store.ListOptions{})
+	if err != nil || messages.Total != 1 {
+		t.Fatalf("list messages: %+v err=%v", messages, err)
+	}
+	message := messages.Items[0]
+	if message.Body != tc.wantBody {
+		t.Fatalf("persisted body = %q, want %q", message.Body, tc.wantBody)
+	}
+	if got := message.Metadata["campaign_id"] == "campaign-1"; got != tc.wantCampaign {
+		t.Fatalf("campaign metadata presence = %v, want %v: %+v", got, tc.wantCampaign, message.Metadata)
+	}
+	if (len(message.Metadata) > 0) != tc.wantAnyMetadata {
+		t.Fatalf("metadata presence mismatch: %+v", message.Metadata)
+	}
+	if tc.decision.MessageMode != persistencepolicy.Full &&
+		(message.Subject != "" || message.ActionURL != "" ||
+			message.Metadata["secret"] != nil || message.Metadata["html_body"] != nil) {
+		t.Fatalf("redacted update restored private content: %+v", message)
+	}
+}
+
+func TestStrictDefinitionPolicyFailurePreventsAdapterDelivery(t *testing.T) {
+	ctx := context.Background()
+	adapter := &testAdapter{name: "test", channels: []string{"email"}}
+	svc, _, tplSvc := newTestDispatcher(t, nil, nil, nil, links.FailurePolicy{}, adapter)
+	seedTemplate(t, tplSvc, "strict-email", "email")
+	definition := &domain.NotificationDefinition{
+		Code: "strict", Channels: domain.StringList{"email"},
+		TemplateKeys: domain.StringList{"email:strict-email"},
+		Policy:       domain.JSONMap{"persistence_mode": "invalid"},
+	}
+	if err := svc.definitions.Create(ctx, definition); err != nil {
+		t.Fatalf("create definition: %v", err)
+	}
+	event := &domain.NotificationEvent{
+		DefinitionCode: "strict", Recipients: domain.StringList{testRecipient},
+	}
+	if err := svc.events.Create(ctx, event); err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+	svc.persistence = persistencepolicy.DefinitionPolicy{}
+	receipt, err := svc.DispatchWithReceipt(ctx, event, DispatchOptions{})
+	var safe privacy.SafeError
+	if !errors.As(err, &safe) || receipt.Status != receipts.StatusFailed {
+		t.Fatalf("expected safe strict-policy failure, receipt=%+v err=%v", receipt, err)
+	}
+	if adapter.Count() != 0 {
+		t.Fatalf("strict policy failure delivered %d messages", adapter.Count())
+	}
+}
+
+func TestLinkObserverReceivesSanitizedProjection(t *testing.T) {
+	ctx := context.Background()
+	storeSpy := &captureStore{}
+	observer := &captureObserver{}
+	svc := &Service{
+		linkStore: storeSpy, linkObserver: observer,
+		linkPolicy: links.FailurePolicy{}, privacy: privacy.DefaultPolicy{},
+	}
+	request := links.LinkRequest{
+		Recipient: "person@example.com",
+		Payload: map[string]any{
+			"action_url": "https://private.invalid/action",
+			"nested":     domain.JSONMap{"token": "private", "result": "ok"},
+		},
+		ResolvedURLs: map[string]string{"action_url": "https://private.invalid/action"},
+	}
+	resolved := links.ResolvedLinks{
+		ActionURL: "https://private.invalid/action",
+		Metadata:  map[string]any{"token": "private", "result": "ok"},
+		Records: []links.LinkRecord{{
+			URL: "https://private.invalid/action", Recipient: "person@example.com",
+			Metadata: map[string]any{"token": "private", "result": "ok"},
+		}},
+	}
+	if err := svc.invokeLinkHooks(ctx, request, resolved, true, true); err != nil {
+		t.Fatalf("invoke link hooks: %v", err)
+	}
+	if storeSpy.calls != 1 || storeSpy.records[0][0].URL == "" {
+		t.Fatalf("full persistence store did not receive durable URL projection: %+v", storeSpy.records)
+	}
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	if len(observer.calls) != 1 {
+		t.Fatalf("expected one observer call, got %d", len(observer.calls))
+	}
+	got := observer.calls[0]
+	if got.Request.ResolvedURLs != nil || got.Resolved.ActionURL != "" ||
+		got.Resolved.Metadata["token"] != nil || got.Resolved.Records[0].URL != "" ||
+		got.Resolved.Records[0].Metadata["token"] != nil {
+		t.Fatalf("observer received unsafe link projection: %+v", got)
+	}
+}
+
 func TestDispatcherLinkHooksErrorHandling(t *testing.T) {
-	t.Run("lenient store error continues", func(t *testing.T) {
-		ctx := context.Background()
-		builder := &captureLinkBuilder{
-			buildFn: func(req links.LinkRequest) (links.ResolvedLinks, error) {
-				return links.ResolvedLinks{ActionURL: "builder-url"}, nil
-			},
-		}
-		adapter := &testAdapter{name: "test", channels: []string{"email"}}
-		storeSpy := &captureStore{
-			err: errors.New("store failed"),
-		}
-		observer := &captureObserver{}
-		svc, msgRepo, tplSvc := newTestDispatcher(t, builder, storeSpy, observer, links.FailurePolicy{
-			Store: links.FailureLenient,
-		}, adapter)
-		storeSpy.messageRepo = msgRepo
+	t.Run("lenient store error continues", testLenientLinkStoreError)
+	t.Run("lenient builder error triggers observer only", testLenientLinkBuilderError)
+	t.Run("strict store error stops delivery", testStrictLinkStoreError)
+}
 
-		seedTemplate(t, tplSvc, "welcome-email", "email")
+func testLenientLinkStoreError(t *testing.T) {
+	ctx := context.Background()
+	builder := &captureLinkBuilder{
+		buildFn: func(req links.LinkRequest) (links.ResolvedLinks, error) {
+			return links.ResolvedLinks{ActionURL: "builder-url"}, nil
+		},
+	}
+	adapter := &testAdapter{name: "test", channels: []string{"email"}}
+	storeSpy := &captureStore{
+		err: errors.New("store failed"),
+	}
+	observer := &captureObserver{}
+	svc, msgRepo, tplSvc := newTestDispatcher(t, builder, storeSpy, observer, links.FailurePolicy{
+		Store: links.FailureLenient,
+	}, adapter)
+	storeSpy.messageRepo = msgRepo
 
-		def := &domain.NotificationDefinition{
-			Code:         "welcome",
-			Channels:     domain.StringList{"email"},
-			TemplateKeys: domain.StringList{"email:welcome-email"},
-		}
-		event := &domain.NotificationEvent{
-			RecordMeta:     domain.RecordMeta{ID: uuid.New()},
-			DefinitionCode: def.Code,
-			Recipients:     domain.StringList{testRecipient},
-			Context:        domain.JSONMap{},
-		}
+	seedTemplate(t, tplSvc, "welcome-email", "email")
 
-		job := deliveryJob{
-			event:        event,
-			channel:      "email",
-			templateCode: "welcome-email",
-			recipient:    testRecipient,
-			locale:       "en",
-		}
-		if err := svc.processDelivery(ctx, event, def, job); err != nil {
-			t.Fatalf("expected delivery to continue, got %v", err)
-		}
+	def := &domain.NotificationDefinition{
+		Code:         "welcome",
+		Channels:     domain.StringList{"email"},
+		TemplateKeys: domain.StringList{"email:welcome-email"},
+	}
+	event := &domain.NotificationEvent{
+		RecordMeta:     domain.RecordMeta{ID: uuid.New()},
+		DefinitionCode: def.Code,
+		Recipients:     domain.StringList{testRecipient},
+		Context:        domain.JSONMap{},
+	}
 
-		list, err := msgRepo.List(ctx, store.ListOptions{})
-		if err != nil {
-			t.Fatalf("list messages: %v", err)
-		}
-		if list.Total != 1 {
-			t.Fatalf("expected 1 message, got %d", list.Total)
-		}
-		if adapter.Count() != 1 {
-			t.Fatalf("expected adapter send, got %d", adapter.Count())
-		}
-		if storeSpy.calls != 1 {
-			t.Fatalf("expected store call, got %d", storeSpy.calls)
-		}
-		if storeSpy.prePersistHits != 0 {
-			t.Fatalf("expected store before persistence, got %d hits", storeSpy.prePersistHits)
-		}
-		observer.mu.Lock()
-		observerCalls := len(observer.calls)
-		observer.mu.Unlock()
-		if observerCalls != 1 {
-			t.Fatalf("expected observer call, got %d", observerCalls)
-		}
-	})
+	job := deliveryJob{
+		event:        event,
+		channel:      "email",
+		templateCode: "welcome-email",
+		recipient:    testRecipient,
+		locale:       "en",
+	}
+	if err := svc.processDelivery(ctx, event, def, job); err != nil {
+		t.Fatalf("expected delivery to continue, got %v", err)
+	}
 
-	t.Run("lenient builder error triggers observer only", func(t *testing.T) {
-		ctx := context.Background()
-		builder := &captureLinkBuilder{
-			buildFn: func(req links.LinkRequest) (links.ResolvedLinks, error) {
-				return links.ResolvedLinks{}, errors.New("builder failed")
-			},
-		}
-		adapter := &testAdapter{name: "test", channels: []string{"email"}}
-		storeSpy := &captureStore{}
-		observer := &captureObserver{}
-		svc, msgRepo, tplSvc := newTestDispatcher(t, builder, storeSpy, observer, links.FailurePolicy{
-			Builder: links.FailureLenient,
-		}, adapter)
-		storeSpy.messageRepo = msgRepo
+	list, err := msgRepo.List(ctx, store.ListOptions{})
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if list.Total != 1 {
+		t.Fatalf("expected 1 message, got %d", list.Total)
+	}
+	if adapter.Count() != 1 {
+		t.Fatalf("expected adapter send, got %d", adapter.Count())
+	}
+	if storeSpy.calls != 1 {
+		t.Fatalf("expected store call, got %d", storeSpy.calls)
+	}
+	if storeSpy.prePersistHits != 0 {
+		t.Fatalf("expected store before persistence, got %d hits", storeSpy.prePersistHits)
+	}
+	observer.mu.Lock()
+	observerCalls := len(observer.calls)
+	observer.mu.Unlock()
+	if observerCalls != 1 {
+		t.Fatalf("expected observer call, got %d", observerCalls)
+	}
+}
 
-		seedTemplate(t, tplSvc, "welcome-email", "email")
+func testLenientLinkBuilderError(t *testing.T) {
+	ctx := context.Background()
+	builder := &captureLinkBuilder{
+		buildFn: func(req links.LinkRequest) (links.ResolvedLinks, error) {
+			return links.ResolvedLinks{}, errors.New("builder failed")
+		},
+	}
+	adapter := &testAdapter{name: "test", channels: []string{"email"}}
+	storeSpy := &captureStore{}
+	observer := &captureObserver{}
+	svc, msgRepo, tplSvc := newTestDispatcher(t, builder, storeSpy, observer, links.FailurePolicy{
+		Builder: links.FailureLenient,
+	}, adapter)
+	storeSpy.messageRepo = msgRepo
 
-		def := &domain.NotificationDefinition{
-			Code:         "welcome",
-			Channels:     domain.StringList{"email"},
-			TemplateKeys: domain.StringList{"email:welcome-email"},
-		}
-		event := &domain.NotificationEvent{
-			RecordMeta:     domain.RecordMeta{ID: uuid.New()},
-			DefinitionCode: def.Code,
-			Recipients:     domain.StringList{testRecipient},
-			Context: domain.JSONMap{
-				"action_url": "fallback-url",
-			},
-		}
+	seedTemplate(t, tplSvc, "welcome-email", "email")
 
-		job := deliveryJob{
-			event:        event,
-			channel:      "email",
-			templateCode: "welcome-email",
-			recipient:    testRecipient,
-			locale:       "en",
-		}
-		if err := svc.processDelivery(ctx, event, def, job); err != nil {
-			t.Fatalf("expected delivery to continue, got %v", err)
-		}
+	def := &domain.NotificationDefinition{
+		Code:         "welcome",
+		Channels:     domain.StringList{"email"},
+		TemplateKeys: domain.StringList{"email:welcome-email"},
+	}
+	event := &domain.NotificationEvent{
+		RecordMeta:     domain.RecordMeta{ID: uuid.New()},
+		DefinitionCode: def.Code,
+		Recipients:     domain.StringList{testRecipient},
+		Context: domain.JSONMap{
+			"action_url": "fallback-url",
+		},
+	}
 
-		list, err := msgRepo.List(ctx, store.ListOptions{})
-		if err != nil {
-			t.Fatalf("list messages: %v", err)
-		}
-		if list.Total != 1 {
-			t.Fatalf("expected 1 message, got %d", list.Total)
-		}
-		if adapter.Count() != 1 {
-			t.Fatalf("expected adapter send, got %d", adapter.Count())
-		}
-		if storeSpy.calls != 0 {
-			t.Fatalf("expected no store calls, got %d", storeSpy.calls)
-		}
-		observer.mu.Lock()
-		observerCalls := len(observer.calls)
-		observer.mu.Unlock()
-		if observerCalls != 1 {
-			t.Fatalf("expected observer call, got %d", observerCalls)
-		}
-	})
+	job := deliveryJob{
+		event:        event,
+		channel:      "email",
+		templateCode: "welcome-email",
+		recipient:    testRecipient,
+		locale:       "en",
+	}
+	if err := svc.processDelivery(ctx, event, def, job); err != nil {
+		t.Fatalf("expected delivery to continue, got %v", err)
+	}
 
-	t.Run("strict store error stops delivery", func(t *testing.T) {
-		ctx := context.Background()
-		builder := &captureLinkBuilder{
-			buildFn: func(req links.LinkRequest) (links.ResolvedLinks, error) {
-				return links.ResolvedLinks{ActionURL: "builder-url"}, nil
-			},
-		}
-		adapter := &testAdapter{name: "test", channels: []string{"email"}}
-		storeSpy := &captureStore{
-			err: errors.New("store failed"),
-		}
-		observer := &captureObserver{}
-		svc, msgRepo, tplSvc := newTestDispatcher(t, builder, storeSpy, observer, links.FailurePolicy{
-			Store: links.FailureStrict,
-		}, adapter)
-		storeSpy.messageRepo = msgRepo
+	list, err := msgRepo.List(ctx, store.ListOptions{})
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if list.Total != 1 {
+		t.Fatalf("expected 1 message, got %d", list.Total)
+	}
+	if adapter.Count() != 1 {
+		t.Fatalf("expected adapter send, got %d", adapter.Count())
+	}
+	if storeSpy.calls != 0 {
+		t.Fatalf("expected no store calls, got %d", storeSpy.calls)
+	}
+	observer.mu.Lock()
+	observerCalls := len(observer.calls)
+	observer.mu.Unlock()
+	if observerCalls != 1 {
+		t.Fatalf("expected observer call, got %d", observerCalls)
+	}
+}
 
-		seedTemplate(t, tplSvc, "welcome-email", "email")
+func testStrictLinkStoreError(t *testing.T) {
+	ctx := context.Background()
+	builder := &captureLinkBuilder{
+		buildFn: func(req links.LinkRequest) (links.ResolvedLinks, error) {
+			return links.ResolvedLinks{ActionURL: "builder-url"}, nil
+		},
+	}
+	adapter := &testAdapter{name: "test", channels: []string{"email"}}
+	storeSpy := &captureStore{
+		err: errors.New("store failed"),
+	}
+	observer := &captureObserver{}
+	svc, msgRepo, tplSvc := newTestDispatcher(t, builder, storeSpy, observer, links.FailurePolicy{
+		Store: links.FailureStrict,
+	}, adapter)
+	storeSpy.messageRepo = msgRepo
 
-		def := &domain.NotificationDefinition{
-			Code:         "welcome",
-			Channels:     domain.StringList{"email"},
-			TemplateKeys: domain.StringList{"email:welcome-email"},
-		}
-		event := &domain.NotificationEvent{
-			RecordMeta:     domain.RecordMeta{ID: uuid.New()},
-			DefinitionCode: def.Code,
-			Recipients:     domain.StringList{testRecipient},
-			Context:        domain.JSONMap{},
-		}
+	seedTemplate(t, tplSvc, "welcome-email", "email")
 
-		job := deliveryJob{
-			event:        event,
-			channel:      "email",
-			templateCode: "welcome-email",
-			recipient:    testRecipient,
-			locale:       "en",
-		}
-		if err := svc.processDelivery(ctx, event, def, job); err == nil {
-			t.Fatalf("expected error on strict store failure")
-		}
+	def := &domain.NotificationDefinition{
+		Code:         "welcome",
+		Channels:     domain.StringList{"email"},
+		TemplateKeys: domain.StringList{"email:welcome-email"},
+	}
+	event := &domain.NotificationEvent{
+		RecordMeta:     domain.RecordMeta{ID: uuid.New()},
+		DefinitionCode: def.Code,
+		Recipients:     domain.StringList{testRecipient},
+		Context:        domain.JSONMap{},
+	}
 
-		list, err := msgRepo.List(ctx, store.ListOptions{})
-		if err != nil {
-			t.Fatalf("list messages: %v", err)
-		}
-		if list.Total != 0 {
-			t.Fatalf("expected no message persisted, got %d", list.Total)
-		}
-		if adapter.Count() != 0 {
-			t.Fatalf("expected no adapter send, got %d", adapter.Count())
-		}
-		if storeSpy.calls != 1 {
-			t.Fatalf("expected store call, got %d", storeSpy.calls)
-		}
-		if storeSpy.prePersistHits != 0 {
-			t.Fatalf("expected store before persistence, got %d hits", storeSpy.prePersistHits)
-		}
-		observer.mu.Lock()
-		observerCalls := len(observer.calls)
-		observer.mu.Unlock()
-		if observerCalls != 0 {
-			t.Fatalf("expected no observer call, got %d", observerCalls)
-		}
-	})
+	job := deliveryJob{
+		event:        event,
+		channel:      "email",
+		templateCode: "welcome-email",
+		recipient:    testRecipient,
+		locale:       "en",
+	}
+	if err := svc.processDelivery(ctx, event, def, job); err == nil {
+		t.Fatalf("expected error on strict store failure")
+	}
+
+	list, err := msgRepo.List(ctx, store.ListOptions{})
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if list.Total != 0 {
+		t.Fatalf("expected no message persisted, got %d", list.Total)
+	}
+	if adapter.Count() != 0 {
+		t.Fatalf("expected no adapter send, got %d", adapter.Count())
+	}
+	if storeSpy.calls != 1 {
+		t.Fatalf("expected store call, got %d", storeSpy.calls)
+	}
+	if storeSpy.prePersistHits != 0 {
+		t.Fatalf("expected store before persistence, got %d hits", storeSpy.prePersistHits)
+	}
+	observer.mu.Lock()
+	observerCalls := len(observer.calls)
+	observer.mu.Unlock()
+	if observerCalls != 0 {
+		t.Fatalf("expected no observer call, got %d", observerCalls)
+	}
 }
 
 func newTestDispatcher(t *testing.T, builder links.LinkBuilder, store links.LinkStore, observer links.LinkObserver, policy links.FailurePolicy, adapter adapters.Messenger) (*Service, *memory.MessageRepository, *templates.Service) {

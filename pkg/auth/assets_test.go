@@ -43,6 +43,16 @@ func TestTemplatesShape(t *testing.T) {
 	}
 }
 
+type templateRenderCase struct {
+	name      string
+	code      string
+	data      map[string]any
+	want      []string
+	wantLower []string
+	wantValue any
+	notWant   []string
+}
+
 func TestTemplatesRender(t *testing.T) {
 	ctx := context.Background()
 	repo := memstore.NewTemplateRepository()
@@ -54,15 +64,7 @@ func TestTemplatesRender(t *testing.T) {
 	}
 	svc := newTemplateService(t, repo)
 
-	cases := []struct {
-		name      string
-		code      string
-		data      map[string]any
-		want      []string
-		wantLower []string
-		wantValue any
-		notWant   []string
-	}{
+	cases := []templateRenderCase{
 		{
 			name: "password reset with minutes",
 			code: PasswordResetCode,
@@ -117,37 +119,39 @@ func TestTemplatesRender(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rendered, err := svc.Render(ctx, pkgtemplates.RenderRequest{
-				Code:    tc.code,
-				Channel: "email",
-				Locale:  "en",
-				Data:    tc.data,
-			})
-			if err != nil {
-				t.Fatalf("render %s: %v", tc.code, err)
-			}
-			for _, want := range tc.want {
-				if !strings.Contains(rendered.Body, want) && !strings.Contains(rendered.Subject, want) {
-					t.Fatalf("rendered output missing %q", want)
-				}
-			}
-			if tc.wantValue != nil {
-				value := fmt.Sprintf("%v", tc.wantValue)
-				if !strings.Contains(rendered.Body, value) && !strings.Contains(rendered.Subject, value) {
-					t.Fatalf("rendered output missing value %q", value)
-				}
-			}
-			for _, want := range tc.wantLower {
-				if !strings.Contains(strings.ToLower(rendered.Body), want) {
-					t.Fatalf("rendered output missing %q", want)
-				}
-			}
-			for _, notWant := range tc.notWant {
-				if strings.Contains(rendered.Body, notWant) {
-					t.Fatalf("rendered output should not include %q", notWant)
-				}
-			}
+			assertTemplateRender(t, ctx, svc, tc)
 		})
+	}
+}
+
+func assertTemplateRender(t *testing.T, ctx context.Context, svc *pkgtemplates.Service, tc templateRenderCase) {
+	t.Helper()
+	rendered, err := svc.Render(ctx, pkgtemplates.RenderRequest{
+		Code: tc.code, Channel: "email", Locale: "en", Data: tc.data,
+	})
+	if err != nil {
+		t.Fatalf("render %s: %v", tc.code, err)
+	}
+	for _, want := range tc.want {
+		if !strings.Contains(rendered.Body, want) && !strings.Contains(rendered.Subject, want) {
+			t.Fatalf("rendered output missing %q", want)
+		}
+	}
+	if tc.wantValue != nil {
+		value := fmt.Sprintf("%v", tc.wantValue)
+		if !strings.Contains(rendered.Body, value) && !strings.Contains(rendered.Subject, value) {
+			t.Fatalf("rendered output missing value %q", value)
+		}
+	}
+	for _, want := range tc.wantLower {
+		if !strings.Contains(strings.ToLower(rendered.Body), want) {
+			t.Fatalf("rendered output missing %q", want)
+		}
+	}
+	for _, notWant := range tc.notWant {
+		if strings.Contains(rendered.Body, notWant) {
+			t.Fatalf("rendered output should not include %q", notWant)
+		}
 	}
 }
 

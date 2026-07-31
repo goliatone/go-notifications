@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,97 +48,88 @@ func TestPhase7EndToEndDemo(t *testing.T) {
 		t.Fatalf("seeded demo users missing")
 	}
 
-	preflightSecret := func(user *DemoUser, provider string) {
-		ref := secrets.Reference{Scope: secrets.ScopeUser, SubjectID: user.ID, Channel: "chat", Provider: provider, Key: "default"}
-		resolved, err := app.Directory.ResolveSecrets(ref)
-		if err != nil {
-			t.Fatalf("preflight secret for %s/%s: %v", user.Name, provider, err)
-		}
-		if val, ok := resolved[ref]; !ok || len(val.Data) == 0 {
-			t.Fatalf("preflight secret for %s/%s missing", user.Name, provider)
-		}
-		tokenRef := secrets.Reference{Scope: secrets.ScopeUser, SubjectID: user.ID, Channel: "chat", Provider: provider, Key: "token"}
-		if _, err := app.Directory.provider.Get(tokenRef); err != nil {
-			t.Fatalf("preflight token missing for %s/%s: %v", user.Name, provider, err)
-		}
-	}
+	assertPreflightSecret(t, app, bob, "slack")
+	assertPreflightSecret(t, app, carlos, "telegram")
+	fireTestEvent(ctx, t, app, bob, lgr)
+	fireTestEvent(ctx, t, app, carlos, lgr)
+	assertProviderMessages(t, fakes, lgr)
+	assertDeliveryProvider(ctx, t, app, bob, "slack")
+	assertDeliveryProvider(ctx, t, app, carlos, "telegram")
+	assertMaskedLogs(t, lgr.entries)
+}
 
-	preflightSecret(bob, "slack")
-	preflightSecret(carlos, "telegram")
-
-	fireEvent := func(user *DemoUser) {
-		err := app.Catalog.EnqueueEvent.Execute(ctx, events.IntakeRequest{
-			DefinitionCode: "test_notification",
-			Recipients:     []string{user.ID},
-			Context: map[string]any{
-				"name":    user.Name,
-				"message": "This is a test notification",
-			},
-		})
-		if err != nil {
-			t.Fatalf("enqueue event for %s: %v\nlogs: %v", user.Name, err, lgr.entries)
-		}
-	}
-
-	fireEvent(bob)
-	fireEvent(carlos)
-
-	// Provider selection via preferences should route Bob->slack and Carlos->telegram.
-	if len(fakes["slack"].sent) != 1 {
-		t.Fatalf("expected slack to send once, got %d", len(fakes["slack"].sent))
-	}
-	if len(fakes["telegram"].sent) != 1 {
-		t.Fatalf("expected telegram to send once, got %d", len(fakes["telegram"].sent))
-	}
-
-	slackMsg := fakes["slack"].sent[0]
-	if slackMsg.Provider != "slack" || slackMsg.Channel != "chat" {
-		t.Fatalf("unexpected slack message provider/channel: %+v", slackMsg)
-	}
-	if got := slackMsg.Metadata["token"]; !strings.Contains(fmt.Sprint(got), "xoxb-bob") {
-		t.Fatalf("expected bob token injected, got %v (meta=%v logs=%v)", got, slackMsg.Metadata, lgr.entries)
-	}
-
-	telegramMsg := fakes["telegram"].sent[0]
-	if telegramMsg.Provider != "telegram" || telegramMsg.Channel != "chat" {
-		t.Fatalf("unexpected telegram message provider/channel: %+v", telegramMsg)
-	}
-	if got := telegramMsg.Metadata["token"]; !strings.Contains(fmt.Sprint(got), "telegram-carlos") {
-		t.Fatalf("expected carlos telegram token injected, got %v", got)
-	}
-
-	// Delivery logs should reflect provider choice for each user.
-	logs, err := app.DeliveryLogs.LastForUser(ctx, bob.ID, 5)
+func assertPreflightSecret(t *testing.T, app *App, user *DemoUser, provider string) {
+	t.Helper()
+	ref := secrets.Reference{Scope: secrets.ScopeUser, SubjectID: user.ID, Channel: "chat", Provider: provider, Key: "default"}
+	resolved, err := app.Directory.ResolveSecrets(ref)
 	if err != nil {
-		t.Fatalf("delivery logs bob: %v", err)
+		t.Fatalf("preflight secret for %s/%s: %v", user.Name, provider, err)
 	}
-	if len(logs) == 0 || logs[0].Provider != "slack" {
-		t.Fatalf("expected slack delivery log for bob, got %+v", logs)
+	if value, ok := resolved[ref]; !ok || len(value.Data) == 0 {
+		t.Fatalf("preflight secret for %s/%s missing", user.Name, provider)
 	}
+	tokenRef := secrets.Reference{Scope: secrets.ScopeUser, SubjectID: user.ID, Channel: "chat", Provider: provider, Key: "token"}
+	if _, err := app.Directory.provider.Get(tokenRef); err != nil {
+		t.Fatalf("preflight token missing for %s/%s: %v", user.Name, provider, err)
+	}
+}
 
-	logs, err = app.DeliveryLogs.LastForUser(ctx, carlos.ID, 5)
+func fireTestEvent(ctx context.Context, t *testing.T, app *App, user *DemoUser, lgr *captureLogger) {
+	t.Helper()
+	err := app.Catalog.EnqueueEvent.Execute(ctx, events.IntakeRequest{
+		DefinitionCode: "test_notification", Recipients: []string{user.ID},
+		Context: map[string]any{"name": user.Name, "message": "This is a test notification"},
+	})
 	if err != nil {
-		t.Fatalf("delivery logs carlos: %v", err)
+		t.Fatalf("enqueue event for %s: %v\nlogs: %v", user.Name, err, lgr.entries)
 	}
-	if len(logs) == 0 || logs[0].Provider != "telegram" {
-		t.Fatalf("expected telegram delivery log for carlos, got %+v", logs)
-	}
+}
 
-	// Ensure masked logging removed raw secrets.
-	for _, entry := range lgr.entries {
+func assertProviderMessages(t *testing.T, fakes map[string]*capturingMessenger, lgr *captureLogger) {
+	t.Helper()
+	assertProviderMessage(t, fakes["slack"], "slack", "xoxb-bob", lgr)
+	assertProviderMessage(t, fakes["telegram"], "telegram", "telegram-carlos", lgr)
+}
+
+func assertProviderMessage(
+	t *testing.T,
+	messenger *capturingMessenger,
+	provider, tokenFragment string,
+	lgr *captureLogger,
+) {
+	t.Helper()
+	if len(messenger.sent) != 1 {
+		t.Fatalf("expected %s to send once, got %d", provider, len(messenger.sent))
+	}
+	message := messenger.sent[0]
+	if message.Provider != provider || message.Channel != "chat" {
+		t.Fatalf("unexpected %s message provider/channel: %+v", provider, message)
+	}
+	if got := message.Metadata["token"]; !strings.Contains(fmt.Sprint(got), tokenFragment) {
+		t.Fatalf("expected %s token injected, got %v (meta=%v logs=%v)", provider, got, message.Metadata, lgr.entries)
+	}
+}
+
+func assertDeliveryProvider(ctx context.Context, t *testing.T, app *App, user *DemoUser, provider string) {
+	t.Helper()
+	logs, err := app.DeliveryLogs.LastForUser(ctx, user.ID, 5)
+	if err != nil {
+		t.Fatalf("delivery logs %s: %v", user.Name, err)
+	}
+	if len(logs) == 0 || logs[0].Provider != provider {
+		t.Fatalf("expected %s delivery log for %s, got %+v", provider, user.Name, logs)
+	}
+}
+
+func assertMaskedLogs(t *testing.T, entries []string) {
+	t.Helper()
+	for _, entry := range entries {
 		if strings.Contains(entry, "xoxb-") || strings.Contains(entry, "telegram-") {
 			t.Fatalf("found unmasked secret in logs: %s", entry)
 		}
 	}
-	hasMasked := false
-	for _, entry := range lgr.entries {
-		if strings.Contains(entry, "***") {
-			hasMasked = true
-			break
-		}
-	}
-	if !hasMasked {
-		t.Fatalf("expected masked secrets to be logged")
+	if !slices.ContainsFunc(entries, func(entry string) bool { return strings.Contains(entry, "***") }) {
+		t.Fatal("expected masked secrets to be logged")
 	}
 }
 

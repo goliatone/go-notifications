@@ -2,6 +2,8 @@ package inbox
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
+	"github.com/goliatone/go-notifications/pkg/privacy"
 	"github.com/google/uuid"
 )
 
@@ -92,6 +95,82 @@ func TestDeliverFromMessage(t *testing.T) {
 	if err := svc.DeliverFromMessage(ctx, msg); err != nil {
 		t.Fatalf("deliver: %v", err)
 	}
+}
+
+func TestRepositoryFailureReturnsSafeErrorAndReportsRawDiagnostic(t *testing.T) {
+	raw := errors.New("database leaked person@example.com token-123")
+	diagnostic := &captureDiagnostic{}
+	svc, err := NewService(Dependencies{
+		Repository: &failingInboxRepository{
+			InboxRepository: memory.NewInboxRepository(),
+			err:             raw,
+		},
+		Broadcaster: &broadcaster.Nop{},
+		Logger:      &logger.Nop{},
+		Diagnostic:  diagnostic,
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	_, err = svc.Create(context.Background(), CreateInput{
+		UserID: "subject-1", Title: "Title", Body: "Body",
+	})
+	var safe privacy.SafeError
+	if !errors.As(err, &safe) || errors.Is(err, raw) ||
+		strings.Contains(err.Error(), "person@example.com") ||
+		strings.Contains(err.Error(), "token-123") {
+		t.Fatalf("expected non-wrapping safe inbox error, got %v", err)
+	}
+	if !errors.Is(diagnostic.event.Cause, raw) || diagnostic.event.Operation != "inbox_create_failed" {
+		t.Fatalf("unexpected diagnostic event: %+v", diagnostic.event)
+	}
+}
+
+func TestBroadcasterFailureIsDiagnosticOnly(t *testing.T) {
+	raw := errors.New("broadcaster leaked private body")
+	diagnostic := &captureDiagnostic{}
+	svc, err := NewService(Dependencies{
+		Repository:  memory.NewInboxRepository(),
+		Broadcaster: failingBroadcaster{err: raw},
+		Logger:      &logger.Nop{},
+		Diagnostic:  diagnostic,
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if _, err := svc.Create(context.Background(), CreateInput{
+		UserID: "subject-1", Title: "Title", Body: "Body",
+	}); err != nil {
+		t.Fatalf("broadcast failure should not fail inbox persistence: %v", err)
+	}
+	if !errors.Is(diagnostic.event.Cause, raw) || diagnostic.event.Operation != "inbox_broadcast_failed" {
+		t.Fatalf("unexpected broadcast diagnostic: %+v", diagnostic.event)
+	}
+}
+
+type failingInboxRepository struct {
+	*memory.InboxRepository
+	err error
+}
+
+func (r *failingInboxRepository) Create(context.Context, *domain.InboxItem) error {
+	return r.err
+}
+
+type failingBroadcaster struct {
+	err error
+}
+
+func (b failingBroadcaster) Broadcast(context.Context, broadcaster.Event) error {
+	return b.err
+}
+
+type captureDiagnostic struct {
+	event privacy.DiagnosticEvent
+}
+
+func (d *captureDiagnostic) Report(_ context.Context, event privacy.DiagnosticEvent) {
+	d.event = event
 }
 
 type capturedEvents struct {

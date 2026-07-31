@@ -83,7 +83,17 @@ func TestOnReadyNotifierSendsEmail(t *testing.T) {
 	if sendErr := exportNotifier.Send(ctx, payload); sendErr != nil {
 		t.Fatalf("send: %v", sendErr)
 	}
+	assertOnReadyEmail(t, ctx, msgRepo, registry, payload)
+}
 
+func assertOnReadyEmail(
+	t *testing.T,
+	ctx context.Context,
+	msgRepo *memstore.MessageRepository,
+	registry *adapters.Registry,
+	payload OnReadyEvent,
+) {
+	t.Helper()
 	msgs, err := msgRepo.List(ctx, store.ListOptions{})
 	if err != nil {
 		t.Fatalf("list messages: %v", err)
@@ -278,8 +288,8 @@ func TestOnReadyNotifierSendsInApp(t *testing.T) {
 		},
 	}
 
-	if err := exportNotifier.Send(ctx, payload); err != nil {
-		t.Fatalf("send: %v", err)
+	if sendErr := exportNotifier.Send(ctx, payload); sendErr != nil {
+		t.Fatalf("send: %v", sendErr)
 	}
 
 	result, err := inboxRepo.List(ctx, store.ListOptions{})
