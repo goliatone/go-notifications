@@ -10,14 +10,20 @@ import (
 )
 
 type PublicationRepository struct {
-	base baseMemoryRepo[domain.NotificationPublication]
+	base   baseMemoryRepo[domain.NotificationPublication]
+	events *EventRepository
 }
 
-func NewPublicationRepository() *PublicationRepository {
+func NewPublicationRepository(events ...*EventRepository) *PublicationRepository {
+	var eventRepo *EventRepository
+	if len(events) > 0 {
+		eventRepo = events[0]
+	}
 	return &PublicationRepository{
 		base: newBaseMemoryRepo("publication", func(value *domain.NotificationPublication) *domain.RecordMeta {
 			return &value.RecordMeta
 		}),
+		events: eventRepo,
 	}
 }
 
@@ -101,6 +107,46 @@ func (r *PublicationRepository) CreateOrGetOpenDigest(_ context.Context, value *
 	r.base.records[value.ID] = *value
 	copy := *value
 	return &copy, true, nil
+}
+
+func (r *PublicationRepository) CreateOrAttachOpenDigest(_ context.Context, value *domain.NotificationPublication, event *domain.NotificationEvent) (*domain.NotificationPublication, bool, error) {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	if r.events == nil {
+		return nil, false, store.ErrNotFound
+	}
+	var publication domain.NotificationPublication
+	created := false
+	for _, item := range r.base.records {
+		if item.DigestKey == value.DigestKey && item.DeletedAt.IsZero() &&
+			(item.Status == domain.PublicationStatusPending ||
+				item.Status == domain.PublicationStatusPublished) {
+			publication = item
+			break
+		}
+	}
+	if publication.ID == uuid.Nil {
+		value.EnsureID()
+		now := time.Now().UTC()
+		if value.CreatedAt.IsZero() {
+			value.CreatedAt = now
+		}
+		value.UpdatedAt = now
+		if value.Status == "" {
+			value.Status = domain.PublicationStatusPending
+		}
+		publication = *value
+		r.base.records[value.ID] = publication
+		created = true
+	}
+	if err := r.events.attachPublication(event, publication.ID, publication.DigestKey); err != nil {
+		if created {
+			delete(r.base.records, publication.ID)
+		}
+		return nil, false, err
+	}
+	copy := publication
+	return &copy, created, nil
 }
 
 func (r *PublicationRepository) Claim(_ context.Context, id uuid.UUID, until time.Time) (bool, error) {

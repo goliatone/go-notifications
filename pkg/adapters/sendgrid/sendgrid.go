@@ -3,7 +3,6 @@ package sendgrid
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -167,20 +166,8 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		requestBody["headers"] = hdrs
 	}
 
-	if cc := stringSlice(msg.Metadata, "cc"); len(cc) > 0 {
-		ccList := make([]map[string]string, 0, len(cc))
-		for _, addr := range cc {
-			ccList = append(ccList, map[string]string{"email": addr})
-		}
-		personalization["cc"] = ccList
-	}
-	if bcc := stringSlice(msg.Metadata, "bcc"); len(bcc) > 0 {
-		bccList := make([]map[string]string, 0, len(bcc))
-		for _, addr := range bcc {
-			bccList = append(bccList, map[string]string{"email": addr})
-		}
-		personalization["bcc"] = bccList
-	}
+	addRecipients(personalization, "cc", stringSlice(msg.Metadata, "cc"))
+	addRecipients(personalization, "bcc", stringSlice(msg.Metadata, "bcc"))
 
 	bodyBytes, err := adapters.EncodeJSONPayload("sendgrid", requestBody)
 	if err != nil {
@@ -193,22 +180,23 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("sendgrid: request failed: %w", err)
-	}
-	respBody, err := adapters.ReadResponseBody(resp)
-	closeErr := resp.Body.Close()
-	if responseErr := errors.Join(err, closeErr); responseErr != nil {
-		return fmt.Errorf("sendgrid: %w", responseErr)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return adapters.HTTPStatusError("sendgrid", resp.StatusCode, respBody)
+	if _, err := adapters.ExecuteRequest(a.client, "sendgrid", req); err != nil {
+		return err
 	}
 
 	a.base.LogSuccess(a.name, msg)
 	return nil
+}
+
+func addRecipients(personalization map[string]any, field string, addresses []string) {
+	if len(addresses) == 0 {
+		return
+	}
+	recipients := make([]map[string]string, 0, len(addresses))
+	for _, address := range addresses {
+		recipients = append(recipients, map[string]string{"email": address})
+	}
+	personalization[field] = recipients
 }
 
 func firstNonEmpty(values ...string) string {

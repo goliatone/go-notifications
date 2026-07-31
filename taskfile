@@ -245,21 +245,11 @@ function dev:cover {
 ## ########################################
 
 ##
-## -----
-##
-## test
-##
-## Run Go unit tests in every module
+## Stable public quality entry points used by local workflows and CI.
 function test {
     go:test "$@"
 }
 
-##
-## -----
-##
-## lint
-##
-## Run Go linters via golangci-lint
 function lint {
     go:lint "$@"
 }
@@ -460,6 +450,8 @@ function go:quality:pr {
 
 function go:quality:all {
     go:fmt:check || return 1
+    go:fmt || return 1
+    go:fix || return 1
     go:test || return 1
     go:race || return 1
     go:lint || return 1

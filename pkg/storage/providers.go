@@ -24,6 +24,8 @@ type Providers struct {
 	Events             store.NotificationEventRepository
 	Messages           store.NotificationMessageRepository
 	DeliveryAttempts   store.DeliveryAttemptRepository
+	Publications       store.NotificationPublicationRepository
+	RetryOperations    store.NotificationRetryOperationRepository
 	Preferences        store.NotificationPreferenceRepository
 	SubscriptionGroups store.SubscriptionGroupRepository
 	Inbox              store.InboxRepository
@@ -42,12 +44,15 @@ func WithMetricsCollector(collector MetricsCollector) Option {
 
 // NewMemoryProviders returns repositories backed by in-memory maps.
 func NewMemoryProviders(opts ...Option) Providers {
+	events := memory.NewEventRepository()
 	providers := Providers{
 		Definitions:        memory.NewDefinitionRepository(),
 		Templates:          memory.NewTemplateRepository(),
-		Events:             memory.NewEventRepository(),
+		Events:             events,
 		Messages:           memory.NewMessageRepository(),
 		DeliveryAttempts:   memory.NewDeliveryRepository(),
+		Publications:       memory.NewPublicationRepository(events),
+		RetryOperations:    memory.NewRetryOperationRepository(),
 		Preferences:        memory.NewPreferenceRepository(),
 		SubscriptionGroups: memory.NewSubscriptionRepository(),
 		Inbox:              memory.NewInboxRepository(),
@@ -74,6 +79,8 @@ func NewBunProviders(db *bun.DB, opts ...Option) Providers {
 		(*domain.NotificationEvent)(nil),
 		(*domain.NotificationMessage)(nil),
 		(*domain.DeliveryAttempt)(nil),
+		(*domain.NotificationPublication)(nil),
+		(*domain.NotificationRetryOperation)(nil),
 		(*domain.NotificationPreference)(nil),
 		(*domain.SubscriptionGroup)(nil),
 		(*domain.InboxItem)(nil),
@@ -87,6 +94,8 @@ func NewBunProviders(db *bun.DB, opts ...Option) Providers {
 		Events:             bunrepo.NewEventRepository(db),
 		Messages:           bunrepo.NewMessageRepository(db),
 		DeliveryAttempts:   bunrepo.NewDeliveryRepository(db),
+		Publications:       bunrepo.NewPublicationRepository(db),
+		RetryOperations:    bunrepo.NewRetryOperationRepository(db),
 		Preferences:        bunrepo.NewPreferenceRepository(db),
 		SubscriptionGroups: bunrepo.NewSubscriptionRepository(db),
 		Inbox:              bunrepo.NewInboxRepository(db),

@@ -3,7 +3,6 @@ package telegram
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -92,36 +91,9 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	token := strings.TrimSpace(firstNonEmptyStrings(
-		stringValue(msg.Metadata, "token"),
-		secretString(msg.Metadata, "token"),
-		secretString(msg.Metadata, "default"),
-		a.cfg.Token,
-	))
-	chatID := strings.TrimSpace(firstNonEmptyStrings(stringValue(msg.Metadata, "chat_id"), msg.To))
-	if chatID == "" {
-		chatID = strings.TrimSpace(a.cfg.ChatID)
-	}
-	if chatID == "" {
-		return fmt.Errorf("telegram: chat id required")
-	}
-
-	htmlBody := stringValue(msg.Metadata, "html_body")
-	textBody := stringValue(msg.Metadata, "body")
-
-	body := firstNonEmptyStrings(htmlBody, textBody, msg.Body, msg.Subject)
-	parseMode := sanitizeParseMode(strings.TrimSpace(firstNonEmptyStrings(stringValue(msg.Metadata, "parse_mode"), a.cfg.ParseMode)))
-	if parseMode == "" && !a.cfg.PlainOnly && strings.TrimSpace(htmlBody) != "" {
-		parseMode = "HTML"
-	}
-	if a.cfg.PlainOnly {
-		parseMode = ""
-		body = firstNonEmptyStrings(textBody, msg.Body, msg.Subject)
-	}
-	attachments := adapters.NormalizeAttachments(msg.Attachments)
-	attachment := firstURLAttachment(attachments)
-	if attachment == nil && body == "" {
-		return fmt.Errorf("telegram: message body required")
+	content, err := a.prepareContent(msg)
+	if err != nil {
+		return err
 	}
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
@@ -130,43 +102,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		)
 		return nil
 	}
-	if token == "" {
+	if content.token == "" {
 		return fmt.Errorf("telegram: bot token required")
 	}
 
-	payload := map[string]any{
-		"chat_id": chatID,
-	}
-	endpoint := fmt.Sprintf("%s/bot%s/sendMessage", strings.TrimRight(a.cfg.BaseURL, "/"), token)
-	if attachment != nil {
-		payload["document"] = attachment.URL
-		if body != "" {
-			payload["caption"] = body
-		}
-		if parseMode != "" {
-			payload["parse_mode"] = parseMode
-		}
-		endpoint = fmt.Sprintf("%s/bot%s/sendDocument", strings.TrimRight(a.cfg.BaseURL, "/"), token)
-	} else {
-		payload["text"] = body
-		if parseMode != "" {
-			payload["parse_mode"] = parseMode
-		}
-		disablePreview := boolValue(msg.Metadata, "disable_preview", a.cfg.DisableWebPagePreview)
-		if disablePreview {
-			payload["disable_web_page_preview"] = true
-		}
-	}
-	disableNotification := boolValue(msg.Metadata, "silent", a.cfg.DisableNotification)
-	if disableNotification {
-		payload["disable_notification"] = true
-	}
-	if thread := stringValue(msg.Metadata, "thread_id"); thread != "" {
-		payload["message_thread_id"] = thread
-	}
-	if replyTo := stringValue(msg.Metadata, "reply_to"); replyTo != "" {
-		payload["reply_to_message_id"] = replyTo
-	}
+	payload, endpoint := a.telegramRequest(content, msg.Metadata)
 	bodyBytes, err := adapters.EncodeJSONPayload("telegram", payload)
 	if err != nil {
 		return err
@@ -177,22 +117,92 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("telegram: request failed: %w", err)
-	}
-	bodyBytes, err = adapters.ReadResponseBody(resp)
-	closeErr := resp.Body.Close()
-	if responseErr := errors.Join(err, closeErr); responseErr != nil {
-		return fmt.Errorf("telegram: %w", responseErr)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return adapters.HTTPStatusError("telegram", resp.StatusCode, bodyBytes)
+	if _, err := adapters.ExecuteRequest(a.client, "telegram", req); err != nil {
+		return err
 	}
 
 	a.base.LogSuccess(a.name, msg)
 	return nil
+}
+
+type telegramContent struct {
+	token      string
+	chatID     string
+	body       string
+	parseMode  string
+	attachment *adapters.Attachment
+}
+
+func (a *Adapter) prepareContent(msg adapters.Message) (telegramContent, error) {
+	content := telegramContent{}
+	content.token = strings.TrimSpace(firstNonEmptyStrings(
+		stringValue(msg.Metadata, "token"),
+		secretString(msg.Metadata, "token"),
+		secretString(msg.Metadata, "default"),
+		a.cfg.Token,
+	))
+	content.chatID = strings.TrimSpace(firstNonEmptyStrings(stringValue(msg.Metadata, "chat_id"), msg.To, a.cfg.ChatID))
+	if content.chatID == "" {
+		return telegramContent{}, fmt.Errorf("telegram: chat id required")
+	}
+	htmlBody := stringValue(msg.Metadata, "html_body")
+	textBody := stringValue(msg.Metadata, "body")
+	content.body = firstNonEmptyStrings(htmlBody, textBody, msg.Body, msg.Subject)
+	content.parseMode = sanitizeParseMode(strings.TrimSpace(firstNonEmptyStrings(stringValue(msg.Metadata, "parse_mode"), a.cfg.ParseMode)))
+	if content.parseMode == "" && !a.cfg.PlainOnly && strings.TrimSpace(htmlBody) != "" {
+		content.parseMode = "HTML"
+	}
+	if a.cfg.PlainOnly {
+		content.parseMode = ""
+		content.body = firstNonEmptyStrings(textBody, msg.Body, msg.Subject)
+	}
+	content.attachment = firstURLAttachment(adapters.NormalizeAttachments(msg.Attachments))
+	if content.attachment == nil && content.body == "" {
+		return telegramContent{}, fmt.Errorf("telegram: message body required")
+	}
+	return content, nil
+}
+
+func (a *Adapter) telegramRequest(content telegramContent, metadata map[string]any) (map[string]any, string) {
+	payload := map[string]any{"chat_id": content.chatID}
+	endpoint := fmt.Sprintf("%s/bot%s/sendMessage", strings.TrimRight(a.cfg.BaseURL, "/"), content.token)
+	if content.attachment != nil {
+		applyTelegramDocument(payload, content)
+		endpoint = fmt.Sprintf("%s/bot%s/sendDocument", strings.TrimRight(a.cfg.BaseURL, "/"), content.token)
+	} else {
+		applyTelegramText(payload, content, boolValue(metadata, "disable_preview", a.cfg.DisableWebPagePreview))
+	}
+	disableNotification := boolValue(metadata, "silent", a.cfg.DisableNotification)
+	if disableNotification {
+		payload["disable_notification"] = true
+	}
+	if thread := stringValue(metadata, "thread_id"); thread != "" {
+		payload["message_thread_id"] = thread
+	}
+	if replyTo := stringValue(metadata, "reply_to"); replyTo != "" {
+		payload["reply_to_message_id"] = replyTo
+	}
+	return payload, endpoint
+}
+
+func applyTelegramDocument(payload map[string]any, content telegramContent) {
+	payload["document"] = content.attachment.URL
+	if content.body != "" {
+		payload["caption"] = content.body
+	}
+	if content.parseMode != "" {
+		payload["parse_mode"] = content.parseMode
+	}
+}
+
+func applyTelegramText(payload map[string]any, content telegramContent, disablePreview bool) {
+	payload["text"] = content.body
+	if content.parseMode != "" {
+		payload["parse_mode"] = content.parseMode
+	}
+	if disablePreview {
+		payload["disable_web_page_preview"] = true
+	}
 }
 
 func stringValue(meta map[string]any, key string) string {

@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "sh -c 'd=${PWD:-.}; while :; do if [ -f \"$d/.claude/hooks/ctx_hook_dispatch.sh\" ]; then exec sh \"$d/.claude/hooks/ctx_hook_dispatch.sh\" ctx_post_tool_use.py; fi; [ \"$d\" = \"/\" ] && exit 0; d=$(dirname \"$d\"); done'",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "sh -c 'd=${PWD:-.}; while :; do if [ -f \"$d/.claude/hooks/ctx_hook_dispatch.sh\" ]; then exec sh \"$d/.claude/hooks/ctx_hook_dispatch.sh\" ctx_session_start.py; fi; [ \"$d\" = \"/\" ] && exit 0; d=$(dirname \"$d\"); done'",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "sh -c 'd=${PWD:-.}; while :; do if [ -f \"$d/.claude/hooks/ctx_hook_dispatch.sh\" ]; then exec sh \"$d/.claude/hooks/ctx_hook_dispatch.sh\" ctx_stop.py; fi; [ \"$d\" = \"/\" ] && exit 0; d=$(dirname \"$d\"); done'",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "sh -c 'd=${PWD:-.}; while :; do if [ -f \"$d/.claude/hooks/ctx_hook_dispatch.sh\" ]; then exec sh \"$d/.claude/hooks/ctx_hook_dispatch.sh\" ctx_user_prompt_submit.py; fi; [ \"$d\" = \"/\" ] && exit 0; d=$(dirname \"$d\"); done'",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

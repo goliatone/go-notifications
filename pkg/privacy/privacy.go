@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/goliatone/go-notifications/pkg/domain"
 )
 
 // SafeError is suitable for public return values and persistence. It
@@ -101,9 +103,85 @@ func safeMap(src map[string]any) map[string]any {
 		if sensitiveKey(key) {
 			continue
 		}
-		out[key] = value
+		out[key] = safeValue(value)
 	}
 	return out
+}
+
+func safeValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return safeMap(typed)
+	case domain.JSONMap:
+		return safeMap(map[string]any(typed))
+	case map[string]string:
+		return safeStringMap(typed)
+	case []map[string]any:
+		return safeMapSlice(typed)
+	case []domain.JSONMap:
+		return safeJSONMapSlice(typed)
+	case []any:
+		return safeValueSlice(typed)
+	case []string:
+		return safeStringSlice(typed)
+	case string:
+		return safeString(typed)
+	default:
+		return value
+	}
+}
+
+func safeStringMap(src map[string]string) map[string]any {
+	out := make(map[string]any, len(src))
+	for key, value := range src {
+		if !sensitiveKey(key) {
+			out[key] = safeValue(value)
+		}
+	}
+	return out
+}
+
+func safeMapSlice(src []map[string]any) []map[string]any {
+	out := make([]map[string]any, len(src))
+	for idx := range src {
+		out[idx] = safeMap(src[idx])
+	}
+	return out
+}
+
+func safeJSONMapSlice(src []domain.JSONMap) []map[string]any {
+	out := make([]map[string]any, len(src))
+	for idx := range src {
+		out[idx] = safeMap(map[string]any(src[idx]))
+	}
+	return out
+}
+
+func safeValueSlice(src []any) []any {
+	out := make([]any, len(src))
+	for idx := range src {
+		out[idx] = safeValue(src[idx])
+	}
+	return out
+}
+
+func safeStringSlice(src []string) []any {
+	out := make([]any, len(src))
+	for idx := range src {
+		out[idx] = safeValue(src[idx])
+	}
+	return out
+}
+
+func safeString(value string) string {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if strings.HasPrefix(lower, "https://") ||
+		strings.HasPrefix(lower, "http://") ||
+		strings.Contains(value, "@") ||
+		looksLikePhone(value) {
+		return "[redacted]"
+	}
+	return value
 }
 
 func sensitiveKey(key string) bool {

@@ -3,7 +3,6 @@ package webhook
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -144,18 +143,8 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		req.SetBasicAuth(a.cfg.BasicAuthUser, a.cfg.BasicAuthPass)
 	}
 
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("webhook: request failed: %w", err)
-	}
-	respBody, err := adapters.ReadResponseBody(resp)
-	closeErr := resp.Body.Close()
-	if responseErr := errors.Join(err, closeErr); responseErr != nil {
-		return fmt.Errorf("webhook: %w", responseErr)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return adapters.HTTPStatusError("webhook", resp.StatusCode, respBody)
+	if _, err := adapters.ExecuteRequest(a.client, "webhook", req); err != nil {
+		return err
 	}
 
 	a.base.LogSuccess(a.name, msg)

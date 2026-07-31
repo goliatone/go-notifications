@@ -35,7 +35,11 @@ func (h Hook) Notify(ctx context.Context, evt activity.Event) {
 	if record.OccurredAt.IsZero() {
 		record.OccurredAt = time.Now().UTC()
 	}
-	_ = h.Sink.Log(ctx, record)
+	// Activity hooks are intentionally best effort; notification delivery must
+	// not fail because a secondary audit sink is unavailable.
+	if err := h.Sink.Log(ctx, record); err != nil {
+		return
+	}
 }
 
 func buildData(evt activity.Event) map[string]any {

@@ -34,7 +34,7 @@ func Templates() []domain.NotificationTemplate {
 			Channel:     "email",
 			Locale:      "en",
 			Subject:     "Reset your {{ app_name }} password",
-			Body:        passwordResetBody,
+			Body:        resetNotificationBody,
 			Description: "Email template for password reset notifications",
 			Format:      "text/plain",
 			Schema:      passwordResetSchema,
@@ -88,7 +88,7 @@ func Templates() []domain.NotificationTemplate {
 	}
 }
 
-const passwordResetBody = `
+const resetNotificationBody = `
 Hi {{ name }},
 
 We received a request to reset your password.

@@ -189,7 +189,7 @@ func upsertTemplate(ctx context.Context, svc *templates.Service, desired domain.
 		return nil, fmt.Errorf("onready: get template %s/%s: %w", desired.Code, desired.Channel, err)
 	}
 	if current == nil {
-		record, err := svc.Create(ctx, templates.TemplateInput{
+		record, createErr := svc.Create(ctx, templates.TemplateInput{
 			Code:        desired.Code,
 			Channel:     desired.Channel,
 			Locale:      desired.Locale,
@@ -200,8 +200,8 @@ func upsertTemplate(ctx context.Context, svc *templates.Service, desired domain.
 			Schema:      desired.Schema,
 			Metadata:    desired.Metadata,
 		})
-		if err != nil {
-			return nil, fmt.Errorf("onready: create template %s/%s: %w", desired.Code, desired.Channel, err)
+		if createErr != nil {
+			return nil, fmt.Errorf("onready: create template %s/%s: %w", desired.Code, desired.Channel, createErr)
 		}
 		return record, nil
 	}

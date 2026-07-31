@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +18,10 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	"github.com/goliatone/go-notifications/pkg/links"
 	pkgoptions "github.com/goliatone/go-notifications/pkg/options"
+	"github.com/goliatone/go-notifications/pkg/persistencepolicy"
 	prefsvc "github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/privacy"
+	"github.com/goliatone/go-notifications/pkg/receipts"
 	"github.com/goliatone/go-notifications/pkg/retry"
 	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/templates"
@@ -49,6 +53,9 @@ type Dependencies struct {
 	Secrets      secrets.Resolver
 	Backoff      retry.Backoff
 	Activity     activity.Hooks
+	Persistence  persistencepolicy.Policy
+	Privacy      privacy.Policy
+	Diagnostic   privacy.DiagnosticSink
 }
 
 // Service expands events into rendered messages and routes them to adapters.
@@ -71,12 +78,18 @@ type Service struct {
 	secrets      secrets.Resolver
 	backoff      retry.Backoff
 	activity     activity.Hooks
+	persistence  persistencepolicy.Policy
+	privacy      privacy.Policy
+	diagnostic   privacy.DiagnosticSink
 }
 
 // DispatchOptions allow callers to override channels/locales.
 type DispatchOptions struct {
-	Channels []string
-	Locale   string
+	Channels         []string
+	Locale           string
+	Transient        map[string]any
+	RetryFailedOnly  bool
+	RetryOperationID uuid.UUID
 }
 
 var (
@@ -112,6 +125,15 @@ func New(deps Dependencies) (*Service, error) {
 	if deps.LinkObserver == nil {
 		deps.LinkObserver = &links.NopObserver{}
 	}
+	if deps.Persistence == nil {
+		deps.Persistence = persistencepolicy.DefinitionPolicy{}
+	}
+	if deps.Privacy == nil {
+		deps.Privacy = privacy.DefaultPolicy{}
+	}
+	if deps.Diagnostic == nil {
+		deps.Diagnostic = privacy.NopDiagnosticSink{}
+	}
 
 	if deps.Config.MaxWorkers <= 0 {
 		return nil, fmt.Errorf("%w: max_workers must be > 0", ErrInvalidConfig)
@@ -141,35 +163,273 @@ func New(deps Dependencies) (*Service, error) {
 		secrets:      deps.Secrets,
 		backoff:      deps.Backoff,
 		activity:     deps.Activity,
+		persistence:  deps.Persistence,
+		privacy:      deps.Privacy,
+		diagnostic:   deps.Diagnostic,
 	}, nil
 }
 
 // Dispatch expands the stored event into deliveries using the configured adapters.
 func (s *Service) Dispatch(ctx context.Context, event *domain.NotificationEvent, opts DispatchOptions) error {
+	_, err := s.DispatchWithReceipt(ctx, event, opts)
+	return err
+}
+
+// DispatchWithReceipt expands an event and returns deterministic, privacy-safe
+// recipient/channel/provider outcomes.
+func (s *Service) DispatchWithReceipt(ctx context.Context, event *domain.NotificationEvent, opts DispatchOptions) (receipts.DispatchReceipt, error) {
+	receipt := receipts.DispatchReceipt{}
+	if event != nil {
+		receipt.EventID = event.ID
+		receipt.CorrelationID = event.CorrelationID
+		receipt.RequestID = event.RequestID
+	}
+	rawErr := s.dispatch(ctx, event, opts)
+	receipt.Outcomes = s.reconstructOutcomes(ctx, event, opts, rawErr)
+	receipt.Status = aggregateReceiptStatus(receipt.Outcomes, rawErr)
+	if event != nil && s.events != nil {
+		if status := receiptEventStatus(receipt.Status); status != "" {
+			if statusErr := s.events.UpdateStatus(ctx, event.ID, status); statusErr != nil {
+				rawErr = errors.Join(rawErr, fmt.Errorf("dispatcher: persist receipt status: %w", statusErr))
+			}
+		}
+	}
+	if rawErr == nil {
+		return receipt, nil
+	}
+	s.diagnostic.Report(ctx, privacy.DiagnosticEvent{
+		Operation: "dispatcher.dispatch",
+		EventID:   receipt.EventID.String(),
+		Cause:     rawErr,
+	})
+	safe := s.privacy.SafeError(rawErr)
+	return receipt, safe
+}
+
+// ReceiptForEvent reconstructs the current privacy-safe receipt from durable
+// message and attempt state without rendering or delivering again.
+func (s *Service) ReceiptForEvent(ctx context.Context, event *domain.NotificationEvent) (receipts.DispatchReceipt, error) {
 	if event == nil {
-		return errors.New("dispatcher: event is required")
+		return receipts.DispatchReceipt{}, privacy.SafeError{
+			Category: "validation",
+			Code:     "event_required",
+			Message:  "notification event is required",
+		}
+	}
+	receipt := receipts.DispatchReceipt{
+		EventID:       event.ID,
+		PublicationID: event.PublicationID,
+		CorrelationID: event.CorrelationID,
+		RequestID:     event.RequestID,
+		Outcomes:      s.reconstructOutcomes(ctx, event, DispatchOptions{}, nil),
+	}
+	receipt.Status = receiptStatusForEvent(event.Status, receipt.Outcomes)
+	return receipt, nil
+}
+
+func (s *Service) dispatch(ctx context.Context, event *domain.NotificationEvent, opts DispatchOptions) error {
+	plan, err := s.buildDispatchPlan(ctx, event, opts)
+	if err != nil {
+		return err
+	}
+	deliveryErr := s.executeJobs(ctx, event, plan.definition, plan.jobs)
+	return s.completeDispatch(ctx, event, deliveryErr)
+}
+
+type dispatchPlan struct {
+	definition *domain.NotificationDefinition
+	jobs       []deliveryJob
+}
+
+func (s *Service) buildDispatchPlan(ctx context.Context, event *domain.NotificationEvent, opts DispatchOptions) (dispatchPlan, error) {
+	if event == nil {
+		return dispatchPlan{}, errors.New("dispatcher: event is required")
 	}
 	definition, err := s.definitions.GetByCode(ctx, event.DefinitionCode)
 	if err != nil {
-		return fmt.Errorf("dispatcher: load definition: %w", err)
+		return dispatchPlan{}, fmt.Errorf("dispatcher: load definition: %w", err)
 	}
-
+	decision, err := s.persistence.Resolve(ctx, definition)
+	if err != nil {
+		return dispatchPlan{}, fmt.Errorf("dispatcher: resolve persistence policy: %w", err)
+	}
+	decision = persistencepolicy.WithTransientOverlay(decision, len(opts.Transient) > 0 || event.TransientDependent)
 	channels := opts.Channels
+	if len(channels) == 0 {
+		channels = event.Channels
+	}
 	if len(channels) == 0 {
 		channels = definition.Channels
 	}
+	if opts.Locale == "" {
+		opts.Locale = event.Locale
+	}
 	if len(channels) == 0 {
-		return errors.New("dispatcher: no channels configured")
+		return dispatchPlan{}, errors.New("dispatcher: no channels configured")
 	}
-	recipients := event.Recipients
-	if len(recipients) == 0 {
-		return errors.New("dispatcher: event has no recipients")
+	if len(event.Recipients) == 0 {
+		return dispatchPlan{}, errors.New("dispatcher: event has no recipients")
 	}
+	existingMessages := make(map[string]*domain.NotificationMessage)
+	if s.messages != nil {
+		existing, listErr := s.messages.ListByEvent(ctx, event.ID)
+		if listErr != nil {
+			return dispatchPlan{}, fmt.Errorf("dispatcher: load existing messages: %w", listErr)
+		}
+		for idx := range existing {
+			copy := existing[idx]
+			existingMessages[copy.Receiver+"\x00"+copy.Channel] = &copy
+		}
+	}
+	retryProviders, err := s.retryProviderPlans(ctx, opts, existingMessages)
+	if err != nil {
+		return dispatchPlan{}, err
+	}
+	jobs := buildDeliveryJobs(event, definition, channels, decision, existingMessages, retryProviders, opts)
+	return dispatchPlan{definition: definition, jobs: jobs}, nil
+}
 
-	jobs := make(chan deliveryJob, len(channels)*len(recipients))
-	errCh := make(chan error, len(channels)*len(recipients))
+func (s *Service) retryProviderPlans(
+	ctx context.Context,
+	opts DispatchOptions,
+	existing map[string]*domain.NotificationMessage,
+) (map[string][]string, error) {
+	if !opts.RetryFailedOnly {
+		return nil, nil
+	}
+	if s.messages == nil || s.attempts == nil {
+		return nil, errors.New("dispatcher: retry requires message and attempt repositories")
+	}
+	plans := make(map[string][]string)
+	sameOperationLineage := false
+	for key, message := range existing {
+		providers, sameOperation, err := s.retryProviderPlan(ctx, message, opts.RetryOperationID)
+		if err != nil {
+			return nil, err
+		}
+		if sameOperation {
+			sameOperationLineage = true
+		}
+		if len(providers) > 0 {
+			plans[key] = providers
+		}
+	}
+	if len(plans) == 0 && !sameOperationLineage {
+		return nil, errors.New("dispatcher: no failed outcomes eligible for retry")
+	}
+	return plans, nil
+}
+
+func (s *Service) retryProviderPlan(
+	ctx context.Context,
+	message *domain.NotificationMessage,
+	operationID uuid.UUID,
+) ([]string, bool, error) {
+	attempts, err := s.attempts.ListByMessage(ctx, message.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("dispatcher: load delivery attempts: %w", err)
+	}
+	providers := retryPlanProviders(message, attempts, s.registry, operationID)
+	latest := make(map[string]domain.DeliveryAttempt, len(providers))
+	for _, attempt := range attempts {
+		current, ok := latest[attempt.Adapter]
+		if !ok || compareAttemptChronology(current, attempt) < 0 {
+			latest[attempt.Adapter] = attempt
+		}
+	}
+	eligible := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		attempt, attempted := latest[provider]
+		if !attempted || attempt.Status != domain.AttemptStatusSucceeded {
+			eligible = append(eligible, provider)
+		}
+	}
+	return eligible, operationID != uuid.Nil && message.RetryOperationID == operationID, nil
+}
+
+func retryPlanProviders(
+	message *domain.NotificationMessage,
+	attempts []domain.DeliveryAttempt,
+	registry *adapters.Registry,
+	operationID uuid.UUID,
+) []string {
+	providers := slices.Clone([]string(message.ProviderPlan))
+	if len(providers) == 0 {
+		slices.SortFunc(attempts, compareAttemptChronology)
+		seen := make(map[string]struct{}, len(attempts))
+		for _, attempt := range attempts {
+			if _, ok := seen[attempt.Adapter]; ok {
+				continue
+			}
+			seen[attempt.Adapter] = struct{}{}
+			providers = append(providers, attempt.Adapter)
+		}
+	}
+	if len(providers) > 0 || (message.Status != domain.MessageStatusFailed &&
+		(message.Status != domain.MessageStatusPending || message.RetryOperationID != operationID)) {
+		return providers
+	}
+	for _, candidate := range registry.List(message.Channel) {
+		providers = append(providers, candidate.Name())
+	}
+	return providers
+}
+
+func buildDeliveryJobs(
+	event *domain.NotificationEvent,
+	definition *domain.NotificationDefinition,
+	channels []string,
+	decision persistencepolicy.Decision,
+	existingMessages map[string]*domain.NotificationMessage,
+	retryProviders map[string][]string,
+	opts DispatchOptions,
+) []deliveryJob {
+	jobs := make([]deliveryJob, 0, len(channels)*len(event.Recipients))
+	for _, channel := range channels {
+		templateCode := templateCodeForChannel(definition, channel)
+		for _, recipient := range event.Recipients {
+			channelType, _ := adapters.ParseChannel(channel)
+			key := recipient + "\x00" + channelType
+			existing := existingMessages[key]
+			providers := retryProviders[key]
+			if shouldSkipDelivery(existing, opts.RetryFailedOnly, providers) {
+				continue
+			}
+			locale := opts.Locale
+			if opts.RetryFailedOnly && existing != nil && existing.Locale != "" {
+				locale = existing.Locale
+			}
+			if opts.RetryFailedOnly && existing != nil && existing.TemplateCode != "" {
+				templateCode = existing.TemplateCode
+			}
+			jobs = append(jobs, deliveryJob{
+				event: event, channel: channel, templateCode: templateCode,
+				recipient: recipient, locale: locale, transient: cloneAnyMap(opts.Transient),
+				persistence: decision, existing: existing, retryOperationID: opts.RetryOperationID,
+				providers: slices.Clone(providers),
+			})
+		}
+	}
+	return jobs
+}
+
+func shouldSkipDelivery(existing *domain.NotificationMessage, retryFailedOnly bool, providers []string) bool {
+	if retryFailedOnly {
+		return existing == nil || len(providers) == 0
+	}
+	return existing != nil && existing.Status == domain.MessageStatusDelivered
+}
+
+func (s *Service) executeJobs(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	definition *domain.NotificationDefinition,
+	pending []deliveryJob,
+) error {
+	jobs := make(chan deliveryJob, len(pending))
+	errCh := make(chan error, len(pending))
 	var wg sync.WaitGroup
-	workerCount := min(s.cfg.MaxWorkers, len(channels)*len(recipients))
+	workerCount := min(s.cfg.MaxWorkers, len(pending))
 
 	for range workerCount {
 		wg.Go(func() {
@@ -185,39 +445,36 @@ func (s *Service) Dispatch(ctx context.Context, event *domain.NotificationEvent,
 		})
 	}
 
-	for _, channel := range channels {
-		templateCode := templateCodeForChannel(definition, channel)
-		for _, recipient := range recipients {
-			jobs <- deliveryJob{
-				event:        event,
-				channel:      channel,
-				templateCode: templateCode,
-				recipient:    recipient,
-				locale:       opts.Locale,
-			}
-		}
+	for _, job := range pending {
+		jobs <- job
 	}
 	close(jobs)
 	wg.Wait()
 	close(errCh)
 
-	failed := false
-	for err := range errCh {
-		if err != nil {
-			failed = true
-			s.logger.Error("dispatcher delivery failed", "error", err)
+	var deliveryErr error
+	for workerErr := range errCh {
+		if workerErr != nil {
+			deliveryErr = errors.Join(deliveryErr, workerErr)
+			safe := s.privacy.SafeError(workerErr)
+			s.logger.Error("dispatcher delivery failed", "error_code", safe.Code)
 		}
 	}
+	return deliveryErr
+}
 
+func (s *Service) completeDispatch(ctx context.Context, event *domain.NotificationEvent, deliveryErr error) error {
 	status := domain.EventStatusProcessed
-	if failed {
+	if deliveryErr != nil {
 		status = domain.EventStatusFailed
 	}
 	if s.events != nil {
-		_ = s.events.UpdateStatus(ctx, event.ID, status)
+		if err := s.events.UpdateStatus(ctx, event.ID, status); err != nil {
+			return fmt.Errorf("dispatcher: update event status: %w", err)
+		}
 	}
-	if failed {
-		return errors.New("dispatcher: one or more deliveries failed")
+	if deliveryErr != nil {
+		return fmt.Errorf("dispatcher: one or more deliveries failed: %w", deliveryErr)
 	}
 	return nil
 }
@@ -234,7 +491,7 @@ func (s *Service) resolveSecrets(ctx context.Context, event *domain.Notification
 		if s.allowFallback(job.recipient, event) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("dispatcher: secrets resolver not configured and fallback not allowed for recipient %s", job.recipient)
+		return nil, errors.New("dispatcher: secrets resolver not configured and fallback not allowed")
 	}
 
 	refs := []secrets.Reference{
@@ -246,7 +503,7 @@ func (s *Service) resolveSecrets(ctx context.Context, event *domain.Notification
 	refs = append(refs, secrets.Reference{Scope: secrets.ScopeSystem, SubjectID: "default", Channel: channelType, Provider: provider, Key: "default"})
 
 	resolved, err := s.secrets.Resolve(refs...)
-	if err != nil && err != secrets.ErrNotFound {
+	if err != nil && !errors.Is(err, secrets.ErrNotFound) {
 		return nil, err
 	}
 
@@ -260,7 +517,7 @@ func (s *Service) resolveSecrets(ctx context.Context, event *domain.Notification
 	if s.allowFallback(job.recipient, event) {
 		return nil, nil
 	}
-	return nil, fmt.Errorf("dispatcher: no scoped secret for recipient %s and fallback not allowed", job.recipient)
+	return nil, errors.New("dispatcher: no scoped secret and fallback not allowed")
 }
 
 func (s *Service) allowFallback(recipient string, event *domain.NotificationEvent) bool {
@@ -279,42 +536,148 @@ func (s *Service) allowFallback(recipient string, event *domain.NotificationEven
 }
 
 type deliveryJob struct {
-	event        *domain.NotificationEvent
-	channel      string
-	templateCode string
-	recipient    string
-	locale       string
+	event            *domain.NotificationEvent
+	channel          string
+	templateCode     string
+	recipient        string
+	locale           string
+	transient        map[string]any
+	persistence      persistencepolicy.Decision
+	existing         *domain.NotificationMessage
+	retryOperationID uuid.UUID
+	providers        []string
 }
 
 func (s *Service) processDelivery(ctx context.Context, event *domain.NotificationEvent, def *domain.NotificationDefinition, job deliveryJob) error {
+	job.persistence = normalizePersistenceDecision(job.persistence)
+	state, skipped, err := s.prepareDelivery(ctx, event, def, job)
+	if err != nil || skipped {
+		return err
+	}
+	if isInboxChannel(state.channelType) {
+		return s.processInboxDelivery(ctx, event, def, job, state)
+	}
+	return s.processAdapterDelivery(ctx, event, def, job, state)
+}
+
+type deliveryState struct {
+	channelType       string
+	provider          string
+	preferredProvider string
+	resolvedProvider  string
+	renderLocale      string
+	attachments       []adapters.Attachment
+	renderResult      templates.RenderResult
+	message           *domain.NotificationMessage
+	candidates        []adapters.Messenger
+}
+
+func (s *Service) prepareDelivery(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	job deliveryJob,
+) (*deliveryState, bool, error) {
+	state, skipped, err := s.initializeDelivery(ctx, event, def, job)
+	if err != nil || skipped {
+		return nil, skipped, err
+	}
+	payload, basePayload, attachments := buildDeliveryPayload(event, def, job, state.channelType, state.provider)
+	state.attachments = attachments
+	if state.preferredProvider != "" {
+		state.resolvedProvider = state.preferredProvider
+	}
+	messageID := uuid.New()
+	if job.existing != nil {
+		messageID = job.existing.ID
+	}
+	linkReq, resolvedLinks, attempted, builderOK, err := s.resolveLinks(
+		ctx, event, def, job, basePayload, payload, state.channelType,
+		state.resolvedProvider, state.renderLocale, messageID,
+	)
+	if err != nil {
+		s.notifyDelivery(ctx, event, def, job, nil, "failed", state.resolvedProvider, state.renderLocale, err)
+		return nil, false, err
+	}
+	applyResolvedLinksToPayload(payload, resolvedLinks)
+	if err := s.renderDelivery(ctx, event, def, job, state, payload, messageID); err != nil {
+		return nil, false, err
+	}
+	applyResolvedLinksToMessage(state.message, resolvedLinks)
+	if err := s.persistResolvedLinks(ctx, event, def, job, state, linkReq, resolvedLinks, attempted, builderOK); err != nil {
+		return nil, false, err
+	}
+	if err := s.persistInitialMessage(ctx, event, def, job, state); err != nil {
+		return nil, false, err
+	}
+	return state, false, nil
+}
+
+func (s *Service) initializeDelivery(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	job deliveryJob,
+) (*deliveryState, bool, error) {
 	channelType, provider := adapters.ParseChannel(job.channel)
-	inboxChannel := isInboxChannel(channelType)
 	renderLocale := job.locale
 	if renderLocale == "" && event != nil {
-		if locale, ok := event.Context["locale"].(string); ok && locale != "" {
+		if locale, ok := event.Context["locale"].(string); ok {
 			renderLocale = locale
 		}
 	}
-
-	preferredProvider := ""
-	if allowed, reason, providerOverride, err := s.allowDelivery(ctx, event, def, job.recipient, channelType); err != nil {
-		return fmt.Errorf("preferences evaluation: %w", err)
-	} else if !allowed {
-		s.logger.Debug("delivery skipped by preferences",
-			"recipient", job.recipient,
-			"channel", channelType,
-			"reason", reason,
-		)
-		return nil
-	} else if providerOverride != "" {
-		preferredProvider = providerOverride
+	allowed, reason, providerOverride, err := s.allowDelivery(ctx, event, def, job.recipient, channelType)
+	if err != nil {
+		return nil, false, fmt.Errorf("preferences evaluation: %w", err)
 	}
+	if !allowed {
+		s.logger.Debug("delivery skipped by preferences", "channel", channelType, "reason", reason)
+		return nil, true, nil
+	}
+	if len(job.providers) > 0 {
+		// Retry the durable provider plan. A later preference-provider change
+		// may not redirect an explicit retry to a provider that was never part
+		// of the original outcome.
+		providerOverride = ""
+	}
+	state := &deliveryState{
+		channelType: channelType, provider: provider, preferredProvider: providerOverride,
+		resolvedProvider: provider, renderLocale: renderLocale,
+	}
+	if !isInboxChannel(channelType) {
+		routeChannel := job.channel
+		if providerOverride != "" {
+			routeChannel = fmt.Sprintf("%s:%s", channelType, providerOverride)
+		}
+		state.candidates = s.registry.List(routeChannel)
+		if len(job.providers) > 0 {
+			allowedProviders := make(map[string]struct{}, len(job.providers))
+			for _, name := range job.providers {
+				allowedProviders[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+			}
+			state.candidates = slices.DeleteFunc(state.candidates, func(candidate adapters.Messenger) bool {
+				_, ok := allowedProviders[strings.ToLower(strings.TrimSpace(candidate.Name()))]
+				return !ok
+			})
+		}
+		if len(state.candidates) == 0 {
+			return nil, false, fmt.Errorf("route channel %s: %w", routeChannel, adapters.ErrAdapterNotFound)
+		}
+	}
+	return state, false, nil
+}
 
-	messageID := uuid.New()
+func buildDeliveryPayload(
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	job deliveryJob,
+	channelType, provider string,
+) (domain.JSONMap, domain.JSONMap, []adapters.Attachment) {
 	payload := cloneJSONMap(event.Context)
 	if payload == nil {
 		payload = make(domain.JSONMap)
 	}
+	maps.Copy(payload, job.transient)
 	basePayload := cloneJSONMap(payload)
 	attachments := adapters.AttachmentsFromValue(payload["attachments"])
 	channelAttachments := adapters.ChannelAttachmentsFromValue(payload["channel_attachments"])
@@ -327,146 +690,149 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 	payload["definition"] = def.Metadata
 	applyChannelOverridesToPayload(payload, channelType)
 	normalizeLinkPayload(payload)
+	return payload, basePayload, attachments
+}
 
-	resolvedProvider := provider
-	if preferredProvider != "" {
-		resolvedProvider = preferredProvider
-	}
-	linkReq, resolvedLinks, builderAttempted, builderOK, err := s.resolveLinks(ctx, event, def, job, basePayload, payload, channelType, resolvedProvider, renderLocale, messageID)
-	if err != nil {
-		s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, nil, "failed", resolvedProvider, renderLocale, err))
-		return err
-	}
-	applyResolvedLinksToPayload(payload, resolvedLinks)
-
+func (s *Service) renderDelivery(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	job deliveryJob,
+	state *deliveryState,
+	payload domain.JSONMap,
+	messageID uuid.UUID,
+) error {
 	renderResult, err := s.templates.Render(ctx, templates.RenderRequest{
-		Code:    job.templateCode,
-		Channel: channelType,
-		Locale:  renderLocale,
-		Data:    payload,
+		Code: job.templateCode, Channel: state.channelType, Locale: state.renderLocale, Data: payload,
 	})
 	if err != nil {
 		s.logger.Error("dispatcher render failed",
-			"template", job.templateCode,
-			"channel", channelType,
-			"recipient", job.recipient,
-			"definition", def.Code,
-			"event_id", event.ID,
-			"error", err,
+			"template", job.templateCode, "channel", state.channelType,
+			"definition", def.Code, "event_id", event.ID,
+			"error_code", s.privacy.SafeError(err).Code,
 		)
-		s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, nil, "failed", provider, renderLocale, err))
+		s.notifyDelivery(ctx, event, def, job, nil, "failed", state.provider, state.renderLocale, err)
 		return fmt.Errorf("render template %s: %w", job.templateCode, err)
 	}
+	state.renderResult = renderResult
+	state.message = &domain.NotificationMessage{
+		RecordMeta: domain.RecordMeta{ID: messageID}, EventID: event.ID,
+		RetryOperationID: job.retryOperationID, Channel: state.channelType,
+		TemplateCode: job.templateCode,
+		Locale:       renderResult.Locale, Subject: renderResult.Subject, Body: renderResult.Body,
+		Receiver: job.recipient, Status: domain.MessageStatusPending, Metadata: renderResult.Metadata,
+	}
+	for _, candidate := range state.candidates {
+		state.message.ProviderPlan = append(state.message.ProviderPlan, candidate.Name())
+	}
+	if job.existing != nil {
+		state.message.RecordMeta = job.existing.RecordMeta
+		if len(job.existing.ProviderPlan) > 0 {
+			state.message.ProviderPlan = slices.Clone(job.existing.ProviderPlan)
+		}
+	}
+	applyChannelOverrides(payload, state.channelType, state.message)
+	return nil
+}
 
-	message := &domain.NotificationMessage{
-		RecordMeta: domain.RecordMeta{ID: messageID},
-		EventID:    event.ID,
-		Channel:    channelType,
-		Locale:     renderResult.Locale,
-		Subject:    renderResult.Subject,
-		Body:       renderResult.Body,
-		Receiver:   job.recipient,
-		Status:     domain.MessageStatusPending,
-		Metadata:   renderResult.Metadata,
-	}
-	applyChannelOverrides(payload, channelType, message)
-	applyResolvedLinksToMessage(message, resolvedLinks)
-	if builderAttempted {
-		if err := s.invokeLinkHooks(ctx, linkReq, resolvedLinks, builderOK, true); err != nil {
-			s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "failed", resolvedProvider, renderLocale, err))
-			return err
-		}
-	}
-	if s.messages != nil {
-		if err := s.messages.Create(ctx, message); err != nil {
-			s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "failed", provider, renderLocale, err))
-			return fmt.Errorf("persist message: %w", err)
-		}
-	}
-
-	if inboxChannel {
-		if s.inbox == nil {
-			s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "failed", provider, renderLocale, errors.New("inbox service not configured")))
-			return errors.New("dispatcher: inbox channel requested but inbox service is not configured")
-		}
-		if err := s.handleInboxDelivery(ctx, message); err != nil {
-			s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "failed", provider, renderLocale, err))
-			return err
-		}
-		s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "delivered", provider, renderLocale, nil))
+func (s *Service) persistResolvedLinks(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	job deliveryJob,
+	state *deliveryState,
+	request links.LinkRequest,
+	resolved links.ResolvedLinks,
+	attempted, builderOK bool,
+) error {
+	if !attempted || len(job.transient) > 0 {
 		return nil
 	}
-	// TODO: We should support multi-channel deliveries
-	routeChannel := job.channel
-	if preferredProvider != "" {
-		routeChannel = fmt.Sprintf("%s:%s", channelType, preferredProvider)
+	if !job.persistence.PersistLinkURLs {
+		resolved.ActionURL, resolved.ManifestURL, resolved.URL = "", "", ""
+		for idx := range resolved.Records {
+			resolved.Records[idx].URL = ""
+		}
 	}
-	candidates := s.registry.List(routeChannel)
-	if len(candidates) == 0 {
-		return fmt.Errorf("route channel %s: %w", routeChannel, adapters.ErrAdapterNotFound)
+	if !job.persistence.PersistLinkRecords {
+		resolved.Records = nil
 	}
+	if err := s.invokeLinkHooks(ctx, request, resolved, builderOK && job.persistence.PersistLinkRecords, true); err != nil {
+		s.notifyDelivery(ctx, event, def, job, state.message, "failed", state.resolvedProvider, state.renderLocale, err)
+		return err
+	}
+	return nil
+}
 
+func (s *Service) persistInitialMessage(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	job deliveryJob,
+	state *deliveryState,
+) error {
+	if s.messages == nil {
+		return nil
+	}
+	if job.existing == nil {
+		persistedMessage := projectMessage(state.message, job.persistence)
+		if err := s.messages.Create(ctx, persistedMessage); err != nil {
+			s.notifyDelivery(ctx, event, def, job, state.message, "failed", state.provider, state.renderLocale, err)
+			return fmt.Errorf("persist message: %w", err)
+		}
+		state.message.RecordMeta = persistedMessage.RecordMeta
+		return nil
+	}
+	if err := s.messages.Update(ctx, projectMessage(state.message, job.persistence)); err != nil {
+		return fmt.Errorf("update retry message: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) processInboxDelivery(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	job deliveryJob,
+	state *deliveryState,
+) error {
+	if job.persistence.InboxMode != persistencepolicy.Full {
+		state.message.Status = domain.MessageStatusSkipped
+		if err := s.updateMessage(ctx, state.message, job.persistence, "skipped"); err != nil {
+			return err
+		}
+		s.notifyDelivery(ctx, event, def, job, state.message, "skipped", state.provider, state.renderLocale, nil)
+		return nil
+	}
+	if s.inbox == nil {
+		err := errors.New("dispatcher: inbox channel requested but inbox service is not configured")
+		s.notifyDelivery(ctx, event, def, job, state.message, "failed", state.provider, state.renderLocale, err)
+		return err
+	}
+	if err := s.handleInboxDelivery(ctx, state.message); err != nil {
+		s.notifyDelivery(ctx, event, def, job, state.message, "failed", state.provider, state.renderLocale, err)
+		return err
+	}
+	if err := s.updateMessage(ctx, state.message, job.persistence, "inbox"); err != nil {
+		return err
+	}
+	s.notifyDelivery(ctx, event, def, job, state.message, "delivered", state.provider, state.renderLocale, nil)
+	return nil
+}
+
+func (s *Service) processAdapterDelivery(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	job deliveryJob,
+	state *deliveryState,
+) error {
 	var success bool
 	var lastErr error
 	var lastProvider string
 
-	for _, messenger := range candidates {
-		resolvedAttachments := attachments
-		if s.attachments != nil && len(attachments) > 0 {
-			resolved, err := s.attachments.Resolve(ctx, adapters.AttachmentJob{
-				Channel:        channelType,
-				Provider:       messenger.Name(),
-				Recipient:      job.recipient,
-				EventID:        event.ID.String(),
-				DefinitionCode: def.Code,
-			}, attachments)
-			if err != nil {
-				lastErr = err
-				lastProvider = messenger.Name()
-				continue
-			}
-			resolvedAttachments = resolved
-		}
-
-		secretPayload, err := s.resolveSecrets(ctx, event, job, messenger, preferredProvider)
-		if err != nil {
-			lastErr = err
-			lastProvider = messenger.Name()
-			continue
-		}
-
-		sendMsg := adapters.Message{
-			ID:          message.ID.String(),
-			Channel:     channelType,
-			Provider:    messenger.Name(),
-			Subject:     message.Subject,
-			Body:        message.Body,
-			To:          message.Receiver,
-			Attachments: resolvedAttachments,
-			Metadata: map[string]any{
-				"event_id":        event.ID.String(),
-				"definition_code": def.Code,
-			},
-			Locale: renderResult.Locale,
-		}
-		if len(secretPayload) > 0 {
-			sendMsg.Metadata["secrets"] = secretPayload
-		}
-		if len(message.Metadata) > 0 {
-			if sendMsg.Metadata == nil {
-				sendMsg.Metadata = make(map[string]any)
-			}
-			for k, v := range message.Metadata {
-				if _, exists := sendMsg.Metadata[k]; exists {
-					continue
-				}
-				sendMsg.Metadata[k] = v
-			}
-		}
-
-		// Use a copy so per-adapter status updates don't clobber each other mid-loop.
-		msgCopy := *message
-		if err := s.deliverWithRetries(ctx, messenger, &msgCopy, sendMsg); err != nil {
+	for _, messenger := range state.candidates {
+		if err := s.sendThroughCandidate(ctx, event, def, job, state, messenger); err != nil {
 			lastErr = err
 			lastProvider = messenger.Name()
 			continue
@@ -477,22 +843,127 @@ func (s *Service) processDelivery(ctx context.Context, event *domain.Notificatio
 
 	if s.messages != nil {
 		if success {
-			message.Status = domain.MessageStatusDelivered
+			state.message.Status = domain.MessageStatusDelivered
 		} else {
-			message.Status = domain.MessageStatusFailed
+			state.message.Status = domain.MessageStatusFailed
 		}
-		_ = s.messages.Update(ctx, message)
+		if err := s.messages.Update(ctx, projectMessage(state.message, job.persistence)); err != nil {
+			return errors.Join(lastErr, fmt.Errorf("dispatcher: update message: %w", err))
+		}
 	}
 
 	if !success {
-		s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "failed", lastProvider, renderResult.Locale, lastErr))
+		s.notifyDelivery(ctx, event, def, job, state.message, "failed", lastProvider, state.renderResult.Locale, lastErr)
 		return lastErr
 	}
-	s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, "delivered", lastProvider, renderResult.Locale, nil))
+	s.notifyDelivery(ctx, event, def, job, state.message, "delivered", lastProvider, state.renderResult.Locale, nil)
 	return nil
 }
 
-func (s *Service) deliverWithRetries(ctx context.Context, messenger adapters.Messenger, message *domain.NotificationMessage, sendMsg adapters.Message) error {
+func (s *Service) sendThroughCandidate(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	job deliveryJob,
+	state *deliveryState,
+	messenger adapters.Messenger,
+) error {
+	attachments := state.attachments
+	if s.attachments != nil && len(attachments) > 0 {
+		resolved, err := s.attachments.Resolve(ctx, adapters.AttachmentJob{
+			Channel: state.channelType, Provider: messenger.Name(), Recipient: job.recipient,
+			EventID: event.ID.String(), DefinitionCode: def.Code,
+		}, attachments)
+		if err != nil {
+			return err
+		}
+		attachments = resolved
+	}
+	secretPayload, err := s.resolveSecrets(ctx, event, job, messenger, state.preferredProvider)
+	if err != nil {
+		return err
+	}
+	sendMessage := buildOutboundMessage(event, def, state, messenger, attachments, secretPayload)
+	messageCopy := *state.message
+	return s.deliverWithRetries(ctx, messenger, &messageCopy, sendMessage, job.persistence)
+}
+
+func buildOutboundMessage(
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	state *deliveryState,
+	messenger adapters.Messenger,
+	attachments []adapters.Attachment,
+	secretPayload map[string][]byte,
+) adapters.Message {
+	metadata := map[string]any{
+		"event_id": event.ID.String(), "definition_code": def.Code,
+		"correlation_id": event.CorrelationID, "request_id": event.RequestID,
+	}
+	if len(secretPayload) > 0 {
+		metadata["secrets"] = secretPayload
+	}
+	for key, value := range state.message.Metadata {
+		if _, exists := metadata[key]; !exists {
+			metadata[key] = value
+		}
+	}
+	return adapters.Message{
+		ID: state.message.ID.String(), Channel: state.channelType, Provider: messenger.Name(),
+		Subject: state.message.Subject, Body: state.message.Body, To: state.message.Receiver,
+		Attachments: attachments, Metadata: metadata, Locale: state.renderResult.Locale,
+		TraceID: event.CorrelationID, RequestID: event.RequestID,
+	}
+}
+
+func (s *Service) updateMessage(
+	ctx context.Context,
+	message *domain.NotificationMessage,
+	decision persistencepolicy.Decision,
+	label string,
+) error {
+	if s.messages == nil {
+		return nil
+	}
+	if err := s.messages.Update(ctx, projectMessage(message, decision)); err != nil {
+		return fmt.Errorf("dispatcher: update %s message: %w", label, err)
+	}
+	return nil
+}
+
+func (s *Service) notifyDelivery(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	def *domain.NotificationDefinition,
+	job deliveryJob,
+	message *domain.NotificationMessage,
+	status, provider, locale string,
+	err error,
+) {
+	s.activity.Notify(ctx, s.buildDeliveryActivity(event, def, job, message, status, provider, locale, err))
+}
+
+func normalizePersistenceDecision(decision persistencepolicy.Decision) persistencepolicy.Decision {
+	if decision.MessageMode != "" || decision.InboxMode != "" {
+		return decision
+	}
+	decision.MessageMode = persistencepolicy.Full
+	decision.InboxMode = persistencepolicy.Full
+	decision.PersistLinkURLs = true
+	decision.PersistLinkRecords = true
+	return decision
+}
+
+func (s *Service) deliverWithRetries(ctx context.Context, messenger adapters.Messenger, message *domain.NotificationMessage, sendMsg adapters.Message, decisions ...persistencepolicy.Decision) error {
+	decision := persistencepolicy.Decision{
+		MessageMode:        persistencepolicy.Full,
+		InboxMode:          persistencepolicy.Full,
+		PersistLinkURLs:    true,
+		PersistLinkRecords: true,
+	}
+	if len(decisions) > 0 {
+		decision = decisions[0]
+	}
 	var lastErr error
 	for attempt := 1; attempt <= s.cfg.MaxAttempts; attempt++ {
 		if ctx.Err() != nil {
@@ -500,15 +971,22 @@ func (s *Service) deliverWithRetries(ctx context.Context, messenger adapters.Mes
 		}
 		lastErr = messenger.Send(ctx, sendMsg)
 		if lastErr == nil {
-			_ = s.recordAttempt(ctx, messenger.Name(), message, domain.AttemptStatusSucceeded, "", attempt)
+			if err := s.recordAttempt(ctx, messenger.Name(), message, domain.AttemptStatusSucceeded, "", attempt); err != nil {
+				return fmt.Errorf("dispatcher: record successful delivery attempt: %w", err)
+			}
 			message.Status = domain.MessageStatusDelivered
 			if s.messages != nil {
-				_ = s.messages.Update(ctx, message)
+				if err := s.messages.Update(ctx, projectMessage(message, decision)); err != nil {
+					return fmt.Errorf("dispatcher: update delivered message: %w", err)
+				}
 			}
 			return nil
 		}
-		s.logger.Warn("delivery error", "attempt", attempt, "error", lastErr)
-		_ = s.recordAttempt(ctx, messenger.Name(), message, domain.AttemptStatusFailed, lastErr.Error(), attempt)
+		safe := s.safeError(lastErr)
+		s.logger.Warn("delivery error", "attempt", attempt, "error_code", safe.Code)
+		if err := s.recordAttempt(ctx, messenger.Name(), message, domain.AttemptStatusFailed, safe.Code, attempt); err != nil {
+			return errors.Join(lastErr, fmt.Errorf("dispatcher: record failed delivery attempt: %w", err))
+		}
 		var delay time.Duration
 		if s.backoff != nil {
 			delay = s.backoff.Next(attempt)
@@ -521,25 +999,35 @@ func (s *Service) deliverWithRetries(ctx context.Context, messenger adapters.Mes
 	}
 	message.Status = domain.MessageStatusFailed
 	if s.messages != nil {
-		_ = s.messages.Update(ctx, message)
+		if err := s.messages.Update(ctx, projectMessage(message, decision)); err != nil {
+			lastErr = errors.Join(lastErr, fmt.Errorf("dispatcher: update failed message: %w", err))
+		}
 	}
 	return fmt.Errorf("dispatcher: delivery failed after %d attempts: %w", s.cfg.MaxAttempts, lastErr)
 }
 
-func (s *Service) recordAttempt(ctx context.Context, adapterName string, message *domain.NotificationMessage, status, errMsg string, attempt int) error {
+func (s *Service) recordAttempt(ctx context.Context, adapterName string, message *domain.NotificationMessage, status, errorCode string, attempt int) error {
 	if s.attempts == nil {
 		return nil
 	}
 	record := &domain.DeliveryAttempt{
-		MessageID: message.ID,
-		Adapter:   adapterName,
-		Status:    status,
-		Error:     errMsg,
+		MessageID:        message.ID,
+		RetryOperationID: message.RetryOperationID,
+		Adapter:          adapterName,
+		Status:           status,
+		ErrorCode:        errorCode,
 		Payload: domain.JSONMap{
 			"attempt": attempt,
 		},
 	}
 	return s.attempts.Create(ctx, record)
+}
+
+func (s *Service) safeError(err error) privacy.SafeError {
+	if s != nil && s.privacy != nil {
+		return s.privacy.SafeError(err)
+	}
+	return (privacy.DefaultPolicy{}).SafeError(err)
 }
 
 func (s *Service) buildDeliveryActivity(event *domain.NotificationEvent, def *domain.NotificationDefinition, job deliveryJob, message *domain.NotificationMessage, status, provider, locale string, err error) activity.Event {
@@ -575,8 +1063,12 @@ func (s *Service) buildDeliveryActivity(event *domain.NotificationEvent, def *do
 		"template":  job.templateCode,
 		"recipient": job.recipient,
 	}
+	if event != nil {
+		meta["correlation_id"] = event.CorrelationID
+		meta["request_id"] = event.RequestID
+	}
 	if err != nil {
-		meta["error"] = err.Error()
+		meta["error_code"] = s.privacy.SafeError(err).Code
 	}
 	if message != nil {
 		meta["message_status"] = message.Status
@@ -589,14 +1081,14 @@ func (s *Service) buildDeliveryActivity(event *domain.NotificationEvent, def *do
 	return activity.Event{
 		Verb:           fmt.Sprintf("notification.%s", status),
 		ActorID:        actorID,
-		UserID:         job.recipient,
+		UserID:         s.privacy.SafeSubjectID(job.recipient),
 		TenantID:       tenantID,
 		ObjectType:     "notification_message",
 		ObjectID:       objectID,
 		Channel:        job.channel,
 		DefinitionCode: defCode,
-		Recipients:     recipients,
-		Metadata:       meta,
+		Recipients:     safeRecipients(s.privacy, recipients),
+		Metadata:       s.privacy.SafeMetadata(meta),
 	}
 }
 
@@ -637,6 +1129,375 @@ func cloneAnyMap(src map[string]any) map[string]any {
 	return dst
 }
 
+func projectMessage(message *domain.NotificationMessage, decision persistencepolicy.Decision) *domain.NotificationMessage {
+	if message == nil {
+		return nil
+	}
+	projected := *message
+	projected.Metadata = cloneJSONMap(message.Metadata)
+	projected.ProviderPlan = slices.Clone(message.ProviderPlan)
+
+	if !decision.PersistLinkURLs {
+		clearProjectedContent(&projected, false)
+	}
+
+	switch decision.MessageMode {
+	case persistencepolicy.Full:
+		return &projected
+	case persistencepolicy.MetadataOnly:
+		clearProjectedContent(&projected, true)
+		projected.Metadata = allowedMetadata(projected.Metadata, decision.AllowedMetadata)
+	case persistencepolicy.StateOnly:
+		clearProjectedContent(&projected, true)
+		projected.Metadata = nil
+	default:
+		// Custom policies must fail closed if they return an unknown mode.
+		clearProjectedContent(&projected, true)
+		projected.Metadata = nil
+	}
+	return &projected
+}
+
+func clearProjectedContent(message *domain.NotificationMessage, rendered bool) {
+	if rendered {
+		message.Subject = ""
+		message.Body = ""
+	}
+	message.ActionURL = ""
+	message.ManifestURL = ""
+	message.URL = ""
+}
+
+func allowedMetadata(metadata domain.JSONMap, allowed []string) domain.JSONMap {
+	if len(metadata) == 0 || len(allowed) == 0 {
+		return nil
+	}
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, key := range allowed {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			allowedSet[key] = struct{}{}
+		}
+	}
+	filtered := make(domain.JSONMap)
+	for key, value := range metadata {
+		if _, ok := allowedSet[key]; ok && safePersistenceMetadataKey(key) {
+			filtered[key] = value
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
+func safePersistenceMetadataKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return false
+	}
+	for _, fragment := range []string{
+		"token", "secret", "password", "credential", "authorization",
+		"body", "subject", "html", "url", "attachment", "recipient",
+		"destination",
+	} {
+		if key == fragment || strings.Contains(key, fragment) {
+			return false
+		}
+	}
+	return true
+}
+
+func safeRecipients(policy privacy.Policy, recipients []string) []string {
+	if len(recipients) == 0 {
+		return nil
+	}
+	safe := make([]string, 0, len(recipients))
+	for _, recipient := range recipients {
+		if subject := policy.SafeSubjectID(recipient); subject != "" {
+			safe = append(safe, subject)
+		}
+	}
+	return safe
+}
+
+func (s *Service) reconstructOutcomes(
+	ctx context.Context,
+	event *domain.NotificationEvent,
+	opts DispatchOptions,
+	dispatchErr error,
+) []receipts.DeliveryOutcome {
+	if event == nil {
+		return nil
+	}
+	if s.messages == nil {
+		return s.syntheticOutcomes(event, opts, dispatchErr)
+	}
+
+	messages, err := s.messages.ListByEvent(ctx, event.ID)
+	if err != nil || len(messages) == 0 {
+		return s.syntheticOutcomes(event, opts, dispatchErr)
+	}
+	channels := append([]string(nil), opts.Channels...)
+	if len(channels) == 0 {
+		channels = append(channels, event.Channels...)
+	}
+	if len(channels) == 0 {
+		if definition, definitionErr := s.definitions.GetByCode(ctx, event.DefinitionCode); definitionErr == nil {
+			channels = append(channels, definition.Channels...)
+		}
+	}
+	messageByKey := make(map[string]*domain.NotificationMessage, len(messages))
+	for idx := range messages {
+		message := &messages[idx]
+		messageByKey[message.Receiver+"\x00"+message.Channel] = message
+	}
+	outcomes := make([]receipts.DeliveryOutcome, 0, len(event.Recipients)*len(channels))
+	for _, recipient := range event.Recipients {
+		for _, configuredChannel := range channels {
+			channel, provider := adapters.ParseChannel(configuredChannel)
+			message := messageByKey[recipient+"\x00"+channel]
+			if message == nil {
+				status := receipts.OutcomeSkipped
+				errorCode := ""
+				if dispatchErr != nil {
+					status = receipts.OutcomeFailed
+					errorCode = s.privacy.SafeError(dispatchErr).Code
+				}
+				outcomes = append(outcomes, receipts.DeliveryOutcome{
+					SubjectID: s.privacy.SafeSubjectID(recipient), Channel: channel,
+					Provider: provider, Status: status, ErrorCode: errorCode,
+				})
+				continue
+			}
+			outcomes = append(outcomes, s.messageOutcomes(ctx, message, s.registry.List(configuredChannel))...)
+		}
+	}
+	return outcomes
+}
+
+type providerAttemptResult struct {
+	last  domain.DeliveryAttempt
+	count int
+}
+
+func (s *Service) messageOutcomes(ctx context.Context, message *domain.NotificationMessage, candidates []adapters.Messenger) []receipts.DeliveryOutcome {
+	base := receipts.DeliveryOutcome{
+		MessageID: message.ID,
+		SubjectID: s.privacy.SafeSubjectID(message.Receiver),
+		Channel:   message.Channel,
+		Status:    receiptOutcomeStatus(message.Status),
+	}
+	if s.attempts == nil {
+		return []receipts.DeliveryOutcome{base}
+	}
+	attempts, err := s.attempts.ListByMessage(ctx, message.ID)
+	if err != nil || (len(attempts) == 0 && len(candidates) == 0) {
+		return []receipts.DeliveryOutcome{base}
+	}
+	slices.SortFunc(attempts, compareAttempts)
+
+	byProvider := make(map[string]providerAttemptResult)
+	for _, attempt := range attempts {
+		result := byProvider[attempt.Adapter]
+		result.last = attempt
+		result.count++
+		byProvider[attempt.Adapter] = result
+	}
+	providers := orderedOutcomeProviders(message.ProviderPlan, candidates, byProvider)
+	outcomes := make([]receipts.DeliveryOutcome, 0, len(providers))
+	for _, provider := range providers {
+		result, attempted := byProvider[provider]
+		status := receipts.OutcomeFailed
+		if attempted && result.last.Status == domain.AttemptStatusSucceeded {
+			status = receipts.OutcomeDelivered
+		}
+		outcomes = append(outcomes, receipts.DeliveryOutcome{
+			MessageID:    message.ID,
+			SubjectID:    base.SubjectID,
+			Channel:      message.Channel,
+			Provider:     provider,
+			Status:       status,
+			AttemptCount: result.count,
+			ErrorCode:    result.last.ErrorCode,
+		})
+	}
+	return outcomes
+}
+
+func orderedOutcomeProviders(
+	providerPlan domain.StringList,
+	candidates []adapters.Messenger,
+	byProvider map[string]providerAttemptResult,
+) []string {
+	providers := make([]string, 0, len(byProvider)+len(providerPlan))
+	seen := make(map[string]struct{}, len(byProvider)+len(providerPlan))
+	for _, provider := range providerPlan {
+		if _, ok := seen[provider]; !ok {
+			providers = append(providers, provider)
+			seen[provider] = struct{}{}
+		}
+	}
+	if len(providerPlan) == 0 {
+		for _, candidate := range candidates {
+			if _, ok := seen[candidate.Name()]; !ok {
+				providers = append(providers, candidate.Name())
+				seen[candidate.Name()] = struct{}{}
+			}
+		}
+	}
+	extras := make([]string, 0, len(byProvider))
+	for provider := range byProvider {
+		if _, ok := seen[provider]; !ok {
+			extras = append(extras, provider)
+		}
+	}
+	slices.Sort(extras)
+	providers = append(providers, extras...)
+	return providers
+}
+
+func compareAttempts(left, right domain.DeliveryAttempt) int {
+	if cmp := strings.Compare(left.Adapter, right.Adapter); cmp != 0 {
+		return cmp
+	}
+	if left.CreatedAt.Before(right.CreatedAt) {
+		return -1
+	}
+	if left.CreatedAt.After(right.CreatedAt) {
+		return 1
+	}
+	return strings.Compare(left.ID.String(), right.ID.String())
+}
+
+func compareAttemptChronology(left, right domain.DeliveryAttempt) int {
+	if left.CreatedAt.Before(right.CreatedAt) {
+		return -1
+	}
+	if left.CreatedAt.After(right.CreatedAt) {
+		return 1
+	}
+	return strings.Compare(left.ID.String(), right.ID.String())
+}
+
+func (s *Service) syntheticOutcomes(
+	event *domain.NotificationEvent,
+	opts DispatchOptions,
+	dispatchErr error,
+) []receipts.DeliveryOutcome {
+	channels := append([]string(nil), opts.Channels...)
+	if len(channels) == 0 {
+		if definition, err := s.definitions.GetByCode(context.Background(), event.DefinitionCode); err == nil {
+			channels = append(channels, definition.Channels...)
+		}
+	}
+	if len(channels) == 0 {
+		channels = []string{""}
+	}
+	status := receipts.OutcomePending
+	errorCode := ""
+	if dispatchErr != nil {
+		status = receipts.OutcomeFailed
+		errorCode = s.privacy.SafeError(dispatchErr).Code
+	}
+	outcomes := make([]receipts.DeliveryOutcome, 0, len(event.Recipients)*len(channels))
+	for _, recipient := range event.Recipients {
+		for _, channel := range channels {
+			outcomes = append(outcomes, receipts.DeliveryOutcome{
+				SubjectID: s.privacy.SafeSubjectID(recipient),
+				Channel:   channel,
+				Status:    status,
+				ErrorCode: errorCode,
+			})
+		}
+	}
+	return outcomes
+}
+
+func receiptOutcomeStatus(status string) receipts.OutcomeStatus {
+	switch status {
+	case domain.MessageStatusDelivered:
+		return receipts.OutcomeDelivered
+	case domain.MessageStatusFailed:
+		return receipts.OutcomeFailed
+	case domain.MessageStatusSkipped:
+		return receipts.OutcomeSkipped
+	default:
+		return receipts.OutcomePending
+	}
+}
+
+func aggregateReceiptStatus(outcomes []receipts.DeliveryOutcome, dispatchErr error) receipts.Status {
+	if len(outcomes) == 0 {
+		if dispatchErr != nil {
+			return receipts.StatusFailed
+		}
+		return receipts.StatusProcessed
+	}
+	delivered := 0
+	failed := 0
+	pending := 0
+	for _, outcome := range outcomes {
+		switch outcome.Status {
+		case receipts.OutcomeDelivered:
+			delivered++
+		case receipts.OutcomeFailed:
+			failed++
+		case receipts.OutcomePending:
+			pending++
+		}
+	}
+	switch {
+	case pending > 0 && delivered == 0 && failed == 0:
+		return receipts.StatusDispatching
+	case delivered > 0 && failed > 0:
+		return receipts.StatusPartial
+	case failed > 0 || dispatchErr != nil:
+		return receipts.StatusFailed
+	default:
+		return receipts.StatusProcessed
+	}
+}
+
+func receiptEventStatus(status receipts.Status) string {
+	switch status {
+	case receipts.StatusProcessed:
+		return domain.EventStatusProcessed
+	case receipts.StatusPartial:
+		return domain.EventStatusPartial
+	case receipts.StatusFailed:
+		return domain.EventStatusFailed
+	default:
+		return ""
+	}
+}
+
+func receiptStatusForEvent(eventStatus string, outcomes []receipts.DeliveryOutcome) receipts.Status {
+	switch eventStatus {
+	case domain.EventStatusScheduled:
+		return receipts.StatusScheduled
+	case domain.EventStatusDispatching:
+		return receipts.StatusDispatching
+	case domain.EventStatusRetrying:
+		return receipts.StatusRetrying
+	case domain.EventStatusProcessed, domain.EventStatusPartial, domain.EventStatusFailed:
+		status := aggregateReceiptStatus(outcomes, nil)
+		if status == receipts.StatusDispatching {
+			switch eventStatus {
+			case domain.EventStatusProcessed:
+				return receipts.StatusProcessed
+			case domain.EventStatusPartial:
+				return receipts.StatusPartial
+			default:
+				return receipts.StatusFailed
+			}
+		}
+		return status
+	default:
+		return receipts.StatusAccepted
+	}
+}
+
 func sanitizeContext(ctx domain.JSONMap) {
 	if len(ctx) == 0 {
 		return
@@ -653,26 +1514,16 @@ func applyChannelOverrides(payload domain.JSONMap, channel string, message *doma
 	if len(overrides) == 0 {
 		return
 	}
-	if subject, ok := overrides["subject"].(string); ok && strings.TrimSpace(subject) != "" {
+	if subject := firstString(overrides, "subject"); subject != "" {
 		message.Subject = subject
 	}
-	if body, ok := overrides["body"].(string); ok && strings.TrimSpace(body) != "" {
+	if body := firstString(overrides, "body"); body != "" {
 		message.Body = body
 	}
-	if htmlBody, ok := overrides["html_body"].(string); ok && strings.TrimSpace(htmlBody) != "" {
-		message.Metadata["html_body"] = htmlBody
-	}
-	if textBody, ok := overrides["text_body"].(string); ok && strings.TrimSpace(textBody) != "" {
-		message.Metadata["text_body"] = textBody
-	}
-	if icon, ok := overrides["icon"].(string); ok && strings.TrimSpace(icon) != "" {
-		message.Metadata["icon"] = icon
-	}
-	if badge, ok := overrides["badge"].(string); ok && strings.TrimSpace(badge) != "" {
-		message.Metadata["badge"] = badge
-	}
-	if cta, ok := overrides["cta_label"].(string); ok && strings.TrimSpace(cta) != "" {
-		message.Metadata["cta_label"] = cta
+	for _, key := range []string{"html_body", "text_body", "icon", "badge", "cta_label"} {
+		if value := firstString(overrides, key); value != "" {
+			message.Metadata[key] = value
+		}
 	}
 }
 
@@ -746,17 +1597,12 @@ func linkMetadataFromPayload(payload domain.JSONMap, channel string) map[string]
 		}
 	}
 	overrides := extractOverrides(payload, channel)
-	if len(overrides) > 0 {
-		keys := []string{"html_body", "text_body", "icon", "badge", "cta_label"}
-		for _, key := range keys {
-			if val, ok := overrides[key]; ok {
-				if str, ok := val.(string); ok && strings.TrimSpace(str) != "" {
-					if metadata == nil {
-						metadata = make(map[string]any)
-					}
-					metadata[key] = str
-				}
+	for _, key := range []string{"html_body", "text_body", "icon", "badge", "cta_label"} {
+		if value := firstString(overrides, key); value != "" {
+			if metadata == nil {
+				metadata = make(map[string]any)
 			}
+			metadata[key] = value
 		}
 	}
 	if len(metadata) == 0 {
@@ -794,8 +1640,7 @@ func (s *Service) resolveLinks(ctx context.Context, event *domain.NotificationEv
 			s.logger.Warn("link builder failed; continuing with pass-through links",
 				"definition", def.Code,
 				"channel", job.channel,
-				"recipient", job.recipient,
-				"error", err,
+				"error_code", s.privacy.SafeError(err).Code,
 			)
 			baseResolved = ensureResolvedLinkRecords(req, baseResolved)
 			return req, baseResolved, true, false, nil
@@ -810,14 +1655,22 @@ func (s *Service) resolveLinks(ctx context.Context, event *domain.NotificationEv
 }
 
 func (s *Service) invokeLinkHooks(ctx context.Context, req links.LinkRequest, resolved links.ResolvedLinks, allowStore, allowObserver bool) error {
+	req.Recipient = s.privacy.SafeSubjectID(req.Recipient)
+	req.Payload = s.privacy.SafeContext(req.Payload)
+	req.Metadata = s.privacy.SafeMetadata(req.Metadata)
+	req.ResolvedURLs = nil
+	resolved.Metadata = s.privacy.SafeMetadata(resolved.Metadata)
+	for idx := range resolved.Records {
+		resolved.Records[idx].Recipient = s.privacy.SafeSubjectID(resolved.Records[idx].Recipient)
+		resolved.Records[idx].Metadata = s.privacy.SafeMetadata(resolved.Records[idx].Metadata)
+	}
 	if allowStore && s.linkStore != nil && len(resolved.Records) > 0 {
 		if err := s.linkStore.Save(ctx, resolved.Records); err != nil {
 			if s.linkPolicy.Store == links.FailureLenient {
 				s.logger.Warn("link store save failed; continuing",
 					"definition", req.Definition,
 					"channel", req.Channel,
-					"recipient", req.Recipient,
-					"error", err,
+					"error_code", s.privacy.SafeError(err).Code,
 				)
 			} else {
 				return err
@@ -825,13 +1678,20 @@ func (s *Service) invokeLinkHooks(ctx context.Context, req links.LinkRequest, re
 		}
 	}
 	if allowObserver && s.linkObserver != nil {
-		if err := s.notifyLinkObserver(ctx, req, resolved); err != nil {
+		observerResolved := resolved
+		observerResolved.ActionURL = ""
+		observerResolved.ManifestURL = ""
+		observerResolved.URL = ""
+		observerResolved.Records = append([]links.LinkRecord(nil), resolved.Records...)
+		for idx := range observerResolved.Records {
+			observerResolved.Records[idx].URL = ""
+		}
+		if err := s.notifyLinkObserver(ctx, req, observerResolved); err != nil {
 			if s.linkPolicy.Observer == links.FailureLenient {
 				s.logger.Warn("link observer failed; continuing",
 					"definition", req.Definition,
 					"channel", req.Channel,
-					"recipient", req.Recipient,
-					"error", err,
+					"error_code", s.privacy.SafeError(err).Code,
 				)
 			} else {
 				return err
@@ -1078,9 +1938,6 @@ func (s *Service) handleInboxDelivery(ctx context.Context, message *domain.Notif
 		return fmt.Errorf("dispatcher: inbox delivery failed: %w", err)
 	}
 	message.Status = domain.MessageStatusDelivered
-	if s.messages != nil {
-		_ = s.messages.Update(ctx, message)
-	}
 	return nil
 }
 

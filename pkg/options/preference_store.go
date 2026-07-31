@@ -85,8 +85,8 @@ func (s PreferenceSnapshotStore) Save(ctx context.Context, input PreferenceSnaps
 	switch {
 	case err == nil:
 		applySnapshot(pref, input)
-		if err := s.Repository.Update(ctx, pref); err != nil {
-			return nil, err
+		if updateErr := s.Repository.Update(ctx, pref); updateErr != nil {
+			return nil, updateErr
 		}
 		return pref, nil
 	case errors.Is(err, store.ErrNotFound):
@@ -103,8 +103,8 @@ func (s PreferenceSnapshotStore) Save(ctx context.Context, input PreferenceSnaps
 		if input.Enabled == nil {
 			record.Enabled = true
 		}
-		if err := s.Repository.Create(ctx, record); err != nil {
-			return nil, err
+		if createErr := s.Repository.Create(ctx, record); createErr != nil {
+			return nil, createErr
 		}
 		return record, nil
 	default:

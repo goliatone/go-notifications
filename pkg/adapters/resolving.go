@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"errors"
+	"maps"
 
 	"github.com/goliatone/go-notifications/pkg/privacy"
 )
@@ -70,8 +71,29 @@ func (m ResolvingMessenger) Send(ctx context.Context, msg Message) error {
 	}
 	copyMessage := msg
 	copyMessage.To = resolved.Destination
+	copyMessage.Metadata = maps.Clone(msg.Metadata)
+	if len(resolved.Metadata) > 0 {
+		if copyMessage.Metadata == nil {
+			copyMessage.Metadata = make(map[string]any, len(resolved.Metadata))
+		}
+		maps.Copy(copyMessage.Metadata, resolved.Metadata)
+	}
 	if resolved.Locale != "" {
 		copyMessage.Locale = resolved.Locale
 	}
-	return m.Inner.Send(ctx, copyMessage)
+	if err := m.Inner.Send(ctx, copyMessage); err != nil {
+		if m.Diagnostic != nil {
+			m.Diagnostic.Report(ctx, privacy.DiagnosticEvent{
+				Operation: "recipient.deliver",
+				MessageID: msg.ID,
+				Cause:     err,
+			})
+		}
+		policy := m.Privacy
+		if policy == nil {
+			policy = privacy.DefaultPolicy{}
+		}
+		return policy.SafeError(err)
+	}
+	return nil
 }

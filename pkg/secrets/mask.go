@@ -17,7 +17,9 @@ func init() {
 	// Register common secret-ish fields so masking uses sane defaults.
 	for _, field := range defaultSecretFields {
 		// Preserve a few characters where possible; fallback to filled if unknown to masker.
-		masker.Default.RegisterMaskField(field, "preserveEnds(2,2)")
+		if err := masker.Default.RegisterMaskField(field, "preserveEnds(2,2)"); err != nil {
+			panic("secrets: register default mask field " + field + ": " + err.Error())
+		}
 	}
 }
 

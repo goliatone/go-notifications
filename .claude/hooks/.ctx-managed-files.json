@@ -1,0 +1,22 @@
+{
+  "files": {
+    "ctx_hook_dispatch.sh": {
+      "sha256": "967bf927895ed1e5d47e7c78d6fe28f917da0b810dbe8cc5ab1937c4fc458da5"
+    },
+    "ctx_hook_utils.py": {
+      "sha256": "f799286a6797a967e56fa29aeb2bb84bb2a80a9d14dd3f0ceb78d38bf413a151"
+    },
+    "ctx_post_tool_use.py": {
+      "sha256": "33d5d95365d9398cc7073bc89474e86ef7b642e5e434777aaeaef6b35594f9c9"
+    },
+    "ctx_session_start.py": {
+      "sha256": "72621bcdfd5e8772e82a162740f27872b0125ccc39e4530570cd89d0f6f780bc"
+    },
+    "ctx_stop.py": {
+      "sha256": "a25f4fd47a6800c7fd8754aa54cb890f7de9e3c12dd2073261bbe27938fd65f0"
+    },
+    "ctx_user_prompt_submit.py": {
+      "sha256": "47dd8f1aeb32e35ee312a447c00cd30be4357738718d5a9217e43c5e39f703f7"
+    }
+  }
+}

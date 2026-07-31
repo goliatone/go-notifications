@@ -92,8 +92,10 @@ func (r *Registry) Route(channel string) (Messenger, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if provider != "" {
-		if adapter, ok := r.adapters[provider]; ok {
-			return adapter, nil
+		for _, adapter := range r.byChannel[normalizeKey(ch)] {
+			if normalizeKey(adapter.Name()) == provider {
+				return adapter, nil
+			}
 		}
 		return nil, ErrAdapterNotFound
 	}
@@ -109,12 +111,17 @@ func (r *Registry) List(channel string) []Messenger {
 	if r == nil {
 		return nil
 	}
-	base, _ := ParseChannel(channel)
+	base, provider := ParseChannel(channel)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	candidates := r.byChannel[normalizeKey(channel)]
-	if len(candidates) == 0 && base != normalizeKey(channel) {
-		candidates = r.byChannel[normalizeKey(base)]
+	candidates := r.byChannel[normalizeKey(base)]
+	if provider != "" {
+		for _, candidate := range candidates {
+			if normalizeKey(candidate.Name()) == provider {
+				return []Messenger{candidate}
+			}
+		}
+		return nil
 	}
 	out := make([]Messenger, len(candidates))
 	copy(out, candidates)

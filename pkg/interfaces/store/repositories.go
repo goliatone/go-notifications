@@ -50,7 +50,11 @@ type NotificationTemplateRepository interface {
 type NotificationEventRepository interface {
 	Repository[domain.NotificationEvent]
 	ListPending(ctx context.Context, limit int) ([]domain.NotificationEvent, error)
+	ListByPublication(ctx context.Context, publicationID uuid.UUID) ([]domain.NotificationEvent, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	CreateIdempotent(ctx context.Context, event *domain.NotificationEvent) (*domain.NotificationEvent, bool, error)
+	GetByIdempotency(ctx context.Context, scope, definitionCode, key string) (*domain.NotificationEvent, error)
+	ClaimRetry(ctx context.Context, id uuid.UUID, until time.Time) (bool, error)
 }
 
 type NotificationMessageRepository interface {
@@ -61,6 +65,21 @@ type NotificationMessageRepository interface {
 type DeliveryAttemptRepository interface {
 	Repository[domain.DeliveryAttempt]
 	ListByMessage(ctx context.Context, messageID uuid.UUID) ([]domain.DeliveryAttempt, error)
+}
+
+type NotificationPublicationRepository interface {
+	Repository[domain.NotificationPublication]
+	ListPending(ctx context.Context, limit int) ([]domain.NotificationPublication, error)
+	FindOpenDigest(ctx context.Context, digestKey string) (*domain.NotificationPublication, error)
+	CreateOrGetOpenDigest(ctx context.Context, publication *domain.NotificationPublication) (*domain.NotificationPublication, bool, error)
+	CreateOrAttachOpenDigest(ctx context.Context, publication *domain.NotificationPublication, event *domain.NotificationEvent) (*domain.NotificationPublication, bool, error)
+	Claim(ctx context.Context, id uuid.UUID, until time.Time) (bool, error)
+}
+
+type NotificationRetryOperationRepository interface {
+	Repository[domain.NotificationRetryOperation]
+	CreateIdempotent(ctx context.Context, operation *domain.NotificationRetryOperation) (*domain.NotificationRetryOperation, bool, error)
+	Claim(ctx context.Context, id uuid.UUID, until time.Time) (bool, error)
 }
 
 type NotificationPreferenceRepository interface {

@@ -14,42 +14,54 @@ func PolicyFromMap(input map[string]any) (Policy, error) {
 		return Policy{}, nil
 	}
 	out := Policy{}
-	if value, ok, err := readBool(input, "enabled"); err != nil {
+	if err := readPolicyScalars(input, &out); err != nil {
 		return Policy{}, err
-	} else if ok {
-		out.Enabled = value
 	}
-	if value, ok, err := readDuration(input, "initial_delay"); err != nil {
+	if err := readPolicyDurations(input, &out); err != nil {
 		return Policy{}, err
-	} else if ok {
-		out.InitialDelay = value
-	}
-	if value, ok, err := readDuration(input, "interval"); err != nil {
-		return Policy{}, err
-	} else if ok {
-		out.Interval = value
-	}
-	if value, ok, err := readInt(input, "max_count"); err != nil {
-		return Policy{}, err
-	} else if ok {
-		out.MaxCount = value
-	}
-	if value, ok, err := readInt(input, "jitter_percent"); err != nil {
-		return Policy{}, err
-	} else if ok {
-		out.JitterPercent = value
-	}
-	if value, ok, err := readDuration(input, "recent_view_grace"); err != nil {
-		return Policy{}, err
-	} else if ok {
-		out.RecentViewGrace = value
-	}
-	if value, ok, err := readDuration(input, "manual_resend_cooldown"); err != nil {
-		return Policy{}, err
-	} else if ok {
-		out.ManualResendCooldown = value
 	}
 	return out, nil
+}
+
+func readPolicyScalars(input map[string]any, policy *Policy) error {
+	if value, ok, err := readBool(input, "enabled"); err != nil {
+		return err
+	} else if ok {
+		policy.Enabled = value
+	}
+	if value, ok, err := readInt(input, "max_count"); err != nil {
+		return err
+	} else if ok {
+		policy.MaxCount = value
+	}
+	if value, ok, err := readInt(input, "jitter_percent"); err != nil {
+		return err
+	} else if ok {
+		policy.JitterPercent = value
+	}
+	return nil
+}
+
+func readPolicyDurations(input map[string]any, policy *Policy) error {
+	fields := []struct {
+		key    string
+		target *time.Duration
+	}{
+		{"initial_delay", &policy.InitialDelay},
+		{"interval", &policy.Interval},
+		{"recent_view_grace", &policy.RecentViewGrace},
+		{"manual_resend_cooldown", &policy.ManualResendCooldown},
+	}
+	for _, field := range fields {
+		value, ok, err := readDuration(input, field.key)
+		if err != nil {
+			return err
+		}
+		if ok {
+			*field.target = value
+		}
+	}
+	return nil
 }
 
 // PolicyToMap converts a Policy to map form using duration strings.

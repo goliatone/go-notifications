@@ -3,7 +3,6 @@ package firebase
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -91,57 +90,9 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	target := strings.TrimSpace(msg.To)
-	if token := stringValue(msg.Metadata, "token"); token != "" {
-		target = token
-	}
-	topic := stringValue(msg.Metadata, "topic")
-	condition := stringValue(msg.Metadata, "condition")
-	if target == "" && topic == "" && condition == "" {
-		return fmt.Errorf("firebase: a target is required (token, topic, or condition)")
-	}
-
-	text := firstNonEmpty(stringValue(msg.Metadata, "body"), msg.Body)
-	html := firstNonEmpty(stringValue(msg.Metadata, "html_body"))
-
-	payload := map[string]any{
-		"notification": map[string]any{
-			"title": msg.Subject,
-			"body":  text,
-		},
-		"data": map[string]any{
-			"text": text,
-		},
-		"priority": "high",
-	}
-	if html != "" {
-		// include html in data for clients that render it
-		if data, ok := payload["data"].(map[string]any); ok {
-			data["html"] = html
-		}
-	}
-	if ca := stringValue(msg.Metadata, "click_action"); ca != "" {
-		if notif, ok := payload["notification"].(map[string]any); ok {
-			notif["click_action"] = ca
-		}
-	}
-	if img := stringValue(msg.Metadata, "image"); img != "" {
-		if notif, ok := payload["notification"].(map[string]any); ok {
-			notif["image"] = img
-		}
-	}
-	if dataMeta, ok := msg.Metadata["data"].(map[string]any); ok {
-		if data, ok := payload["data"].(map[string]any); ok {
-			maps.Copy(data, dataMeta)
-		}
-	}
-
-	if topic != "" {
-		payload["to"] = "/topics/" + strings.TrimPrefix(topic, "/topics/")
-	} else if condition != "" {
-		payload["condition"] = condition
-	} else {
-		payload["to"] = target
+	payload, err := firebasePayload(msg)
+	if err != nil {
+		return err
 	}
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
@@ -165,22 +116,56 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "key="+strings.TrimSpace(a.cfg.ServerKey))
 
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("firebase: request failed: %w", err)
-	}
-	respBody, err := adapters.ReadResponseBody(resp)
-	closeErr := resp.Body.Close()
-	if responseErr := errors.Join(err, closeErr); responseErr != nil {
-		return fmt.Errorf("firebase: %w", responseErr)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return adapters.HTTPStatusError("firebase", resp.StatusCode, respBody)
+	if _, err := adapters.ExecuteRequest(a.client, "firebase", req); err != nil {
+		return err
 	}
 
 	a.base.LogSuccess(a.name, msg)
 	return nil
+}
+
+func firebasePayload(msg adapters.Message) (map[string]any, error) {
+	target := strings.TrimSpace(msg.To)
+	if token := stringValue(msg.Metadata, "token"); token != "" {
+		target = token
+	}
+	topic := stringValue(msg.Metadata, "topic")
+	condition := stringValue(msg.Metadata, "condition")
+	if target == "" && topic == "" && condition == "" {
+		return nil, fmt.Errorf("firebase: a target is required (token, topic, or condition)")
+	}
+
+	text := firstNonEmpty(stringValue(msg.Metadata, "body"), msg.Body)
+	html := firstNonEmpty(stringValue(msg.Metadata, "html_body"))
+
+	notification := map[string]any{"title": msg.Subject, "body": text}
+	data := map[string]any{"text": text}
+	payload := map[string]any{
+		"notification": notification,
+		"data":         data,
+		"priority":     "high",
+	}
+	if html != "" {
+		data["html"] = html
+	}
+	if clickAction := stringValue(msg.Metadata, "click_action"); clickAction != "" {
+		notification["click_action"] = clickAction
+	}
+	if image := stringValue(msg.Metadata, "image"); image != "" {
+		notification["image"] = image
+	}
+	if dataMeta, ok := msg.Metadata["data"].(map[string]any); ok {
+		maps.Copy(data, dataMeta)
+	}
+
+	if topic != "" {
+		payload["to"] = "/topics/" + strings.TrimPrefix(topic, "/topics/")
+	} else if condition != "" {
+		payload["condition"] = condition
+	} else {
+		payload["to"] = target
+	}
+	return payload, nil
 }
 
 func firstNonEmpty(values ...string) string {

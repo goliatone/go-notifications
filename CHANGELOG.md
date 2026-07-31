@@ -1,5 +1,47 @@
 # Changelog
 
+<!-- markdownlint-disable MD012 MD013 MD024 MD025 -->
+
+## Unreleased (`v0.15.0` planned)
+
+Release tag pending explicit authorization.
+
+### Added
+
+- Embedded, ordered SQLite and PostgreSQL core/upgrade migrations.
+- Correlation/request fields, scoped idempotency, typed dispatch receipts,
+  durable scheduled/digest publications, recovery, and explicit retry
+  operations.
+- Immediate-only transient render data, definition-aware persistence/link
+  projections, recipient-resolution adapters, safe public errors, and
+  privileged diagnostics.
+- Eight stable, validated, service-backed `go-command` handlers with typed
+  enqueue/retry results.
+
+### Changed
+
+- `Manager.Send` and `Events.Enqueue` remain compatible wrappers around the
+  canonical receipt-returning event service.
+- Scheduled/digest intake now requires a durable queue and fails closed when
+  only `queue.Nop` is configured.
+- PostgreSQL JSONB values use portable JSON text rather than bytea encoding.
+- Digest membership is atomic with publication claims; late members open a
+  new durable window, and digest identities are PostgreSQL-safe hashes.
+- Retry preserves the original channel, locale, template, and provider plan
+  and retries failed provider outcomes without resending successful ones.
+- Provider-qualified routes and preference overrides now invoke only the
+  selected provider. Every future schedule uses the asynchronous path.
+
+### Schema and adoption
+
+- Hosts must register and run the `go-notifications` migration source before
+  constructing Bun providers.
+- Existing data is preserved by migrations `001` through `003`. Integrity
+  migration `003` repairs legacy template uniqueness and is forward-only on
+  both dialects.
+- Adopt the published tag with `go get`, never a production-only local
+  `replace`.
+
 # [0.14.1](https://github.com/goliatone/go-notifications/compare/v0.14.0...v0.14.1) - (2026-07-31)
 
 ## <!-- 13 -->📦 Bumps
@@ -385,5 +427,3 @@
 - Update examples ([c3553b2](https://github.com/goliatone/go-notifications/commit/c3553b244dd41eb1513b9d3e65bd64e55fd66c7d))  - (goliatone)
 - Clean up ([0571c72](https://github.com/goliatone/go-notifications/commit/0571c72dcc0cee1b884f86f41aebeeffca16b0c3))  - (goliatone)
 - Initial commit ([9a8eb26](https://github.com/goliatone/go-notifications/commit/9a8eb26019ceb07b26fda728351d193e984cd27c))  - (goliatone)
-
-

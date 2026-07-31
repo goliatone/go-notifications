@@ -3,7 +3,6 @@ package mailgun
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -131,18 +130,8 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	req.SetBasicAuth("api", a.cfg.APIKey)
 	req.Header.Set("Content-Type", contentType)
 
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("mailgun: request failed: %w", err)
-	}
-	respBody, err := adapters.ReadResponseBody(resp)
-	closeErr := resp.Body.Close()
-	if responseErr := errors.Join(err, closeErr); responseErr != nil {
-		return fmt.Errorf("mailgun: %w", responseErr)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return adapters.HTTPStatusError("mailgun", resp.StatusCode, respBody)
+	if _, err := adapters.ExecuteRequest(a.client, "mailgun", req); err != nil {
+		return err
 	}
 
 	a.base.LogSuccess(a.name, msg)

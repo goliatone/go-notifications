@@ -5,7 +5,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -149,18 +148,8 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		req.Header.Set(k, v)
 	}
 
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("aws_sns: request failed: %w", err)
-	}
-	respBody, err := adapters.ReadResponseBody(resp)
-	closeErr := resp.Body.Close()
-	if responseErr := errors.Join(err, closeErr); responseErr != nil {
-		return fmt.Errorf("aws_sns: %w", responseErr)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return adapters.HTTPStatusError("aws_sns", resp.StatusCode, respBody)
+	if _, err := adapters.ExecuteRequest(a.client, "aws_sns", req); err != nil {
+		return err
 	}
 	a.base.LogSuccess(a.name, msg)
 	return nil

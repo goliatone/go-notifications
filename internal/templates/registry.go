@@ -184,21 +184,21 @@ func sourceField(src domain.TemplateSource, key string) string {
 	if !strings.EqualFold(src.Type, sourceTypeGoCMSBlock) || src.Payload == nil {
 		return ""
 	}
-	if v, ok := src.Payload[key]; ok {
-		if text, ok := v.(string); ok {
-			return text
-		}
+	if text, ok := src.Payload[key].(string); ok {
+		return text
 	}
 	// support nested block payloads (e.g., map["block"])
-	if blocks, ok := src.Payload["blocks"].([]any); ok {
-		for _, block := range blocks {
-			if blockMap, ok := block.(map[string]any); ok {
-				if val, ok := blockMap[key]; ok {
-					if text, ok := val.(string); ok {
-						return text
-					}
-				}
-			}
+	blocks, ok := src.Payload["blocks"].([]any)
+	if !ok {
+		return ""
+	}
+	for _, block := range blocks {
+		blockMap, ok := block.(map[string]any)
+		if !ok {
+			continue
+		}
+		if text, ok := blockMap[key].(string); ok {
+			return text
 		}
 	}
 	return ""

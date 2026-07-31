@@ -136,7 +136,7 @@ func NewService(translator i18n.Translator, opts ...Option) (*Service, error) {
 
 	renderer, err := gotemplate.NewRenderer(rendererOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRendererConfig, err)
+		return nil, fmt.Errorf("%w: %w", ErrRendererConfig, err)
 	}
 
 	service := &Service{
@@ -209,8 +209,8 @@ func (s *Service) Render(ctx context.Context, req RenderRequest) (RenderResult, 
 	payload := cloneData(req.Data)
 	payload[s.localeKey] = resolvedLocale
 
-	if err := validateSchemaData(variant.Schema(), payload); err != nil {
-		return RenderResult{}, err
+	if validationErr := validateSchemaData(variant.Schema(), payload); validationErr != nil {
+		return RenderResult{}, validationErr
 	}
 
 	s.renderMu.Lock()

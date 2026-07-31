@@ -7,45 +7,19 @@ import (
 	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	repository "github.com/goliatone/go-repository-bun"
-	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 )
 
 type TemplateRepository struct {
-	base baseRepository[domain.NotificationTemplate]
+	crudRepository[domain.NotificationTemplate]
 }
 
 func NewTemplateRepository(db *bun.DB) *TemplateRepository {
-	handlers := repository.ModelHandlers[*domain.NotificationTemplate]{
-		NewRecord:          func() *domain.NotificationTemplate { return &domain.NotificationTemplate{} },
-		GetID:              func(t *domain.NotificationTemplate) uuid.UUID { return t.ID },
-		SetID:              func(t *domain.NotificationTemplate, id uuid.UUID) { t.ID = id },
-		GetIdentifier:      func() string { return "code" },
-		GetIdentifierValue: func(t *domain.NotificationTemplate) string { return t.Code },
-	}
 	return &TemplateRepository{
-		base: newBaseRepository[domain.NotificationTemplate](db, handlers, func(t *domain.NotificationTemplate) *domain.RecordMeta { return &t.RecordMeta }),
+		crudRepository: newEntityCRUD(db, "code",
+			func(template *domain.NotificationTemplate) *domain.RecordMeta { return &template.RecordMeta },
+			func(template *domain.NotificationTemplate) string { return template.Code }),
 	}
-}
-
-func (r *TemplateRepository) Create(ctx context.Context, tpl *domain.NotificationTemplate) error {
-	return r.base.create(ctx, tpl)
-}
-
-func (r *TemplateRepository) Update(ctx context.Context, tpl *domain.NotificationTemplate) error {
-	return r.base.update(ctx, tpl)
-}
-
-func (r *TemplateRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.NotificationTemplate, error) {
-	return r.base.getByID(ctx, id, false)
-}
-
-func (r *TemplateRepository) List(ctx context.Context, opts store.ListOptions) (store.ListResult[domain.NotificationTemplate], error) {
-	return r.base.list(ctx, opts)
-}
-
-func (r *TemplateRepository) SoftDelete(ctx context.Context, id uuid.UUID) error {
-	return r.base.softDelete(ctx, id)
 }
 
 func (r *TemplateRepository) GetByCodeAndLocale(ctx context.Context, code, locale, channel string) (*domain.NotificationTemplate, error) {

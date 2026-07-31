@@ -44,6 +44,24 @@ type PreferenceInput struct {
 	Rules          domain.JSONMap    `json:"rules,omitempty"`
 }
 
+func (PreferenceInput) Type() string { return "notifications.preference.upsert" }
+
+func (input PreferenceInput) Validate() error {
+	if strings.TrimSpace(input.SubjectType) == "" {
+		return errors.New("preferences: subject type is required")
+	}
+	if strings.TrimSpace(input.SubjectID) == "" {
+		return errors.New("preferences: subject id is required")
+	}
+	if strings.TrimSpace(input.DefinitionCode) == "" {
+		return errors.New("preferences: definition code is required")
+	}
+	if strings.TrimSpace(input.Channel) == "" {
+		return errors.New("preferences: channel is required")
+	}
+	return nil
+}
+
 // EvaluationRequest defines the scoped lookup performed before dispatch.
 type EvaluationRequest struct {
 	DefinitionCode string
@@ -147,14 +165,14 @@ func (s *Service) Upsert(ctx context.Context, input PreferenceInput) (*domain.No
 	switch {
 	case err == nil:
 		applyInput(current, input)
-		if err := s.repo.Update(ctx, current); err != nil {
-			return nil, err
+		if updateErr := s.repo.Update(ctx, current); updateErr != nil {
+			return nil, updateErr
 		}
 		return current, nil
 	case errors.Is(err, store.ErrNotFound):
 		record := newPreferenceRecord(input)
-		if err := s.repo.Create(ctx, record); err != nil {
-			return nil, err
+		if createErr := s.repo.Create(ctx, record); createErr != nil {
+			return nil, createErr
 		}
 		return record, nil
 	default:
@@ -221,6 +239,14 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluationRequest) (Evaluati
 	}
 	result.Resolver = resolver
 
+	applyEnabledPreference(&result, resolver, defaultState)
+	applyChannelPreference(&result, resolver, req.Channel)
+	applyQuietHoursPreference(&result, resolver, req.Timestamp, s.clock)
+	applySubscriptionPreference(&result, resolver, req.Subscriptions)
+	return result, nil
+}
+
+func applyEnabledPreference(result *EvaluationResult, resolver *pkgoptions.Resolver, defaultState bool) {
 	if enabled, trace, err := resolver.ResolveBool("enabled"); err == nil {
 		result.Allowed = enabled
 		result.Trace = trace
@@ -230,59 +256,63 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluationRequest) (Evaluati
 	} else {
 		result.Allowed = defaultState
 	}
+}
 
-	if req.Channel != "" {
-		channelPath := fmt.Sprintf("rules.channels.%s.enabled", strings.ToLower(req.Channel))
+func applyChannelPreference(result *EvaluationResult, resolver *pkgoptions.Resolver, channel string) {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if channel != "" {
+		channelPath := fmt.Sprintf("rules.channels.%s.enabled", channel)
 		if channelState, trace, err := resolver.ResolveBool(channelPath); err == nil {
-			result.ChannelOverride = true
-			result.ChannelTrace = trace
+			result.ChannelOverride, result.ChannelTrace = true, trace
 			if !channelState {
-				if result.Allowed || result.Reason == ReasonDefault {
-					result.Reason = ReasonChannelOverride
-				}
-				result.Allowed = false
+				blockPreference(result, ReasonChannelOverride)
 			}
 		}
-		// Provider override at channel level
-		if provider, trace, err := resolver.ResolveString(fmt.Sprintf("rules.channels.%s.provider", strings.ToLower(req.Channel))); err == nil && strings.TrimSpace(provider) != "" {
+		if provider, trace, err := resolver.ResolveString(fmt.Sprintf("rules.channels.%s.provider", channel)); err == nil && strings.TrimSpace(provider) != "" {
 			result.Provider = strings.TrimSpace(provider)
 			result.ProviderTrace = trace
 		}
 	}
-	// Fallback provider at root rules if channel-specific not set.
 	if result.Provider == "" {
 		if provider, trace, err := resolver.ResolveString("rules.provider"); err == nil && strings.TrimSpace(provider) != "" {
 			result.Provider = strings.TrimSpace(provider)
 			result.ProviderTrace = trace
 		}
 	}
+}
 
+func applyQuietHoursPreference(
+	result *EvaluationResult,
+	resolver *pkgoptions.Resolver,
+	timestamp time.Time,
+	clock func() time.Time,
+) {
 	if window, ok := resolveQuietHours(resolver); ok {
-		ts := req.Timestamp
-		if ts.IsZero() {
-			ts = s.clock()
+		if timestamp.IsZero() {
+			timestamp = clock()
 		}
-		if window.contains(ts) {
-			if result.Allowed || result.Reason == ReasonDefault {
-				result.Reason = ReasonQuietHours
-			}
-			result.Allowed = false
+		if window.contains(timestamp) {
+			blockPreference(result, ReasonQuietHours)
 			result.QuietHoursActive = true
 		}
 	}
+}
 
+func applySubscriptionPreference(result *EvaluationResult, resolver *pkgoptions.Resolver, subscriptions []string) {
 	if subs, trace, err := resolver.ResolveStringSlice("rules.subscriptions"); err == nil && len(subs) > 0 {
 		result.RequiredSubs = subs
 		result.SubscriptionTrace = trace
-		if !intersects(subs, req.Subscriptions) {
-			if result.Allowed || result.Reason == ReasonDefault {
-				result.Reason = ReasonSubscriptionFilter
-			}
-			result.Allowed = false
+		if !intersects(subs, subscriptions) {
+			blockPreference(result, ReasonSubscriptionFilter)
 		}
 	}
+}
 
-	return result, nil
+func blockPreference(result *EvaluationResult, reason string) {
+	if result.Allowed || result.Reason == ReasonDefault {
+		result.Reason = reason
+	}
+	result.Allowed = false
 }
 
 func normalizeScopes(req EvaluationRequest) []pkgoptions.PreferenceScopeRef {
@@ -374,19 +404,7 @@ func copyJSONMap(src domain.JSONMap) domain.JSONMap {
 }
 
 func validateInput(input PreferenceInput) error {
-	if strings.TrimSpace(input.SubjectType) == "" {
-		return errors.New("preferences: subject type is required")
-	}
-	if strings.TrimSpace(input.SubjectID) == "" {
-		return errors.New("preferences: subject id is required")
-	}
-	if strings.TrimSpace(input.DefinitionCode) == "" {
-		return errors.New("preferences: definition code is required")
-	}
-	if strings.TrimSpace(input.Channel) == "" {
-		return errors.New("preferences: channel is required")
-	}
-	return nil
+	return input.Validate()
 }
 
 type quietHours struct {

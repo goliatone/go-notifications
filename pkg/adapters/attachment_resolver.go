@@ -85,56 +85,62 @@ func (r *Resolver) Resolve(ctx context.Context, job AttachmentJob, attachments [
 	}
 	out := make([]Attachment, 0, len(normalized))
 	for _, att := range normalized {
-		if strings.TrimSpace(att.URL) != "" {
-			att.Content = nil
-			out = append(out, att)
-			continue
-		}
-		if len(att.Content) == 0 {
-			continue
-		}
-		if r == nil || r.Uploader == nil {
-			if r != nil && r.Policy == AttachmentPolicyError {
-				return nil, fmt.Errorf("attachments: missing uploader for channel %s", job.Channel)
-			}
-			continue
-		}
-		uploaded, err := r.Uploader.Upload(ctx, UploadRequest{
-			Filename:    att.Filename,
-			ContentType: att.ContentType,
-			Content:     att.Content,
-			Size:        att.Size,
-			Channel:     job.Channel,
-			Provider:    job.Provider,
-			Recipient:   job.Recipient,
-			EventID:     job.EventID,
-		})
+		resolved, keep, err := r.resolveURLAttachment(ctx, job, att)
 		if err != nil {
 			return nil, err
 		}
-		att.URL = strings.TrimSpace(uploaded.URL)
-		att.Content = nil
-		if uploaded.Filename != "" {
-			att.Filename = uploaded.Filename
+		if keep {
+			out = append(out, resolved)
 		}
-		if uploaded.ContentType != "" {
-			att.ContentType = uploaded.ContentType
-		}
-		if uploaded.Size > 0 {
-			att.Size = uploaded.Size
-		}
-		if att.URL == "" {
-			if r.Policy == AttachmentPolicyError {
-				return nil, fmt.Errorf("attachments: upload returned empty url for channel %s", job.Channel)
-			}
-			continue
-		}
-		out = append(out, att)
 	}
 	if len(out) == 0 {
 		return nil, nil
 	}
 	return out, nil
+}
+
+func (r *Resolver) resolveURLAttachment(ctx context.Context, job AttachmentJob, attachment Attachment) (Attachment, bool, error) {
+	if strings.TrimSpace(attachment.URL) != "" {
+		attachment.Content = nil
+		return attachment, true, nil
+	}
+	if len(attachment.Content) == 0 {
+		return Attachment{}, false, nil
+	}
+	if r == nil || r.Uploader == nil {
+		if r != nil && r.Policy == AttachmentPolicyError {
+			return Attachment{}, false, fmt.Errorf("attachments: missing uploader for channel %s", job.Channel)
+		}
+		return Attachment{}, false, nil
+	}
+	uploaded, err := r.Uploader.Upload(ctx, UploadRequest{
+		Filename: attachment.Filename, ContentType: attachment.ContentType,
+		Content: attachment.Content, Size: attachment.Size,
+		Channel: job.Channel, Provider: job.Provider, Recipient: job.Recipient,
+		EventID: job.EventID,
+	})
+	if err != nil {
+		return Attachment{}, false, err
+	}
+	applyUploadResult(&attachment, uploaded)
+	if attachment.URL == "" && r.Policy == AttachmentPolicyError {
+		return Attachment{}, false, fmt.Errorf("attachments: upload returned empty url for channel %s", job.Channel)
+	}
+	return attachment, attachment.URL != "", nil
+}
+
+func applyUploadResult(attachment *Attachment, uploaded UploadedAttachment) {
+	attachment.URL = strings.TrimSpace(uploaded.URL)
+	attachment.Content = nil
+	if uploaded.Filename != "" {
+		attachment.Filename = uploaded.Filename
+	}
+	if uploaded.ContentType != "" {
+		attachment.ContentType = uploaded.ContentType
+	}
+	if uploaded.Size > 0 {
+		attachment.Size = uploaded.Size
+	}
 }
 
 func requiresURL(channel string) bool {

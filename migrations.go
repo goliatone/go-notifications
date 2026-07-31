@@ -11,17 +11,14 @@ const (
 )
 
 // OrderedMigrationSource exposes a source-stable migration identity suitable
-// for composition in a host application's shared migration graph.
-func OrderedMigrationSource() (persistence.OrderedMigrationSource, error) {
+// for composition in a host application's shared migration graph. Hosts may
+// supply source keys that must run before this package.
+func OrderedMigrationSource(dependencies ...string) (persistence.OrderedMigrationSource, error) {
 	root, err := GetMigrationsFS()
 	if err != nil {
 		return persistence.OrderedMigrationSource{}, err
 	}
-	return persistence.NewStableOrderedMigrationSource(
-		MigrationSourceName,
-		root,
-		MigrationSourceKey,
-		MigrationSourceOrder,
+	options := []persistence.OrderedMigrationSourceOption{
 		persistence.WithOrderedMigrationDialectOptions(
 			persistence.WithDialectSourceLabel(MigrationSourceName),
 			persistence.WithValidationTargets("postgres", "sqlite"),
@@ -30,6 +27,16 @@ func OrderedMigrationSource() (persistence.OrderedMigrationSource, error) {
 			}),
 			persistence.WithValidateOnMigrate(true),
 		),
+	}
+	if len(dependencies) > 0 {
+		options = append(options, persistence.WithOrderedMigrationDependencies(dependencies...))
+	}
+	return persistence.NewStableOrderedMigrationSource(
+		MigrationSourceName,
+		root,
+		MigrationSourceKey,
+		MigrationSourceOrder,
+		options...,
 	), nil
 }
 

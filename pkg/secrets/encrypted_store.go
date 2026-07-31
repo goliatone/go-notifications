@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -124,10 +125,10 @@ func (p *EncryptedStoreProvider) Describe(ref Reference) (map[string]any, error)
 }
 
 func translateStoreError(err error) error {
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		return nil
-	case sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return ErrNotFound
 	default:
 		return err

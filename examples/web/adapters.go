@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/goliatone/go-notifications/examples/web/config"
 	"github.com/goliatone/go-notifications/pkg/adapters"
@@ -219,12 +220,7 @@ func (r *AdapterRegistry) ProvidersForChannel(channel string) []string {
 }
 
 func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, item)
 }
 
 func uniqueStrings(slice []string) []string {

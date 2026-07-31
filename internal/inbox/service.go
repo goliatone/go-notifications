@@ -12,6 +12,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
+	"github.com/goliatone/go-notifications/pkg/privacy"
 	"github.com/google/uuid"
 )
 
@@ -42,6 +43,8 @@ type Dependencies struct {
 	Broadcaster broadcaster.Broadcaster
 	Logger      logger.Logger
 	Activity    activity.Hooks
+	Privacy     privacy.Policy
+	Diagnostic  privacy.DiagnosticSink
 }
 
 // Service manages inbox CRUD and realtime fan-out.
@@ -50,6 +53,8 @@ type Service struct {
 	broadcaster broadcaster.Broadcaster
 	logger      logger.Logger
 	activity    activity.Hooks
+	privacy     privacy.Policy
+	diagnostic  privacy.DiagnosticSink
 }
 
 var (
@@ -67,11 +72,19 @@ func NewService(deps Dependencies) (*Service, error) {
 	if deps.Logger == nil {
 		deps.Logger = logger.Default()
 	}
+	if deps.Privacy == nil {
+		deps.Privacy = privacy.DefaultPolicy{}
+	}
+	if deps.Diagnostic == nil {
+		deps.Diagnostic = privacy.NopDiagnosticSink{}
+	}
 	return &Service{
 		repo:        deps.Repository,
 		broadcaster: deps.Broadcaster,
 		logger:      deps.Logger,
 		activity:    deps.Activity,
+		privacy:     deps.Privacy,
+		diagnostic:  deps.Diagnostic,
 	}, nil
 }
 
@@ -93,20 +106,19 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*domain.InboxI
 		SnoozedUntil: time.Time{},
 	}
 	if err := s.repo.Create(ctx, item); err != nil {
-		return nil, err
+		return nil, s.publicError(ctx, "inbox_create_failed", err)
 	}
 	s.emit(ctx, "inbox.created", item)
 	s.activity.Notify(ctx, activity.Event{
 		Verb:       "notification.inbox.created",
-		ActorID:    item.UserID,
-		UserID:     item.UserID,
+		ActorID:    s.privacy.SafeSubjectID(item.UserID),
+		UserID:     s.privacy.SafeSubjectID(item.UserID),
 		ObjectType: "inbox_item",
 		ObjectID:   item.ID.String(),
-		Metadata: map[string]any{
-			"title":      item.Title,
+		Metadata: s.privacy.SafeMetadata(map[string]any{
 			"pinned":     item.Pinned,
 			"message_id": item.MessageID.String(),
-		},
+		}),
 	})
 	return item, nil
 }
@@ -115,7 +127,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*domain.InboxI
 func (s *Service) List(ctx context.Context, userID string, opts store.ListOptions, filters ListFilters) (store.ListResult[domain.InboxItem], error) {
 	result, err := s.repo.ListByUser(ctx, strings.TrimSpace(userID), opts)
 	if err != nil {
-		return store.ListResult[domain.InboxItem]{}, err
+		return store.ListResult[domain.InboxItem]{}, s.publicError(ctx, "inbox_list_failed", err)
 	}
 	items := make([]domain.InboxItem, 0, len(result.Items))
 	for _, item := range result.Items {
@@ -146,13 +158,19 @@ func (s *Service) MarkRead(ctx context.Context, userID string, ids []uuid.UUID, 
 	for _, id := range ids {
 		item, err := s.repo.GetByID(ctx, id)
 		if err != nil {
-			return err
+			return s.publicError(ctx, "inbox_item_not_found", err)
 		}
 		if item.UserID != userID {
 			continue
 		}
 		if err := s.repo.MarkRead(ctx, id, read); err != nil {
-			return err
+			return s.publicError(ctx, "inbox_mark_read_failed", err)
+		}
+		item.Unread = !read
+		if read {
+			item.ReadAt = time.Now().UTC()
+		} else {
+			item.ReadAt = time.Time{}
 		}
 		s.emit(ctx, "inbox.updated", item)
 		verb := "notification.unread"
@@ -161,8 +179,8 @@ func (s *Service) MarkRead(ctx context.Context, userID string, ids []uuid.UUID, 
 		}
 		s.activity.Notify(ctx, activity.Event{
 			Verb:       verb,
-			ActorID:    userID,
-			UserID:     item.UserID,
+			ActorID:    s.privacy.SafeSubjectID(userID),
+			UserID:     s.privacy.SafeSubjectID(item.UserID),
 			ObjectType: "inbox_item",
 			ObjectID:   item.ID.String(),
 		})
@@ -174,20 +192,20 @@ func (s *Service) MarkRead(ctx context.Context, userID string, ids []uuid.UUID, 
 func (s *Service) Snooze(ctx context.Context, userID string, id uuid.UUID, until time.Time) error {
 	item, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return s.publicError(ctx, "inbox_item_not_found", err)
 	}
 	if item.UserID != strings.TrimSpace(userID) {
 		return nil
 	}
 	if err := s.repo.Snooze(ctx, id, until); err != nil {
-		return err
+		return s.publicError(ctx, "inbox_snooze_failed", err)
 	}
 	item.SnoozedUntil = until
 	s.emit(ctx, "inbox.updated", item)
 	s.activity.Notify(ctx, activity.Event{
 		Verb:       "notification.snoozed",
-		ActorID:    userID,
-		UserID:     item.UserID,
+		ActorID:    s.privacy.SafeSubjectID(userID),
+		UserID:     s.privacy.SafeSubjectID(item.UserID),
 		ObjectType: "inbox_item",
 		ObjectID:   item.ID.String(),
 		Metadata: map[string]any{
@@ -201,21 +219,21 @@ func (s *Service) Snooze(ctx context.Context, userID string, id uuid.UUID, until
 func (s *Service) Dismiss(ctx context.Context, userID string, id uuid.UUID) error {
 	item, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return s.publicError(ctx, "inbox_item_not_found", err)
 	}
 	if item.UserID != strings.TrimSpace(userID) {
 		return nil
 	}
 	if err := s.repo.Dismiss(ctx, id); err != nil {
-		return err
+		return s.publicError(ctx, "inbox_dismiss_failed", err)
 	}
 	item.DismissedAt = time.Now().UTC()
 	item.Unread = false
 	s.emit(ctx, "inbox.updated", item)
 	s.activity.Notify(ctx, activity.Event{
 		Verb:       "notification.dismissed",
-		ActorID:    userID,
-		UserID:     item.UserID,
+		ActorID:    s.privacy.SafeSubjectID(userID),
+		UserID:     s.privacy.SafeSubjectID(item.UserID),
 		ObjectType: "inbox_item",
 		ObjectID:   item.ID.String(),
 	})
@@ -224,7 +242,11 @@ func (s *Service) Dismiss(ctx context.Context, userID string, id uuid.UUID) erro
 
 // BadgeCount returns the unread count for the given user.
 func (s *Service) BadgeCount(ctx context.Context, userID string) (int, error) {
-	return s.repo.CountUnread(ctx, strings.TrimSpace(userID))
+	count, err := s.repo.CountUnread(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		return 0, s.publicError(ctx, "inbox_count_failed", err)
+	}
+	return count, nil
 }
 
 // DeliverFromMessage converts a rendered notification message into an inbox item.
@@ -248,7 +270,7 @@ func (s *Service) DeliverFromMessage(ctx context.Context, msg *domain.Notificati
 	if err != nil {
 		return err
 	}
-	s.logger.Info("inbox delivery created", "user_id", item.UserID)
+	s.logger.Info("inbox delivery created", "subject_id", s.privacy.SafeSubjectID(item.UserID))
 	return nil
 }
 
@@ -260,15 +282,32 @@ func (s *Service) emit(ctx context.Context, topic string, item *domain.InboxItem
 		Topic: topic,
 		Payload: map[string]any{
 			"id":         item.ID.String(),
-			"user_id":    item.UserID,
-			"title":      item.Title,
+			"subject_id": s.privacy.SafeSubjectID(item.UserID),
 			"unread":     item.Unread,
 			"dismissed":  !item.DismissedAt.IsZero(),
 			"snoozed_at": item.SnoozedUntil,
 		},
 	}
 	if err := s.broadcaster.Broadcast(ctx, payload); err != nil {
-		s.logger.Warn("broadcast inbox event failed", "error", err)
+		s.diagnostic.Report(ctx, privacy.DiagnosticEvent{
+			Operation: "inbox_broadcast_failed",
+			MessageID: item.MessageID.String(),
+			Cause:     err,
+		})
+		s.logger.Warn("broadcast inbox event failed", "error_code", s.privacy.SafeError(err).Code)
+	}
+}
+
+func (s *Service) publicError(ctx context.Context, code string, cause error) error {
+	s.diagnostic.Report(ctx, privacy.DiagnosticEvent{
+		Operation: code,
+		MessageID: "",
+		Cause:     cause,
+	})
+	return privacy.SafeError{
+		Category: "inbox",
+		Code:     code,
+		Message:  "inbox operation failed",
 	}
 }
 

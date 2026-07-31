@@ -21,6 +21,10 @@ storage, queue, and channel providers.
   realtime broadcaster bridges.
 - Command catalog (`pkg/commands`) so transports can call command handlers
   without touching `internal` packages.
+- Embedded, ordered SQLite/PostgreSQL migrations plus durable publications,
+  scoped idempotency, typed receipts, and explicit retry operations.
+- Immediate-only transient rendering, per-definition persistence projections,
+  recipient resolution, privacy-safe errors, and opt-in raw diagnostics.
 - Reminder cadence primitives (`pkg/reminders`) for deterministic scheduling,
   cooldown windows, and no-spam evaluation in host-managed sweep jobs.
 - Optional adapters (`adapters/gocms`, future `adapters/goadmin`) that translate
@@ -33,19 +37,12 @@ import (
     "context"
 
     "github.com/goliatone/go-notifications/pkg/notifier"
-    "github.com/goliatone/go-notifications/pkg/config"
 )
 
-func send(ctx context.Context) error {
-    cfg := config.Default()
-    mod, err := notifier.NewModule(cfg)
-    if err != nil {
-        return err
-    }
-    manager := mod.Manager()
-    return manager.Send(ctx, notifier.Event{
+func send(ctx context.Context, mod *notifier.Module) error {
+    return mod.Manager().Send(ctx, notifier.Event{
         DefinitionCode: "welcome",
-        Recipients:     []string{"user@example.com"},
+        Recipients:     []string{"user-123"},
         Context: map[string]any{
             "Name": "Rosa",
         },
@@ -59,21 +56,61 @@ func send(ctx context.Context) error {
   call it through the exported interface.
 - `pkg/commands.Registry` exposes typed command handlers so HTTP, CLI, and queue
   transports share execution paths.
+- `pkg/events.Service` exposes receipt-returning intake, immediate transient
+  dispatch, publication recovery, and explicit retry.
 - `pkg/reminders` provides pure policy/state evaluation helpers for recurring
   reminder workflows owned by the host app.
 - `adapters/gocms` converts
   [go-cms](https://github.com/goliatone/go-cms) snapshots into
   `templates.TemplateInput` values; see `docs/NTF_ADAPTERS.md`.
 
+## Durable pipeline adoption
+
+Production hosts should register the package migration source in their shared
+`go-persistence-bun` graph before constructing Bun providers:
+
+```go
+manager := persistence.NewMigrations()
+if err := notifications.RegisterMigrations(manager); err != nil {
+    return err
+}
+if err := manager.Migrate(ctx, db); err != nil {
+    return err
+}
+providers := storage.NewBunProviders(db)
+```
+
+Module construction never mutates the schema. Scheduled and digest intake also
+requires a durable queue; the built-in no-op queue fails closed and leaves the
+persisted publication recoverable through `mod.RecoverPending`.
+
+For sensitive values, call `mod.Events().DispatchImmediate` with
+`events.ImmediateRequest.Transient`. Do not put credentials, destinations, or
+one-time URLs in persistent `Context`. Configure `RecipientResolver`,
+`Persistence`, `Privacy`, and `Diagnostic` through `notifier.ModuleOptions`.
+
+The upgrade is planned as `v0.15.0`. After the release tag is authorized and
+published, hosts should adopt it with:
+
+```bash
+go get github.com/goliatone/go-notifications@v0.15.0
+```
+
+Pin the released module version; do not use a local `replace` for production
+adoption.
+
 ## Documentation map
 
-- `docs/NTF_TDD.md`: complete technical design.
+- `docs/GUIDE_GETTING_STARTED.md`: module setup and first delivery.
+- `docs/GUIDE_EVENTS.md`: receipts, idempotency, transient data, publications,
+  digest behavior, and retry.
+- `docs/GUIDE_INTEGRATION.md`: migrations, module policies, resolver,
+  diagnostics, and commands.
 - `docs/GUIDE_REMINDERS.md`: reminder cadence primitives (`pkg/reminders`) and
   host sweep integration pattern.
 - `docs/NTF_TEMPLATES.md`: template authoring, schema validation, and go-cms imports.
 - `docs/NTF_OPTIONS.md`, `docs/NTF_ENTITIES.md`, and `docs/NTF_REALTIME.md`:
   supporting guides.
-- `docs/NTF_TSK.md`: implementation roadmap with progress for each phase.
 - `docs/onready.md`: opt-in OnReady helper for “job ready” style notifications
   (example: `examples/onready`).
 

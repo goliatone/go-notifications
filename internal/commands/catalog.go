@@ -7,13 +7,26 @@ import (
 	"time"
 
 	command "github.com/goliatone/go-command"
+	"github.com/goliatone/go-notifications/pkg/definitions"
 	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/events"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
-	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	"github.com/goliatone/go-notifications/pkg/preferences"
 	"github.com/goliatone/go-notifications/pkg/templates"
+	"github.com/google/uuid"
 )
+
+const (
+	CommandTypeTemplateUpsert = "notifications.template.upsert"
+	CommandTypeInboxMarkRead  = "notifications.inbox.mark_read"
+	CommandTypeInboxDismiss   = "notifications.inbox.dismiss"
+	CommandTypeInboxSnooze    = "notifications.inbox.snooze"
+)
+
+type resultCommander[T, R any] interface {
+	command.Commander[T]
+	Run(context.Context, T) (R, error)
+}
 
 // Catalog exposes go-command compatible handlers for host transports.
 type Catalog struct {
@@ -23,17 +36,20 @@ type Catalog struct {
 	InboxMarkRead    command.Commander[InboxMarkRead]
 	InboxDismiss     command.Commander[InboxDismiss]
 	InboxSnooze      command.Commander[InboxSnooze]
-	EnqueueEvent     command.Commander[events.IntakeRequest]
+	EnqueueEvent     resultCommander[events.IntakeRequest, events.DispatchReceipt]
+	RetryEvent       resultCommander[events.RetryRequest, events.DispatchReceipt]
+}
+
+type definitionService interface {
+	Upsert(context.Context, definitions.UpsertInput) (*domain.NotificationDefinition, error)
 }
 
 type templateService interface {
-	Get(ctx context.Context, code, channel, locale string) (*domain.NotificationTemplate, error)
-	Create(ctx context.Context, input templates.TemplateInput) (*domain.NotificationTemplate, error)
-	Update(ctx context.Context, input templates.TemplateInput) (*domain.NotificationTemplate, error)
+	Upsert(context.Context, templates.TemplateInput, bool) (*domain.NotificationTemplate, error)
 }
 
 type preferenceService interface {
-	Upsert(ctx context.Context, input preferences.PreferenceInput) (*domain.NotificationPreference, error)
+	Upsert(context.Context, preferences.PreferenceInput) (*domain.NotificationPreference, error)
 }
 
 type inboxService interface {
@@ -43,12 +59,13 @@ type inboxService interface {
 }
 
 type eventService interface {
-	Enqueue(ctx context.Context, req events.IntakeRequest) error
+	EnqueueWithReceipt(context.Context, events.IntakeRequest) (events.DispatchReceipt, error)
+	RetryWithReceipt(context.Context, events.RetryRequest) (events.DispatchReceipt, error)
 }
 
-// Dependencies wires repositories and services into the command catalog.
+// Dependencies wires services into the command catalog.
 type Dependencies struct {
-	Definitions store.NotificationDefinitionRepository
+	Definitions definitionService
 	Templates   templateService
 	Preferences preferenceService
 	Inbox       inboxService
@@ -59,7 +76,7 @@ type Dependencies struct {
 // NewCatalog builds the command catalog using the supplied dependencies.
 func NewCatalog(deps Dependencies) (*Catalog, error) {
 	if deps.Definitions == nil {
-		return nil, errors.New("commands: definition repository is required")
+		return nil, errors.New("commands: definitions service is required")
 	}
 	if deps.Templates == nil {
 		return nil, errors.New("commands: templates service is required")
@@ -78,69 +95,30 @@ func NewCatalog(deps Dependencies) (*Catalog, error) {
 	}
 
 	return &Catalog{
-		CreateDefinition: definitionCreateCommand{repo: deps.Definitions},
-		SaveTemplate:     templateUpsertCommand{templates: deps.Templates},
-		UpsertPreference: preferenceUpsertCommand{svc: deps.Preferences},
-		InboxMarkRead:    inboxMarkReadCommand{svc: deps.Inbox},
-		InboxDismiss:     inboxDismissCommand{svc: deps.Inbox},
-		InboxSnooze:      inboxSnoozeCommand{svc: deps.Inbox},
-		EnqueueEvent:     eventEnqueueCommand{svc: deps.Events},
+		CreateDefinition: definitionUpsertCommand{service: deps.Definitions},
+		SaveTemplate:     templateUpsertCommand{service: deps.Templates},
+		UpsertPreference: preferenceUpsertCommand{service: deps.Preferences},
+		InboxMarkRead:    inboxMarkReadCommand{service: deps.Inbox},
+		InboxDismiss:     inboxDismissCommand{service: deps.Inbox},
+		InboxSnooze:      inboxSnoozeCommand{service: deps.Inbox},
+		EnqueueEvent:     eventEnqueueCommand{service: deps.Events},
+		RetryEvent:       eventRetryCommand{service: deps.Events},
 	}, nil
 }
 
-// CreateDefinition represents the payload for creating or updating definitions.
-type CreateDefinition struct {
-	Code        string         `json:"code"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Severity    string         `json:"severity"`
-	Category    string         `json:"category"`
-	Channels    []string       `json:"channels"`
-	TemplateIDs []string       `json:"template_keys"`
-	Metadata    map[string]any `json:"metadata"`
-	AllowUpdate bool           `json:"allow_update"`
-	Policy      map[string]any `json:"policy"`
+// CreateDefinition is retained as the public compatibility name.
+type CreateDefinition = definitions.UpsertInput
+
+type definitionUpsertCommand struct {
+	service definitionService
 }
 
-type definitionCreateCommand struct {
-	repo store.NotificationDefinitionRepository
-}
-
-func (c definitionCreateCommand) Execute(ctx context.Context, msg CreateDefinition) error {
-	msg.Code = strings.TrimSpace(msg.Code)
-	if msg.Code == "" {
-		return errors.New("commands: definition code is required")
-	}
-	def := &domain.NotificationDefinition{
-		Code:        msg.Code,
-		Name:        msg.Name,
-		Description: msg.Description,
-		Severity:    msg.Severity,
-		Category:    msg.Category,
-		Channels:    domain.StringList(msg.Channels),
-		TemplateKeys: func() domain.StringList {
-			return domain.StringList(msg.TemplateIDs)
-		}(),
-		Metadata: domain.JSONMap(msg.Metadata),
-		Policy:   domain.JSONMap(msg.Policy),
-	}
-	if existing, err := c.repo.GetByCode(ctx, msg.Code); err == nil {
-		if !msg.AllowUpdate {
-			return errors.New("commands: definition already exists")
-		}
-		existing.Name = def.Name
-		existing.Description = def.Description
-		existing.Severity = def.Severity
-		existing.Category = def.Category
-		existing.Channels = def.Channels
-		existing.TemplateKeys = def.TemplateKeys
-		existing.Metadata = def.Metadata
-		existing.Policy = def.Policy
-		return c.repo.Update(ctx, existing)
-	} else if !errors.Is(err, store.ErrNotFound) {
+func (c definitionUpsertCommand) Execute(ctx context.Context, msg CreateDefinition) error {
+	if err := msg.Validate(); err != nil {
 		return err
 	}
-	return c.repo.Create(ctx, def)
+	_, err := c.service.Upsert(ctx, msg)
+	return err
 }
 
 // TemplateUpsert wraps templates.TemplateInput for command invocation.
@@ -149,33 +127,42 @@ type TemplateUpsert struct {
 	AllowUpdate bool `json:"allow_update"`
 }
 
+func (TemplateUpsert) Type() string { return CommandTypeTemplateUpsert }
+
+func (msg TemplateUpsert) Validate() error {
+	if strings.TrimSpace(msg.Code) == "" {
+		return errors.New("commands: template code is required")
+	}
+	if strings.TrimSpace(msg.Channel) == "" {
+		return errors.New("commands: template channel is required")
+	}
+	if strings.TrimSpace(msg.Locale) == "" {
+		return errors.New("commands: template locale is required")
+	}
+	return nil
+}
+
 type templateUpsertCommand struct {
-	templates templateService
+	service templateService
 }
 
 func (c templateUpsertCommand) Execute(ctx context.Context, msg TemplateUpsert) error {
-	input := msg.TemplateInput
-	_, err := c.templates.Get(ctx, input.Code, input.Channel, input.Locale)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			_, err := c.templates.Create(ctx, input)
-			return err
-		}
+	if err := msg.Validate(); err != nil {
 		return err
 	}
-	if !msg.AllowUpdate {
-		return errors.New("commands: template already exists")
-	}
-	_, err = c.templates.Update(ctx, input)
+	_, err := c.service.Upsert(ctx, msg.TemplateInput, msg.AllowUpdate)
 	return err
 }
 
 type preferenceUpsertCommand struct {
-	svc preferenceService
+	service preferenceService
 }
 
 func (c preferenceUpsertCommand) Execute(ctx context.Context, msg preferences.PreferenceInput) error {
-	_, err := c.svc.Upsert(ctx, msg)
+	if err := msg.Validate(); err != nil {
+		return err
+	}
+	_, err := c.service.Upsert(ctx, msg)
 	return err
 }
 
@@ -186,12 +173,32 @@ type InboxMarkRead struct {
 	Read   bool     `json:"read"`
 }
 
+func (InboxMarkRead) Type() string { return CommandTypeInboxMarkRead }
+
+func (msg InboxMarkRead) Validate() error {
+	if strings.TrimSpace(msg.UserID) == "" {
+		return errors.New("commands: inbox user ID is required")
+	}
+	if len(msg.IDs) == 0 {
+		return errors.New("commands: at least one inbox item ID is required")
+	}
+	for _, id := range msg.IDs {
+		if _, err := uuid.Parse(strings.TrimSpace(id)); err != nil {
+			return errors.New("commands: inbox item ID is invalid")
+		}
+	}
+	return nil
+}
+
 type inboxMarkReadCommand struct {
-	svc inboxService
+	service inboxService
 }
 
 func (c inboxMarkReadCommand) Execute(ctx context.Context, msg InboxMarkRead) error {
-	return c.svc.MarkRead(ctx, msg.UserID, msg.IDs, msg.Read)
+	if err := msg.Validate(); err != nil {
+		return err
+	}
+	return c.service.MarkRead(ctx, msg.UserID, msg.IDs, msg.Read)
 }
 
 // InboxDismiss dismisses a notification.
@@ -200,12 +207,27 @@ type InboxDismiss struct {
 	ID     string `json:"id"`
 }
 
+func (InboxDismiss) Type() string { return CommandTypeInboxDismiss }
+
+func (msg InboxDismiss) Validate() error {
+	if strings.TrimSpace(msg.UserID) == "" {
+		return errors.New("commands: inbox user ID is required")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(msg.ID)); err != nil {
+		return errors.New("commands: inbox item ID is invalid")
+	}
+	return nil
+}
+
 type inboxDismissCommand struct {
-	svc inboxService
+	service inboxService
 }
 
 func (c inboxDismissCommand) Execute(ctx context.Context, msg InboxDismiss) error {
-	return c.svc.Dismiss(ctx, msg.UserID, msg.ID)
+	if err := msg.Validate(); err != nil {
+		return err
+	}
+	return c.service.Dismiss(ctx, msg.UserID, msg.ID)
 }
 
 // InboxSnooze defers delivery until a timestamp.
@@ -215,18 +237,60 @@ type InboxSnooze struct {
 	Until  time.Time `json:"until"`
 }
 
+func (InboxSnooze) Type() string { return CommandTypeInboxSnooze }
+
+func (msg InboxSnooze) Validate() error {
+	if strings.TrimSpace(msg.UserID) == "" {
+		return errors.New("commands: inbox user ID is required")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(msg.ID)); err != nil {
+		return errors.New("commands: inbox item ID is invalid")
+	}
+	if msg.Until.IsZero() {
+		return errors.New("commands: inbox snooze time is required")
+	}
+	return nil
+}
+
 type inboxSnoozeCommand struct {
-	svc inboxService
+	service inboxService
 }
 
 func (c inboxSnoozeCommand) Execute(ctx context.Context, msg InboxSnooze) error {
-	return c.svc.Snooze(ctx, msg.UserID, msg.ID, msg.Until.Unix())
+	if err := msg.Validate(); err != nil {
+		return err
+	}
+	return c.service.Snooze(ctx, msg.UserID, msg.ID, msg.Until.Unix())
 }
 
 type eventEnqueueCommand struct {
-	svc eventService
+	service eventService
+}
+
+func (c eventEnqueueCommand) Run(ctx context.Context, msg events.IntakeRequest) (events.DispatchReceipt, error) {
+	if err := msg.Validate(); err != nil {
+		return events.DispatchReceipt{}, err
+	}
+	return c.service.EnqueueWithReceipt(ctx, msg)
 }
 
 func (c eventEnqueueCommand) Execute(ctx context.Context, msg events.IntakeRequest) error {
-	return c.svc.Enqueue(ctx, msg)
+	_, err := c.Run(ctx, msg)
+	return err
+}
+
+type eventRetryCommand struct {
+	service eventService
+}
+
+func (c eventRetryCommand) Run(ctx context.Context, msg events.RetryRequest) (events.DispatchReceipt, error) {
+	if err := msg.Validate(); err != nil {
+		return events.DispatchReceipt{}, err
+	}
+	return c.service.RetryWithReceipt(ctx, msg)
+}
+
+func (c eventRetryCommand) Execute(ctx context.Context, msg events.RetryRequest) error {
+	_, err := c.Run(ctx, msg)
+	return err
 }

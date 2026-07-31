@@ -2,7 +2,6 @@ package twilio
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -91,67 +90,10 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	accountSID := strings.TrimSpace(firstNonEmpty(
-		stringValue(msg.Metadata, "account_sid"),
-		secretString(msg.Metadata, "account_sid"),
-		secretString(msg.Metadata, "default"),
-		a.cfg.AccountSID,
-	))
-	authToken := strings.TrimSpace(firstNonEmpty(
-		stringValue(msg.Metadata, "auth_token"),
-		secretString(msg.Metadata, "auth_token"),
-		secretString(msg.Metadata, "default"),
-		a.cfg.AuthToken,
-	))
-
-	to := strings.TrimSpace(msg.To)
-	if to == "" {
-		return fmt.Errorf("twilio: destination missing")
-	}
-
-	from := firstNonEmpty(stringValue(msg.Metadata, "from"), secretString(msg.Metadata, "from"), a.cfg.From)
-
-	body := stringValue(msg.Metadata, "body")
-	if body == "" {
-		body = msg.Body
-	}
-	htmlBody := stringValue(msg.Metadata, "html_body")
-	if htmlBody != "" && !a.cfg.PlainOnly {
-		body = stripHTML(htmlBody)
-	}
-
-	if strings.HasPrefix(strings.ToLower(msg.Channel), "whatsapp") && !strings.HasPrefix(strings.ToLower(to), "whatsapp:") {
-		to = "whatsapp:" + to
-		if from != "" && !strings.HasPrefix(strings.ToLower(from), "whatsapp:") {
-			from = "whatsapp:" + from
-		}
-	}
-
-	form := url.Values{}
-	form.Set("To", to)
-	if a.cfg.MessagingServiceSID != "" {
-		form.Set("MessagingServiceSid", a.cfg.MessagingServiceSID)
-	} else {
-		if from == "" && !a.cfg.DryRun {
-			return fmt.Errorf("twilio: from or messaging service SID required")
-		}
-		if from != "" {
-			form.Set("From", from)
-		}
-	}
-	form.Set("Body", body)
-
-	media := stringSlice(msg.Metadata, "media_urls")
-	if attURLs := adapters.AttachmentURLs(msg.Attachments); len(attURLs) > 0 {
-		media = append(media, attURLs...)
-	}
-	if len(media) > 0 {
-		for _, m := range media {
-			form.Add("MediaUrl", m)
-		}
-	}
-	if strings.TrimSpace(form.Get("Body")) == "" && len(media) == 0 {
-		return fmt.Errorf("twilio: body or media_urls required")
+	accountSID, authToken := a.credentials(msg.Metadata)
+	form, err := a.messageForm(msg)
+	if err != nil {
+		return err
 	}
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
@@ -172,21 +114,87 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	req.SetBasicAuth(accountSID, authToken)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("twilio: request failed: %w", err)
-	}
-	bodyBytes, err := adapters.ReadResponseBody(resp)
-	closeErr := resp.Body.Close()
-	if responseErr := errors.Join(err, closeErr); responseErr != nil {
-		return fmt.Errorf("twilio: %w", responseErr)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return adapters.HTTPStatusError("twilio", resp.StatusCode, bodyBytes)
+	if _, err := adapters.ExecuteRequest(a.client, "twilio", req); err != nil {
+		return err
 	}
 
 	a.base.LogSuccess(a.name, msg)
+	return nil
+}
+
+func (a *Adapter) credentials(metadata map[string]any) (string, string) {
+	accountSID := strings.TrimSpace(firstNonEmpty(
+		stringValue(metadata, "account_sid"),
+		secretString(metadata, "account_sid"),
+		secretString(metadata, "default"),
+		a.cfg.AccountSID,
+	))
+	authToken := strings.TrimSpace(firstNonEmpty(
+		stringValue(metadata, "auth_token"),
+		secretString(metadata, "auth_token"),
+		secretString(metadata, "default"),
+		a.cfg.AuthToken,
+	))
+	return accountSID, authToken
+}
+
+func (a *Adapter) messageForm(msg adapters.Message) (url.Values, error) {
+	to := strings.TrimSpace(msg.To)
+	if to == "" {
+		return nil, fmt.Errorf("twilio: destination missing")
+	}
+	from := firstNonEmpty(stringValue(msg.Metadata, "from"), secretString(msg.Metadata, "from"), a.cfg.From)
+	body := stringValue(msg.Metadata, "body")
+	if body == "" {
+		body = msg.Body
+	}
+	htmlBody := stringValue(msg.Metadata, "html_body")
+	if htmlBody != "" && !a.cfg.PlainOnly {
+		body = stripHTML(htmlBody)
+	}
+	to, from = normalizeWhatsAppAddresses(msg.Channel, to, from)
+
+	form := url.Values{}
+	form.Set("To", to)
+	if err := a.setSender(form, from); err != nil {
+		return nil, err
+	}
+	form.Set("Body", body)
+
+	media := append(stringSlice(msg.Metadata, "media_urls"), adapters.AttachmentURLs(msg.Attachments)...)
+	for _, mediaURL := range media {
+		form.Add("MediaUrl", mediaURL)
+	}
+	if strings.TrimSpace(form.Get("Body")) == "" && len(media) == 0 {
+		return nil, fmt.Errorf("twilio: body or media_urls required")
+	}
+	return form, nil
+}
+
+func normalizeWhatsAppAddresses(channel, to, from string) (string, string) {
+	if !strings.HasPrefix(strings.ToLower(channel), "whatsapp") {
+		return to, from
+	}
+	if !strings.HasPrefix(strings.ToLower(to), "whatsapp:") {
+		to = "whatsapp:" + to
+	}
+	if from != "" && !strings.HasPrefix(strings.ToLower(from), "whatsapp:") {
+		from = "whatsapp:" + from
+	}
+	return to, from
+}
+
+func (a *Adapter) setSender(form url.Values, from string) error {
+	if a.cfg.MessagingServiceSID != "" {
+		form.Set("MessagingServiceSid", a.cfg.MessagingServiceSID)
+		return nil
+	}
+	if from == "" && !a.cfg.DryRun {
+		return fmt.Errorf("twilio: from or messaging service SID required")
+	}
+	if from != "" {
+		form.Set("From", from)
+	}
 	return nil
 }
 

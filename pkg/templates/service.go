@@ -58,6 +58,24 @@ type TemplateInput struct {
 	Metadata    domain.JSONMap
 }
 
+// Upsert creates a missing template or updates an existing one when allowed.
+func (s *Service) Upsert(ctx context.Context, input TemplateInput, allowUpdate bool) (*domain.NotificationTemplate, error) {
+	if s == nil {
+		return nil, errRepositoryRequired
+	}
+	_, err := s.Get(ctx, input.Code, input.Channel, input.Locale)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return s.Create(ctx, input)
+	case err != nil:
+		return nil, err
+	case !allowUpdate:
+		return nil, errors.New("templates: template already exists")
+	default:
+		return s.Update(ctx, input)
+	}
+}
+
 var (
 	errRepositoryRequired = errors.New("templates: repository is required")
 	errTranslatorRequired = errors.New("templates: translator is required")

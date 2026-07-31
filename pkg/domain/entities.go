@@ -32,9 +32,10 @@ type JSONMap map[string]any
 // Value implements driver.Valuer.
 func (m JSONMap) Value() (driver.Value, error) {
 	if m == nil {
-		return []byte("null"), nil
+		return "null", nil
 	}
-	return json.Marshal(m)
+	body, err := json.Marshal(m)
+	return string(body), err
 }
 
 // Scan implements sql.Scanner.
@@ -59,7 +60,8 @@ func (m *JSONMap) Scan(value any) error {
 type StringList []string
 
 func (s StringList) Value() (driver.Value, error) {
-	return json.Marshal([]string(s))
+	body, err := json.Marshal([]string(s))
+	return string(body), err
 }
 
 func (s *StringList) Scan(value any) error {
@@ -88,9 +90,10 @@ type TemplateSource struct {
 
 func (s TemplateSource) Value() (driver.Value, error) {
 	if s.Type == "" && s.Reference == "" && len(s.Payload) == 0 {
-		return []byte("null"), nil
+		return "null", nil
 	}
-	return json.Marshal(s)
+	body, err := json.Marshal(s)
+	return string(body), err
 }
 
 func (s *TemplateSource) Scan(value any) error {
@@ -131,9 +134,10 @@ func (s TemplateSchema) IsZero() bool {
 
 func (s TemplateSchema) Value() (driver.Value, error) {
 	if len(s.Required) == 0 && len(s.Optional) == 0 {
-		return []byte("null"), nil
+		return "null", nil
 	}
-	return json.Marshal(s)
+	body, err := json.Marshal(s)
+	return string(body), err
 }
 
 func (s *TemplateSchema) Scan(value any) error {
@@ -184,12 +188,12 @@ type NotificationTemplate struct {
 	bun.BaseModel `bun:"table:notification_templates"`
 	RecordMeta
 
-	Code        string         `bun:",unique,nullzero,notnull"`
-	Channel     string         `bun:",nullzero,notnull"`
+	Code        string         `bun:",nullzero,notnull,unique:template_variant"`
+	Channel     string         `bun:",nullzero,notnull,unique:template_variant"`
 	Description string         `bun:",nullzero"`
 	Body        string         `bun:",nullzero"`
 	Subject     string         `bun:",nullzero"`
-	Locale      string         `bun:",nullzero"`
+	Locale      string         `bun:",nullzero,unique:template_variant"`
 	Format      string         `bun:",nullzero"`
 	Revision    int            `bun:",nullzero"`
 	Source      TemplateSource `bun:"type:jsonb,nullzero"`
@@ -202,13 +206,24 @@ type NotificationEvent struct {
 	bun.BaseModel `bun:"table:notification_events"`
 	RecordMeta
 
-	DefinitionCode string     `bun:",nullzero,notnull"`
-	TenantID       string     `bun:",nullzero"`
-	ActorID        string     `bun:",nullzero"`
-	Recipients     StringList `bun:"type:jsonb,nullzero"`
-	Context        JSONMap    `bun:"type:jsonb,nullzero"`
-	ScheduledAt    time.Time  `bun:",nullzero"`
-	Status         string     `bun:",nullzero"`
+	DefinitionCode     string     `bun:",nullzero,notnull"`
+	TenantID           string     `bun:",nullzero"`
+	ActorID            string     `bun:",nullzero"`
+	Recipients         StringList `bun:"type:jsonb,nullzero"`
+	Channels           StringList `bun:"type:jsonb,nullzero"`
+	Locale             string     `bun:",nullzero"`
+	Context            JSONMap    `bun:"type:jsonb,nullzero"`
+	CorrelationID      string     `bun:",nullzero"`
+	RequestID          string     `bun:",nullzero"`
+	IdempotencyScope   string     `bun:",nullzero"`
+	IdempotencyKey     string     `bun:",nullzero"`
+	RequestFingerprint string     `bun:",nullzero"`
+	TransientDependent bool       `bun:",notnull,default:false"`
+	PublicationID      uuid.UUID  `bun:",nullzero"`
+	DigestKey          string     `bun:",nullzero"`
+	RetryClaimUntil    time.Time  `bun:",nullzero"`
+	ScheduledAt        time.Time  `bun:",nullzero"`
+	Status             string     `bun:",nullzero"`
 }
 
 // NotificationMessage represents a concrete rendered message.
@@ -216,17 +231,20 @@ type NotificationMessage struct {
 	bun.BaseModel `bun:"table:notification_messages"`
 	RecordMeta
 
-	EventID     uuid.UUID `bun:",nullzero,notnull"`
-	Channel     string    `bun:",nullzero,notnull"`
-	Locale      string    `bun:",nullzero"`
-	Subject     string    `bun:",nullzero"`
-	Body        string    `bun:",nullzero"`
-	ActionURL   string    `bun:",nullzero" json:"action_url"`
-	ManifestURL string    `bun:",nullzero" json:"manifest_url"`
-	URL         string    `bun:",nullzero" json:"url"`
-	Receiver    string    `bun:",nullzero,notnull"`
-	Status      string    `bun:",nullzero"`
-	Metadata    JSONMap   `bun:"type:jsonb,nullzero"`
+	EventID          uuid.UUID  `bun:",nullzero,notnull"`
+	RetryOperationID uuid.UUID  `bun:",nullzero"`
+	Channel          string     `bun:",nullzero,notnull"`
+	TemplateCode     string     `bun:",nullzero"`
+	ProviderPlan     StringList `bun:"type:jsonb,nullzero"`
+	Locale           string     `bun:",nullzero"`
+	Subject          string     `bun:",nullzero"`
+	Body             string     `bun:",nullzero"`
+	ActionURL        string     `bun:",nullzero" json:"action_url"`
+	ManifestURL      string     `bun:",nullzero" json:"manifest_url"`
+	URL              string     `bun:",nullzero" json:"url"`
+	Receiver         string     `bun:",nullzero,notnull"`
+	Status           string     `bun:",nullzero"`
+	Metadata         JSONMap    `bun:"type:jsonb,nullzero"`
 }
 
 // DeliveryAttempt tracks adapter executions.
@@ -234,11 +252,45 @@ type DeliveryAttempt struct {
 	bun.BaseModel `bun:"table:notification_delivery_attempts"`
 	RecordMeta
 
-	MessageID uuid.UUID `bun:",nullzero,notnull"`
-	Adapter   string    `bun:",nullzero,notnull"`
-	Status    string    `bun:",nullzero"`
-	Error     string    `bun:",nullzero"`
-	Payload   JSONMap   `bun:"type:jsonb,nullzero"`
+	MessageID        uuid.UUID `bun:",nullzero,notnull"`
+	RetryOperationID uuid.UUID `bun:",nullzero"`
+	Adapter          string    `bun:",nullzero,notnull"`
+	Status           string    `bun:",nullzero"`
+	Error            string    `bun:",nullzero"`
+	ErrorCode        string    `bun:",nullzero"`
+	Payload          JSONMap   `bun:"type:jsonb,nullzero"`
+}
+
+// NotificationPublication is the durable authority for asynchronous
+// scheduling and digest windows.
+type NotificationPublication struct {
+	bun.BaseModel `bun:"table:notification_publications"`
+	RecordMeta
+
+	Kind       string    `bun:",nullzero,notnull"`
+	DigestKey  string    `bun:",nullzero"`
+	QueueKey   string    `bun:",nullzero,notnull"`
+	RunAt      time.Time `bun:",nullzero"`
+	Status     string    `bun:",nullzero,notnull"`
+	ClaimUntil time.Time `bun:",nullzero"`
+	Attempts   int       `bun:",nullzero"`
+	ErrorCode  string    `bun:",nullzero"`
+}
+
+// NotificationRetryOperation provides a durable idempotency and audit record
+// for explicit same-event retries.
+type NotificationRetryOperation struct {
+	bun.BaseModel `bun:"table:notification_retry_operations"`
+	RecordMeta
+
+	EventID        uuid.UUID `bun:",nullzero,notnull"`
+	RetryScope     string    `bun:",nullzero,notnull"`
+	IdempotencyKey string    `bun:",nullzero,notnull"`
+	CorrelationID  string    `bun:",nullzero"`
+	RequestID      string    `bun:",nullzero"`
+	Status         string    `bun:",nullzero,notnull"`
+	ClaimUntil     time.Time `bun:",nullzero"`
+	ErrorCode      string    `bun:",nullzero"`
 }
 
 // NotificationPreference captures opt-in/out settings.
@@ -288,16 +340,31 @@ type InboxItem struct {
 
 // Domain constants for statuses.
 const (
-	EventStatusPending   = "pending"
-	EventStatusScheduled = "scheduled"
-	EventStatusProcessed = "processed"
-	EventStatusFailed    = "failed"
+	EventStatusPending     = "pending"
+	EventStatusScheduled   = "scheduled"
+	EventStatusDispatching = "dispatching"
+	EventStatusRetrying    = "retrying"
+	EventStatusPartial     = "partial"
+	EventStatusProcessed   = "processed"
+	EventStatusFailed      = "failed"
 
 	MessageStatusPending   = "pending"
 	MessageStatusDelivered = "delivered"
 	MessageStatusFailed    = "failed"
+	MessageStatusSkipped   = "skipped"
 
 	AttemptStatusPending   = "pending"
 	AttemptStatusSucceeded = "succeeded"
 	AttemptStatusFailed    = "failed"
+
+	PublicationStatusPending    = "pending"
+	PublicationStatusPublished  = "published"
+	PublicationStatusProcessing = "processing"
+	PublicationStatusCompleted  = "completed"
+	PublicationStatusFailed     = "failed"
+
+	RetryStatusPending    = "pending"
+	RetryStatusProcessing = "processing"
+	RetryStatusCompleted  = "completed"
+	RetryStatusFailed     = "failed"
 )

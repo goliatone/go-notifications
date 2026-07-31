@@ -30,10 +30,12 @@ type Policy interface {
 type FullPolicy struct{}
 
 func (FullPolicy) Resolve(context.Context, *domain.NotificationDefinition) (Decision, error) {
-	return fullDecision(), nil
+	return DefaultDecision(), nil
 }
 
-func fullDecision() Decision {
+// DefaultDecision returns the unrestricted persistence policy used when a
+// definition does not configure narrower storage rules.
+func DefaultDecision() Decision {
 	return Decision{
 		MessageMode:        Full,
 		InboxMode:          Full,
@@ -47,34 +49,51 @@ func fullDecision() Decision {
 type DefinitionPolicy struct{}
 
 func (DefinitionPolicy) Resolve(_ context.Context, def *domain.NotificationDefinition) (Decision, error) {
-	decision := fullDecision()
+	decision := DefaultDecision()
 	if def == nil || len(def.Policy) == 0 {
 		return decision, nil
 	}
-	if raw, ok := def.Policy["persistence_mode"].(string); ok && raw != "" {
-		mode := ContentMode(raw)
-		if !validMode(mode) {
-			return Decision{}, fmt.Errorf("persistence policy: invalid message mode")
-		}
-		decision.MessageMode = mode
+	if err := applyContentModes(def.Policy, &decision); err != nil {
+		return Decision{}, err
 	}
-	if raw, ok := def.Policy["inbox_persistence_mode"].(string); ok && raw != "" {
-		mode := ContentMode(raw)
-		if !validMode(mode) {
-			return Decision{}, fmt.Errorf("persistence policy: invalid inbox mode")
+	applyPersistenceOptions(def.Policy, &decision)
+	return decision, nil
+}
+
+func applyContentModes(policy domain.JSONMap, decision *Decision) error {
+	if raw, ok := policy["persistence_mode"].(string); ok && raw != "" {
+		if mode := ContentMode(raw); validMode(mode) {
+			decision.MessageMode = mode
+		} else {
+			return fmt.Errorf("persistence policy: invalid message mode")
 		}
-		decision.InboxMode = mode
 	}
-	if raw, ok := def.Policy["persist_link_urls"].(bool); ok {
+	if raw, ok := policy["inbox_persistence_mode"].(string); ok && raw != "" {
+		if mode := ContentMode(raw); validMode(mode) {
+			decision.InboxMode = mode
+		} else {
+			return fmt.Errorf("persistence policy: invalid inbox mode")
+		}
+	}
+	return nil
+}
+
+func applyPersistenceOptions(policy domain.JSONMap, decision *Decision) {
+	if raw, ok := policy["persist_link_urls"].(bool); ok {
 		decision.PersistLinkURLs = raw
 	}
-	if raw, ok := def.Policy["persist_link_records"].(bool); ok {
+	if raw, ok := policy["persist_link_records"].(bool); ok {
 		decision.PersistLinkRecords = raw
 	}
-	if raw, ok := def.Policy["allowed_metadata"].([]string); ok {
+	if raw, ok := policy["allowed_metadata"].([]string); ok {
 		decision.AllowedMetadata = append([]string(nil), raw...)
+	} else if raw, ok := policy["allowed_metadata"].([]any); ok {
+		for _, value := range raw {
+			if key, ok := value.(string); ok && key != "" {
+				decision.AllowedMetadata = append(decision.AllowedMetadata, key)
+			}
+		}
 	}
-	return decision, nil
 }
 
 // WithTransientOverlay applies the mandatory non-persistence boundary for
@@ -87,6 +106,7 @@ func WithTransientOverlay(decision Decision, transient bool) Decision {
 	decision.InboxMode = StateOnly
 	decision.PersistLinkURLs = false
 	decision.PersistLinkRecords = false
+	decision.AllowedMetadata = nil
 	return decision
 }
 

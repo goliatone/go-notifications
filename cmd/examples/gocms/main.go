@@ -64,7 +64,10 @@ func main() {
 		log.Fatalf("translate snapshot: %v", err)
 	}
 	for _, tpl := range templates {
-		encoded, _ := json.MarshalIndent(tpl.Source.Payload, "", "  ")
+		encoded, marshalErr := json.MarshalIndent(tpl.Source.Payload, "", "  ")
+		if marshalErr != nil {
+			log.Fatalf("encode template payload: %v", marshalErr)
+		}
 		fmt.Printf("Template %s/%s\n%s\n\n", tpl.Channel, tpl.Locale, encoded)
 	}
 }

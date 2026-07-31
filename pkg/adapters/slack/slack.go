@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -123,25 +122,8 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if thread := stringValue(msg.Metadata, "thread_ts"); thread != "" {
 		payload["thread_ts"] = thread
 	}
-	if attachments := adapters.NormalizeAttachments(msg.Attachments); len(attachments) > 0 {
-		files := make([]map[string]any, 0, len(attachments))
-		for _, att := range attachments {
-			if att.URL == "" {
-				continue
-			}
-			title := strings.TrimSpace(att.Filename)
-			if title == "" {
-				title = "attachment"
-			}
-			files = append(files, map[string]any{
-				"title":      title,
-				"title_link": att.URL,
-				"text":       att.URL,
-			})
-		}
-		if len(files) > 0 {
-			payload["attachments"] = files
-		}
+	if attachments := slackAttachments(msg.Attachments); len(attachments) > 0 {
+		payload["attachments"] = attachments
 	}
 
 	if a.cfg.DryRun || token == "" {
@@ -165,18 +147,9 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := a.client.Do(req)
+	data, err := adapters.ExecuteRequest(a.client, "slack", req)
 	if err != nil {
-		return fmt.Errorf("slack: request failed: %w", err)
-	}
-	data, err := adapters.ReadResponseBody(resp)
-	closeErr := resp.Body.Close()
-	if responseErr := errors.Join(err, closeErr); responseErr != nil {
-		return fmt.Errorf("slack: %w", responseErr)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return adapters.HTTPStatusError("slack", resp.StatusCode, data)
+		return err
 	}
 
 	// Slack returns ok=false on logical errors
@@ -193,6 +166,23 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 
 	a.base.LogSuccess(a.name, msg)
 	return nil
+}
+
+func slackAttachments(attachments []adapters.Attachment) []map[string]any {
+	files := make([]map[string]any, 0, len(attachments))
+	for _, attachment := range adapters.NormalizeAttachments(attachments) {
+		if attachment.URL == "" {
+			continue
+		}
+		title := strings.TrimSpace(attachment.Filename)
+		if title == "" {
+			title = "attachment"
+		}
+		files = append(files, map[string]any{
+			"title": title, "title_link": attachment.URL, "text": attachment.URL,
+		})
+	}
+	return files
 }
 
 func firstNonEmpty(values ...string) string {

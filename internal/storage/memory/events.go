@@ -149,6 +149,25 @@ func (r *EventRepository) ClaimRetry(_ context.Context, id uuid.UUID, until time
 	return true, nil
 }
 
+// attachPublication updates the digest membership while the caller holds the
+// publication repository lock. Keeping this operation private preserves one
+// lock order (publication, then event) for digest membership and claims.
+func (r *EventRepository) attachPublication(event *domain.NotificationEvent, publicationID uuid.UUID, digestKey string) error {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	stored, ok := r.base.records[event.ID]
+	if !ok {
+		return store.ErrNotFound
+	}
+	stored.PublicationID = publicationID
+	stored.DigestKey = digestKey
+	stored.Status = domain.EventStatusScheduled
+	stored.UpdatedAt = time.Now().UTC()
+	r.base.records[event.ID] = stored
+	*event = stored
+	return nil
+}
+
 func eventIdentity(scope, definitionCode, key string) string {
 	return fmt.Sprintf("%s\x00%s\x00%s", scope, definitionCode, key)
 }

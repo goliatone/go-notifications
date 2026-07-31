@@ -3,7 +3,6 @@ package whatsapp
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -94,50 +93,10 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		return fmt.Errorf("whatsapp: destination required")
 	}
 
-	textBody := firstNonEmpty(stringValue(msg.Metadata, "body"), msg.Body)
-	htmlBody := firstNonEmpty(stringValue(msg.Metadata, "html_body"))
-	if htmlBody != "" && !a.cfg.PlainOnly {
-		textBody = stripHTML(htmlBody)
+	payload, err := a.messagePayload(msg, to)
+	if err != nil {
+		return err
 	}
-	attachments := adapters.NormalizeAttachments(msg.Attachments)
-	attachment := firstURLAttachment(attachments)
-	if attachment == nil && textBody == "" {
-		return fmt.Errorf("whatsapp: body required")
-	}
-
-	var payload map[string]any
-	if attachment != nil {
-		doc := map[string]any{
-			"link": attachment.URL,
-		}
-		if attachment.Filename != "" {
-			doc["filename"] = attachment.Filename
-		}
-		if textBody != "" {
-			doc["caption"] = textBody
-		}
-		payload = map[string]any{
-			"messaging_product": "whatsapp",
-			"to":                to,
-			"type":              "document",
-			"document":          doc,
-		}
-	} else {
-		payload = map[string]any{
-			"messaging_product": "whatsapp",
-			"to":                to,
-			"type":              "text",
-			"text": map[string]any{
-				"body": textBody,
-			},
-		}
-		if preview := boolValue(msg.Metadata, "preview_url"); preview {
-			if text, ok := payload["text"].(map[string]any); ok {
-				text["preview_url"] = true
-			}
-		}
-	}
-
 	bodyBytes, err := adapters.EncodeJSONPayload("whatsapp", payload)
 	if err != nil {
 		return err
@@ -150,21 +109,54 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(a.cfg.Token))
 
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("whatsapp: request failed: %w", err)
-	}
-	respBody, err := adapters.ReadResponseBody(resp)
-	closeErr := resp.Body.Close()
-	if responseErr := errors.Join(err, closeErr); responseErr != nil {
-		return fmt.Errorf("whatsapp: %w", responseErr)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return adapters.HTTPStatusError("whatsapp", resp.StatusCode, respBody)
+	if _, err := adapters.ExecuteRequest(a.client, "whatsapp", req); err != nil {
+		return err
 	}
 
 	a.base.LogSuccess(a.name, msg)
 	return nil
+}
+
+func (a *Adapter) messagePayload(msg adapters.Message, to string) (map[string]any, error) {
+	textBody := firstNonEmpty(stringValue(msg.Metadata, "body"), msg.Body)
+	htmlBody := firstNonEmpty(stringValue(msg.Metadata, "html_body"))
+	if htmlBody != "" && !a.cfg.PlainOnly {
+		textBody = stripHTML(htmlBody)
+	}
+	attachments := adapters.NormalizeAttachments(msg.Attachments)
+	attachment := firstURLAttachment(attachments)
+	if attachment == nil && textBody == "" {
+		return nil, fmt.Errorf("whatsapp: body required")
+	}
+	if attachment != nil {
+		return documentPayload(to, textBody, attachment), nil
+	}
+	return textPayload(to, textBody, boolValue(msg.Metadata, "preview_url")), nil
+}
+
+func documentPayload(to, caption string, attachment *adapters.Attachment) map[string]any {
+	document := map[string]any{"link": attachment.URL}
+	if attachment.Filename != "" {
+		document["filename"] = attachment.Filename
+	}
+	if caption != "" {
+		document["caption"] = caption
+	}
+	return map[string]any{
+		"messaging_product": "whatsapp", "to": to,
+		"type": "document", "document": document,
+	}
+}
+
+func textPayload(to, body string, preview bool) map[string]any {
+	text := map[string]any{"body": body}
+	if preview {
+		text["preview_url"] = true
+	}
+	return map[string]any{
+		"messaging_product": "whatsapp", "to": to,
+		"type": "text", "text": text,
+	}
 }
 
 func firstNonEmpty(values ...string) string {

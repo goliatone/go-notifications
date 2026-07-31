@@ -1,5 +1,7 @@
 # Getting Started Guide
 
+<!-- markdownlint-disable MD013 MD029 MD032 MD040 MD060 -->
+
 This guide will help you send your first notification in under 5 minutes using `go-notifications`.
 
 ## Table of Contents
@@ -33,8 +35,12 @@ The module is designed to integrate with `go-admin` and `go-cms` but works indep
 Add `go-notifications` to your project:
 
 ```bash
-go get github.com/goliatone/go-notifications
+go get github.com/goliatone/go-notifications@v0.14.1
 ```
+
+Use a published semantic version in host applications. The durable pipeline
+upgrade is planned for `v0.15.0`; do not use a local `replace` as a production
+adoption mechanism.
 
 ---
 
@@ -199,6 +205,32 @@ err := manager.Send(ctx, notifier.Event{
 ```
 
 Each recipient is fanned out to every configured channel. If you need different destinations per channel (email + SMS), send separate events per channel.
+
+### Receive a typed delivery receipt
+
+Existing `Manager.Send` calls remain supported. New code can request the
+durable, privacy-safe result:
+
+```go
+receipt, err := mod.Manager().SendWithReceipt(ctx, notifier.Event{
+    DefinitionCode: "order-confirmation",
+    Recipients:     []string{"user-123"},
+    CorrelationID:  "order-ORD-12345",
+    RequestID:      "request-789",
+    IdempotencyKey: "order-confirmation-ORD-12345",
+})
+if err != nil {
+    // receipt still identifies failed or partial outcomes.
+}
+```
+
+The receipt contains opaque event/message IDs, aggregate status, safe outcome
+codes, and correlation fields. It never contains rendered bodies, resolved
+destinations, URLs, transient values, or raw provider responses.
+
+For persistent Bun storage, apply the embedded migration profile before
+calling `storage.NewBunProviders`; module construction never auto-migrates.
+See [Integration Guide](GUIDE_INTEGRATION.md#running-migrations).
 
 ---
 

@@ -3,12 +3,82 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - "**/*.go"
+      - "**/go.mod"
+      - "**/go.sum"
+      - "**/*.md"
+      - ".golangci.yml"
+      - ".golangci-lint-version"
+      - "taskfile"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "**/*.go"
+      - "**/go.mod"
+      - "**/go.sum"
+      - "**/*.md"
+      - ".golangci.yml"
+      - ".golangci-lint-version"
+      - "taskfile"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
 
 jobs:
-  build:
+  quality:
+    name: Full Go Quality
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            examples/web/go.sum
+
+      - name: Cache Go build cache
+        uses: actions/cache@v4
+        with:
+          path: .tmp/go-cache
+          key: ${{ runner.os }}-gocache-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-gocache-
+
+      - name: Run quality, docs, and samples
+        run: ./taskfile ci
+        env:
+          DOCS_LINT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+
+  postgres-migrations:
+    name: PostgreSQL Migration Upgrade
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: notifications
+          POSTGRES_PASSWORD: notifications
+          POSTGRES_DB: notifications
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notifications -d notifications"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: notifications
+      PGPASSWORD: notifications
+      PGDATABASE: notifications
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,18 +89,32 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Cache Go build cache
-        uses: actions/cache@v4
-        with:
-          path: tmp/go-cache
-          key: ${{ runner.os }}-gocache-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-gocache-
+      - name: Apply baseline and upgrade migrations
+        run: |
+          psql -v ON_ERROR_STOP=1 -f data/sql/migrations/postgres/001_notifications_core.up.sql
+          psql -v ON_ERROR_STOP=1 -f data/sql/migrations/postgres/002_notification_delivery_upgrades.up.sql
+          psql -v ON_ERROR_STOP=1 -f data/sql/migrations/postgres/003_notification_delivery_integrity.up.sql
 
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.1
+      - name: Verify upgraded schema
+        run: |
+          test "$(psql -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'notification_events' AND column_name = 'request_fingerprint'")" = "1"
+          test "$(psql -Atc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'notification_publications'")" = "1"
+          test "$(psql -Atc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'notification_retry_operations'")" = "1"
+          test "$(psql -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'notification_events' AND column_name = 'channels'")" = "1"
+          test "$(psql -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'notification_messages' AND column_name = 'provider_plan'")" = "1"
 
-      - name: Run lint/test/docs/samples
-        run: ./taskfile ci
+      - name: Run PostgreSQL migration and delivery integrations
+        run: >-
+          go test . -run
+          'Test(SensitiveNotificationContractAcrossProviders|ScopedIdempotencyIsAtomicAcrossProviders|DigestMembershipBoundaryAcrossProviders|PostgresLegacyTemplateConstraintUpgrade)(/postgres)?$'
+          -count=1 -v
         env:
-          GOLANGCI_LINT_TIMEOUT: 5m
+          NOTIFICATIONS_POSTGRES_DSN: postgres://notifications:notifications@localhost:5432/notifications?sslmode=disable
+
+      - name: Run PostgreSQL concurrency race checks
+        run: >-
+          go test -race . -run
+          'Test(ScopedIdempotencyIsAtomicAcrossProviders|DigestMembershipBoundaryAcrossProviders)/postgres$'
+          -count=1 -v
+        env:
+          NOTIFICATIONS_POSTGRES_DSN: postgres://notifications:notifications@localhost:5432/notifications?sslmode=disable

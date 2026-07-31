@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"context"
+
 	command "github.com/goliatone/go-command"
 	internalcommands "github.com/goliatone/go-notifications/internal/commands"
+	"github.com/goliatone/go-notifications/pkg/definitions"
 	"github.com/goliatone/go-notifications/pkg/events"
 	"github.com/goliatone/go-notifications/pkg/inbox"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
@@ -20,6 +23,12 @@ type (
 	InboxSnooze      = internalcommands.InboxSnooze
 )
 
+// ResultCommander preserves Commander compatibility while exposing a typed result.
+type ResultCommander[T, R any] interface {
+	command.Commander[T]
+	Run(context.Context, T) (R, error)
+}
+
 // Registry exposes go-command compatible handlers backed by the module services.
 type Registry struct {
 	Catalog          *internalcommands.Catalog
@@ -29,23 +38,34 @@ type Registry struct {
 	InboxMarkRead    command.Commander[InboxMarkRead]
 	InboxDismiss     command.Commander[InboxDismiss]
 	InboxSnooze      command.Commander[InboxSnooze]
-	EnqueueEvent     command.Commander[events.IntakeRequest]
+	EnqueueEvent     ResultCommander[events.IntakeRequest, events.DispatchReceipt]
+	RetryEvent       ResultCommander[events.RetryRequest, events.DispatchReceipt]
 }
 
 // Dependencies mirror the internal command dependencies but keep them public.
 type Dependencies struct {
-	Definitions store.NotificationDefinitionRepository
-	Templates   *templates.Service
-	Preferences *preferences.Service
-	Inbox       *inbox.Service
-	Events      *events.Service
-	Logger      logger.Logger
+	// Definitions is retained for compatibility; DefinitionService takes precedence.
+	Definitions       store.NotificationDefinitionRepository
+	DefinitionService *definitions.Service
+	Templates         *templates.Service
+	Preferences       *preferences.Service
+	Inbox             *inbox.Service
+	Events            *events.Service
+	Logger            logger.Logger
 }
 
 // New builds the registry using the provided dependencies.
 func New(deps Dependencies) (*Registry, error) {
+	definitionService := deps.DefinitionService
+	if definitionService == nil {
+		var err error
+		definitionService, err = definitions.New(deps.Definitions)
+		if err != nil {
+			return nil, err
+		}
+	}
 	catalog, err := internalcommands.NewCatalog(internalcommands.Dependencies{
-		Definitions: deps.Definitions,
+		Definitions: definitionService,
 		Templates:   deps.Templates,
 		Preferences: deps.Preferences,
 		Inbox:       deps.Inbox,
@@ -64,6 +84,7 @@ func New(deps Dependencies) (*Registry, error) {
 		InboxDismiss:     catalog.InboxDismiss,
 		InboxSnooze:      catalog.InboxSnooze,
 		EnqueueEvent:     catalog.EnqueueEvent,
+		RetryEvent:       catalog.RetryEvent,
 	}, nil
 }
 
@@ -80,5 +101,6 @@ func (r *Registry) Commanders() []any {
 		r.InboxDismiss,
 		r.InboxSnooze,
 		r.EnqueueEvent,
+		r.RetryEvent,
 	}
 }

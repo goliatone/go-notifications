@@ -11,6 +11,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
+	"github.com/goliatone/go-notifications/pkg/privacy"
 	"github.com/google/uuid"
 )
 
@@ -31,6 +32,8 @@ type Dependencies struct {
 	Broadcaster broadcaster.Broadcaster
 	Logger      logger.Logger
 	Activity    activity.Hooks
+	Privacy     privacy.Policy
+	Diagnostic  privacy.DiagnosticSink
 }
 
 var errServiceNotInitialised = errors.New("inbox: service not initialised")
@@ -42,6 +45,8 @@ func New(deps Dependencies) (*Service, error) {
 		Broadcaster: deps.Broadcaster,
 		Logger:      deps.Logger,
 		Activity:    deps.Activity,
+		Privacy:     deps.Privacy,
+		Diagnostic:  deps.Diagnostic,
 	})
 	if err != nil {
 		return nil, err

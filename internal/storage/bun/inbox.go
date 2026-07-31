@@ -12,40 +12,14 @@ import (
 )
 
 type InboxRepository struct {
-	base baseRepository[domain.InboxItem]
+	crudRepository[domain.InboxItem]
 }
 
 func NewInboxRepository(db *bun.DB) *InboxRepository {
-	handlers := repository.ModelHandlers[*domain.InboxItem]{
-		NewRecord:          func() *domain.InboxItem { return &domain.InboxItem{} },
-		GetID:              func(i *domain.InboxItem) uuid.UUID { return i.ID },
-		SetID:              func(i *domain.InboxItem, id uuid.UUID) { i.ID = id },
-		GetIdentifier:      func() string { return "id" },
-		GetIdentifierValue: func(i *domain.InboxItem) string { return i.ID.String() },
-	}
 	return &InboxRepository{
-		base: newBaseRepository[domain.InboxItem](db, handlers, func(i *domain.InboxItem) *domain.RecordMeta { return &i.RecordMeta }),
+		crudRepository: newEntityCRUD(db, "id",
+			func(item *domain.InboxItem) *domain.RecordMeta { return &item.RecordMeta }, nil),
 	}
-}
-
-func (r *InboxRepository) Create(ctx context.Context, item *domain.InboxItem) error {
-	return r.base.create(ctx, item)
-}
-
-func (r *InboxRepository) Update(ctx context.Context, item *domain.InboxItem) error {
-	return r.base.update(ctx, item)
-}
-
-func (r *InboxRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.InboxItem, error) {
-	return r.base.getByID(ctx, id, false)
-}
-
-func (r *InboxRepository) List(ctx context.Context, opts store.ListOptions) (store.ListResult[domain.InboxItem], error) {
-	return r.base.list(ctx, opts)
-}
-
-func (r *InboxRepository) SoftDelete(ctx context.Context, id uuid.UUID) error {
-	return r.base.softDelete(ctx, id)
 }
 
 func (r *InboxRepository) ListByUser(ctx context.Context, userID string, opts store.ListOptions) (store.ListResult[domain.InboxItem], error) {

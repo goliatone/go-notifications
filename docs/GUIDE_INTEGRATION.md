@@ -1,5 +1,7 @@
 # Integration Guide
 
+<!-- markdownlint-disable MD013 MD060 -->
+
 This guide covers integrating `go-notifications` with host applications, including module initialization, dependency injection, storage configuration, and testing patterns.
 
 ---
@@ -86,6 +88,33 @@ func InitNotifications(ctx context.Context, db *bun.DB) (*notifier.Module, error
 | `Adapters` | `[]adapters.Messenger` | No | Delivery channel adapters |
 | `Secrets` | `secrets.Resolver` | No | Credentials resolver |
 | `Activity` | `activity.Hooks` | No | Observability hooks |
+| `Persistence` | `persistencepolicy.Policy` | No | Per-definition durable content/link projection |
+| `Privacy` | `privacy.Policy` | No | Safe IDs, metadata, context, and public errors |
+| `Diagnostic` | `privacy.DiagnosticSink` | No | Explicit privileged raw-cause boundary |
+| `RecipientResolver` | `adapters.RecipientResolver` | No | Resolve opaque subjects at the adapter boundary |
+
+When `RecipientResolver` is configured, the module wraps registered adapters
+with `adapters.ResolvingMessenger`. Events/messages retain opaque subject IDs;
+only the copied in-memory adapter message receives the email address, phone
+number, or provider destination.
+
+The default `persistencepolicy.DefinitionPolicy` reads definition policy keys:
+
+- `persistence_mode`: `full`, `metadata_only`, or `state_only`
+- `inbox_persistence_mode`: the inbox projection
+- `persist_link_urls` and `persist_link_records`
+- `allowed_metadata`: explicit safe metadata keys
+
+Full mode preserves compatibility. Metadata/state modes keep only the opaque
+state required for receipts, replay, retry eligibility, and audit. Later
+status updates apply the same projection and cannot restore removed content.
+
+Public errors, activity, attempts, logs, link observers, inbox, and realtime
+use the injected `Privacy` policy. Raw in-memory causes reach only the optional
+`Diagnostic` sink; they are never wrapped by public errors or persisted.
+Access the effective dependencies through `mod.PersistencePolicy()`,
+`mod.PrivacyPolicy()`, `mod.DiagnosticSink()`, and
+`mod.RecipientResolver()`.
 
 ---
 
@@ -200,14 +229,35 @@ func InitWithPostgres(db *bun.DB) (*notifier.Module, error) {
 ### Running Migrations
 
 ```go
-import persistence "github.com/goliatone/go-persistence-bun"
+import (
+    notifications "github.com/goliatone/go-notifications"
+    persistence "github.com/goliatone/go-persistence-bun"
+)
 
 func RunMigrations(ctx context.Context, db *bun.DB) error {
-    // Models are auto-registered by NewBunProviders
-    migrator := persistence.NewMigrator(db)
-    return migrator.Migrate(ctx)
+    migrations := persistence.NewMigrations()
+    if err := notifications.RegisterMigrations(migrations); err != nil {
+        return err
+    }
+    return migrations.Migrate(ctx, db)
 }
 ```
+
+Register the source before building Bun providers. `RegisterMigrations` does
+not connect, execute SQL, or change module construction. The stable source key
+is `go-notifications`, default order is `50`, and dialect validation targets
+are `sqlite` and `postgres`. Hosts with a shared graph can call
+`OrderedMigrationSource("go-users")` to declare package ordering.
+
+Fresh databases apply `001`, `002`, then `003`. Existing installations adopt
+the same profile: the baseline records the pre-upgrade schema, `002` adds
+correlation, scoped idempotency, publications/digests, retry lineage,
+transient markers, and safe error fields, and `003` repairs legacy template
+variant uniqueness while adding durable channel, locale, template, and
+provider plans. Back up production data before migration. Integrity migration
+`003` is forward-only on both dialects because restoring `UNIQUE(code)` or
+removing delivery-plan fields could make valid persisted data
+unrepresentable.
 
 ### Available Repositories
 
@@ -218,6 +268,8 @@ type Providers struct {
     Events             store.NotificationEventRepository
     Messages           store.NotificationMessageRepository
     DeliveryAttempts   store.DeliveryAttemptRepository
+    Publications       store.NotificationPublicationRepository
+    RetryOperations    store.NotificationRetryOperationRepository
     Preferences        store.NotificationPreferenceRepository
     SubscriptionGroups store.SubscriptionGroupRepository
     Inbox              store.InboxRepository
@@ -362,6 +414,26 @@ func RegisterCommands(registry *command.Registry, mod *notifier.Module) error {
 | `InboxDismiss` | `commands.InboxDismiss` | Dismiss inbox items |
 | `InboxSnooze` | `commands.InboxSnooze` | Snooze items |
 | `EnqueueEvent` | `events.IntakeRequest` | Queue notification events |
+| `RetryEvent` | `events.RetryRequest` | Explicitly retry failed persisted outcomes |
+
+Every message implements `Type() string` and `Validate() error`. The stable
+IDs are:
+
+| ID | Handler |
+| --- | --- |
+| `notifications.definition.upsert` | `CreateDefinition` |
+| `notifications.template.upsert` | `SaveTemplate` |
+| `notifications.preference.upsert` | `UpsertPreference` |
+| `notifications.inbox.mark_read` | `InboxMarkRead` |
+| `notifications.inbox.dismiss` | `InboxDismiss` |
+| `notifications.inbox.snooze` | `InboxSnooze` |
+| `notifications.event.enqueue` | `EnqueueEvent` |
+| `notifications.event.retry` | `RetryEvent` |
+
+`EnqueueEvent.Run` and `RetryEvent.Run` return typed dispatch receipts.
+`Execute` remains available for existing `go-command.Commander` registration
+loops. Immediate transient dispatch is intentionally absent from this
+serializable catalog; invoke the trusted event service directly.
 
 ### HTTP Handler Example
 

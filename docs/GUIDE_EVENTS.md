@@ -1,5 +1,7 @@
 # Events Guide
 
+<!-- markdownlint-disable MD013 MD031 MD032 MD060 -->
+
 This guide covers how to submit notification events and understand the delivery pipeline in `go-notifications`.
 
 ---
@@ -131,6 +133,101 @@ func EnqueueEvent(ctx context.Context, svc *events.Service) error {
 }
 ```
 
+### Receipts, correlation, and scoped idempotency
+
+Use `EnqueueWithReceipt` when the caller needs durable identity and per-outcome
+state:
+
+```go
+receipt, err := svc.EnqueueWithReceipt(ctx, events.IntakeRequest{
+    DefinitionCode:   "invoice-ready",
+    Recipients:       []string{"user-123"},
+    Context:          map[string]any{"invoice_id": "INV-42"},
+    TenantID:         "tenant-7",
+    CorrelationID:    "invoice-INV-42",
+    RequestID:        "request-abc",
+    IdempotencyKey:   "invoice-ready-INV-42",
+    IdempotencyScope: "tenant:tenant-7",
+})
+```
+
+Scope and key values are trimmed, case-sensitive, and limited to 255 bytes.
+When scope is omitted it derives from the tenant or `system`. A duplicate
+request returns the same event receipt with `Replay=true` and does not render,
+enqueue, or dispatch again. Reusing the identity with materially different
+input returns `idempotency_conflict`. Retrying a failure requires a separate
+retry operation.
+
+### Immediate transient render data
+
+Credential tokens and one-time URLs must use the immediate-only API:
+
+```go
+receipt, err := svc.DispatchImmediate(ctx, events.ImmediateRequest{
+    DefinitionCode: "credential-issued",
+    Recipients:     []string{"user-123"},
+    Context:        map[string]any{"display_name": "Rosa"},
+    Transient: map[string]any{
+        "credential_url": oneTimeURL,
+    },
+})
+```
+
+Transient values may reach link building, rendering, and the in-memory adapter
+message. They are excluded from events, messages, attempts, links, inbox,
+realtime, activity, logs, queues, digests, commands, receipts, and public
+errors. The event stores only a boolean dependency marker. Transient input
+cannot be scheduled, digested, queued, or retried.
+
+Definitions may declare `transient_required_keys` and
+`transient_allowed_keys` in `Policy`. Transient values win collisions with
+persistent context for the one immediate render.
+
+### Durable publications, digests, and recovery
+
+Scheduled and digest intake first persists the event and publication ledger,
+then enqueues the stable `events.PublicationJobPayload`. A durable queue is
+required; `queue.Nop` returns `durable_queue_required`.
+
+Workers call:
+
+```go
+receipt, err := svc.ProcessPublication(ctx, payload)
+```
+
+Queue delivery is at-least-once. Duplicate payloads return a replay receipt and
+do not fan out again. If enqueue fails after persistence, publish pending work
+after restart:
+
+```go
+if err := svc.RecoverPending(ctx, 100); err != nil {
+    return err
+}
+```
+
+Digest membership is stored on a shared open publication window, so process
+restart does not lose members. The first recovered worker claims the window
+and every member reaches the same terminal outcome.
+
+### Explicit retry
+
+Retry uses its own durable identity and preserves the original event:
+
+```go
+receipt, err := svc.RetryWithReceipt(ctx, events.RetryRequest{
+    EventID:        failedEventID,
+    IdempotencyKey: "operator-retry-1",
+    CorrelationID:  "incident-456",
+    RequestID:      "request-retry-1",
+})
+```
+
+Only failed outcomes of failed or partial events are eligible. The retry
+operation ID is recorded on messages/attempts and returned in the receipt.
+Same-key calls replay current state; different keys cannot concurrently claim
+the same event. Expired leases recover. Successful events and definitions
+requiring unavailable transient input return categorized errors.
+
 ---
 
 ## Sync vs Async Submission
@@ -182,7 +279,7 @@ type MyQueue struct {
 
 func (q *MyQueue) Enqueue(ctx context.Context, job queue.Job) error {
     // Persist job.Key, job.Payload, job.RunAt
-    // Worker polls and calls ProcessScheduled when RunAt is reached
+    // Worker polls and calls ProcessPublication when RunAt is reached
     return nil
 }
 ```
@@ -264,52 +361,32 @@ err := manager.Send(ctx, notifier.Event{
 
 ## Recipient Resolution
 
-Recipients are identifiers that adapters know how to route:
-
-```go
-// Email adapter expects email addresses
-event := notifier.Event{
-    DefinitionCode: "welcome",
-    Recipients:     []string{"alice@example.com", "bob@example.com"},
-}
-
-// SMS adapter expects phone numbers
-event := notifier.Event{
-    DefinitionCode: "verification-code",
-    Recipients:     []string{"+1234567890"},
-    Channels:       []string{"sms"},
-}
-
-// Multi-channel with different identifier types
-event := notifier.Event{
-    DefinitionCode: "order-update",
-    Recipients:     []string{"user-123"}, // User ID looked up by adapter
-    Channels:       []string{"email", "push", "inbox"},
-}
-```
-
-### Recipient in Context
-
-You can pass additional recipient metadata via Context:
+Recipients should be opaque subject identifiers. Configure
+`notifier.ModuleOptions.RecipientResolver` to resolve a destination only at
+the adapter boundary:
 
 ```go
 event := notifier.Event{
     DefinitionCode: "welcome",
     Recipients:     []string{"user-123"},
-    Context: map[string]any{
-        "recipient_email": "alice@example.com",
-        "recipient_phone": "+1234567890",
-        "recipient_name":  "Alice",
-    },
+    Channels:       []string{"email", "push", "inbox"},
 }
 ```
 
-The dispatcher automatically adds `recipient` to the Context for template rendering:
+The reusable resolver contract is:
 
-```django
-Hello {{ recipient_name }}, your order is on the way!
-Delivery to: {{ recipient }}
+```go
+type RecipientResolver interface {
+    Resolve(
+        context.Context,
+        adapters.RecipientRequest,
+    ) (adapters.ResolvedRecipient, error)
+}
 ```
+
+Persistent events/messages keep `user-123`; only a copied in-memory adapter
+message receives the resolved email, phone, or provider address. Do not put
+destinations in persistent context or template metadata.
 
 ---
 
@@ -335,22 +412,26 @@ err := manager.Send(ctx, notifier.Event{
 ### How Scheduling Works
 
 1. Event is validated and persisted
-2. A job is enqueued with `RunAt` set to `ScheduledAt`
-3. Queue worker picks up the job when time arrives
-4. `ProcessScheduled` is called to dispatch the event
+2. A durable publication is persisted
+3. A publication-only job is enqueued with the configured `RunAt`
+4. Queue worker picks up the job when time arrives
+5. `ProcessPublication` claims and dispatches the persisted members
 
 ```go
 // Worker code (runs in background)
 func (w *Worker) ProcessJob(ctx context.Context, job queue.Job) error {
-    switch payload := job.Payload.(type) {
-    case events.ScheduledJobPayload:
-        return w.eventsService.ProcessScheduled(ctx, payload)
-    case events.DigestJobPayload:
-        return w.eventsService.ProcessDigest(ctx, payload)
+    payload, ok := job.Payload.(events.PublicationJobPayload)
+    if !ok {
+        return errors.New("unexpected notification payload")
     }
-    return nil
+    _, err := w.eventsService.ProcessPublication(ctx, payload)
+    return err
 }
 ```
+
+`ScheduledJobPayload`, `DigestJobPayload`, `ProcessScheduled`, and
+`ProcessDigest` remain compatibility APIs. New queues should publish only
+`PublicationJobPayload`.
 
 ---
 
@@ -724,14 +805,15 @@ func main() {
 ### Scheduled Event Not Firing
 
 1. **Verify queue implementation**: Ensure your Queue correctly persists and polls jobs
-2. **Check worker is running**: ProcessScheduled must be called when job time arrives
+2. **Check worker is running**: `ProcessPublication` must handle the job
 3. **Verify ScheduleAt is in future**: Events scheduled in the past are sent immediately
+4. **Recover pending work**: Call `RecoverPending` after queue/process outages
 
 ### Digest Not Merging
 
 1. **Use consistent Key**: All events in a batch must share the same `Digest.Key`
 2. **Check Delay duration**: Ensure delay is long enough for events to accumulate
-3. **Verify worker calls ProcessDigest**: Digest jobs require explicit processing
+3. **Verify worker calls ProcessPublication**: Digests share the publication worker
 
 ---
 
