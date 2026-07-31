@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"io/fs"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -38,8 +39,8 @@ func TestSQLiteMigrationsApplyBaselineAndUpgrades(t *testing.T) {
 	schema := map[string][]string{
 		"notification_definitions":         {"id", "code", "name", "channels", "metadata", "template_keys", "policy"},
 		"notification_templates":           {"id", "code", "channel", "locale", "body", "subject", "source", "schema", "metadata"},
-		"notification_events":              {"id", "definition_code", "recipients", "context", "correlation_id", "request_id", "idempotency_scope", "idempotency_key", "request_fingerprint", "transient_dependent", "publication_id", "digest_key", "retry_claim_until", "scheduled_at", "status"},
-		"notification_messages":            {"id", "event_id", "retry_operation_id", "channel", "receiver", "status", "metadata"},
+		"notification_events":              {"id", "definition_code", "recipients", "channels", "locale", "context", "correlation_id", "request_id", "idempotency_scope", "idempotency_key", "request_fingerprint", "transient_dependent", "publication_id", "digest_key", "retry_claim_until", "scheduled_at", "status"},
+		"notification_messages":            {"id", "event_id", "retry_operation_id", "channel", "template_code", "provider_plan", "receiver", "status", "metadata"},
 		"notification_delivery_attempts":   {"id", "message_id", "retry_operation_id", "adapter", "status", "error", "error_code", "payload"},
 		"notification_preferences":         {"id", "subject_id", "subject_type", "definition_code", "channel", "enabled"},
 		"notification_subscription_groups": {"id", "code", "name", "metadata"},
@@ -56,6 +57,7 @@ func TestSQLiteMigrationsApplyBaselineAndUpgrades(t *testing.T) {
 
 	for _, index := range []string{
 		"notification_templates_lookup_idx",
+		"notification_templates_variant_uidx",
 		"notification_messages_event_idx",
 		"notification_delivery_attempts_message_idx",
 		"notification_preferences_subject_idx",
@@ -76,7 +78,7 @@ func TestSQLiteMigrationsApplyBaselineAndUpgrades(t *testing.T) {
 	assertSQLiteForeignKey(ctx, t, sqldb, "notification_inbox_items", "message_id", "notification_messages")
 }
 
-func TestSQLiteMigrationsPreservePreUpgradeRecords(t *testing.T) {
+func TestSQLiteMigrationsPreservePreUpgradeRecords(t *testing.T) { //nolint:gocyclo,funlen // Linear legacy fixture audit.
 	db, sqldb := newSQLiteMigrationDB(t)
 	ctx := context.Background()
 	root, err := notifications.GetMigrationsFS()
@@ -87,7 +89,13 @@ func TestSQLiteMigrationsPreservePreUpgradeRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read baseline: %v", err)
 	}
-	if _, err := sqldb.ExecContext(ctx, string(baseline)); err != nil {
+	legacyBaseline := strings.Replace(
+		string(baseline),
+		"UNIQUE (code, channel, locale)",
+		"UNIQUE (code)",
+		1,
+	)
+	if _, err := sqldb.ExecContext(ctx, legacyBaseline); err != nil {
 		t.Fatalf("apply pre-upgrade schema: %v", err)
 	}
 
@@ -147,6 +155,99 @@ func TestSQLiteMigrationsPreservePreUpgradeRecords(t *testing.T) {
 	if body != "hello" || fingerprint != "" {
 		t.Fatalf("fixture changed during upgrade: body=%q fingerprint=%q", body, fingerprint)
 	}
+	if _, err := sqldb.ExecContext(ctx,
+		`INSERT INTO notification_templates (id, code, channel, locale, body) VALUES (?, 'account.notice', 'sms', 'en', 'hello by sms')`,
+		uuid.NewString(),
+	); err != nil {
+		t.Fatalf("legacy code-only template uniqueness was not repaired: %v", err)
+	}
+	if _, err := sqldb.ExecContext(ctx,
+		`INSERT INTO notification_templates (id, code, channel, body) VALUES (?, 'default.notice', 'email', 'first')`,
+		uuid.NewString(),
+	); err != nil {
+		t.Fatalf("insert default-locale variant: %v", err)
+	}
+	if _, err := sqldb.ExecContext(ctx,
+		`INSERT INTO notification_templates (id, code, channel, body) VALUES (?, 'default.notice', 'email', 'duplicate')`,
+		uuid.NewString(),
+	); err == nil {
+		t.Fatalf("default-locale template identity permitted a duplicate")
+	}
+}
+
+func TestPostgresLegacyTemplateConstraintUpgrade(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("NOTIFICATIONS_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("NOTIFICATIONS_POSTGRES_DSN is not configured")
+	}
+	ctx := context.Background()
+	sqldb, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	sqldb.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		if closeErr := sqldb.Close(); closeErr != nil {
+			t.Errorf("close postgres: %v", closeErr)
+		}
+	})
+	schema := "notifications_migration_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, schemaErr := sqldb.ExecContext(ctx, `CREATE SCHEMA `+schema); schemaErr != nil {
+		t.Fatalf("create schema: %v", schemaErr)
+	}
+	t.Cleanup(func() {
+		if _, dropErr := sqldb.ExecContext(context.Background(), `DROP SCHEMA `+schema+` CASCADE`); dropErr != nil {
+			t.Errorf("drop schema: %v", dropErr)
+		}
+	})
+	if _, searchPathErr := sqldb.ExecContext(ctx, `SET search_path TO `+schema); searchPathErr != nil {
+		t.Fatalf("set search path: %v", searchPathErr)
+	}
+	legacy := `
+CREATE TABLE notification_templates (
+  id UUID PRIMARY KEY, code TEXT NOT NULL UNIQUE, channel TEXT NOT NULL,
+  locale TEXT, body TEXT
+);
+CREATE TABLE notification_events (id UUID PRIMARY KEY);
+CREATE TABLE notification_messages (id UUID PRIMARY KEY);
+CREATE TABLE notification_publications (
+  id UUID PRIMARY KEY, digest_key TEXT, kind TEXT NOT NULL, queue_key TEXT NOT NULL,
+  status TEXT NOT NULL
+);
+INSERT INTO notification_templates (id, code, channel, locale, body)
+VALUES ('` + uuid.NewString() + `', 'account.notice', 'email', 'en', 'hello');`
+	if _, legacyErr := sqldb.ExecContext(ctx, legacy); legacyErr != nil {
+		t.Fatalf("create legacy schema: %v", legacyErr)
+	}
+	root, err := notifications.GetMigrationsFS()
+	if err != nil {
+		t.Fatalf("migration filesystem: %v", err)
+	}
+	upgrade, err := fs.ReadFile(root, "postgres/003_notification_delivery_integrity.up.sql")
+	if err != nil {
+		t.Fatalf("read integrity migration: %v", err)
+	}
+	if _, upgradeErr := sqldb.ExecContext(ctx, string(upgrade)); upgradeErr != nil {
+		t.Fatalf("apply integrity migration: %v", upgradeErr)
+	}
+	if _, err := sqldb.ExecContext(ctx,
+		`INSERT INTO notification_templates (id, code, channel, locale, body) VALUES ($1, 'account.notice', 'sms', 'en', 'hello by sms')`,
+		uuid.NewString(),
+	); err != nil {
+		t.Fatalf("legacy code-only uniqueness was not repaired: %v", err)
+	}
+	if _, err := sqldb.ExecContext(ctx,
+		`INSERT INTO notification_publications (id, digest_key, kind, queue_key, status) VALUES ($1, $2, 'digest', $3, 'pending')`,
+		uuid.NewString(), strings.Repeat("a", 64), "notification-publication:"+uuid.NewString(),
+	); err != nil {
+		t.Fatalf("PostgreSQL-safe digest identity was not persisted: %v", err)
+	}
+	var count int
+	if err := sqldb.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM notification_templates WHERE code = 'account.notice'`,
+	).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("legacy templates were not preserved: count=%d err=%v", count, err)
+	}
 }
 
 func TestOrderedMigrationSourceIdentityIsStable(t *testing.T) {
@@ -188,7 +289,7 @@ func TestMigrationDialectsHaveVersionParity(t *testing.T) {
 	if strings.Join(versions["postgres"], ",") != strings.Join(versions["sqlite"], ",") {
 		t.Fatalf("migration version mismatch: postgres=%v sqlite=%v", versions["postgres"], versions["sqlite"])
 	}
-	if strings.Join(versions["sqlite"], ",") != "001,002" {
+	if strings.Join(versions["sqlite"], ",") != "001,002,003" {
 		t.Fatalf("unexpected released migration versions: %v", versions["sqlite"])
 	}
 }
@@ -213,9 +314,7 @@ func TestSQLiteBunScopedIdempotencyIsAtomic(t *testing.T) {
 	ids := make(map[uuid.UUID]struct{})
 	errs := make(chan error, callers)
 	for range callers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			stored, created, err := repo.CreateIdempotent(ctx, &domain.NotificationEvent{
 				DefinitionCode:     "account.notice",
 				IdempotencyScope:   "tenant:one",
@@ -232,7 +331,7 @@ func TestSQLiteBunScopedIdempotencyIsAtomic(t *testing.T) {
 				createdCount++
 			}
 			ids[stored.ID] = struct{}{}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

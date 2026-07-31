@@ -5,110 +5,216 @@ import (
 	"testing"
 	"time"
 
-	i18n "github.com/goliatone/go-i18n"
-	"github.com/goliatone/go-notifications/internal/storage/memory"
+	command "github.com/goliatone/go-command"
+	"github.com/goliatone/go-notifications/pkg/definitions"
+	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/events"
-	"github.com/goliatone/go-notifications/pkg/inbox"
-	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
-	"github.com/goliatone/go-notifications/pkg/interfaces/cache"
-	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/receipts"
 	"github.com/goliatone/go-notifications/pkg/templates"
+	"github.com/google/uuid"
 )
 
-func TestCatalogCommands(t *testing.T) {
+func TestCommandTypesAreStableUniqueAndValidated(t *testing.T) {
+	id := uuid.New()
+	messages := []struct {
+		valid   any
+		invalid any
+		wantID  string
+	}{
+		{
+			valid: definitions.UpsertInput{Code: "welcome"}, invalid: definitions.UpsertInput{},
+			wantID: "notifications.definition.upsert",
+		},
+		{
+			valid:   TemplateUpsert{TemplateInput: templates.TemplateInput{Code: "welcome", Channel: "email", Locale: "en"}},
+			invalid: TemplateUpsert{}, wantID: "notifications.template.upsert",
+		},
+		{
+			valid: preferences.PreferenceInput{
+				SubjectType: "user", SubjectID: "u1", DefinitionCode: "welcome", Channel: "email",
+			},
+			invalid: preferences.PreferenceInput{}, wantID: "notifications.preference.upsert",
+		},
+		{
+			valid:   InboxMarkRead{UserID: "u1", IDs: []string{id.String()}},
+			invalid: InboxMarkRead{}, wantID: "notifications.inbox.mark_read",
+		},
+		{
+			valid:   InboxDismiss{UserID: "u1", ID: id.String()},
+			invalid: InboxDismiss{}, wantID: "notifications.inbox.dismiss",
+		},
+		{
+			valid:   InboxSnooze{UserID: "u1", ID: id.String(), Until: time.Now().Add(time.Hour)},
+			invalid: InboxSnooze{}, wantID: "notifications.inbox.snooze",
+		},
+		{
+			valid:   events.IntakeRequest{DefinitionCode: "welcome", Recipients: []string{"u1"}},
+			invalid: events.IntakeRequest{}, wantID: "notifications.event.enqueue",
+		},
+		{
+			valid:   events.RetryRequest{EventID: id, IdempotencyKey: "retry-1"},
+			invalid: events.RetryRequest{}, wantID: "notifications.event.retry",
+		},
+	}
+	seen := make(map[string]struct{}, len(messages))
+	for _, test := range messages {
+		message, ok := test.valid.(command.Message)
+		if !ok {
+			t.Fatalf("%T does not implement command.Message", test.valid)
+		}
+		if got := message.Type(); got != test.wantID {
+			t.Fatalf("%T type = %q, want %q", test.valid, got, test.wantID)
+		}
+		if _, exists := seen[test.wantID]; exists {
+			t.Fatalf("duplicate command type %q", test.wantID)
+		}
+		seen[test.wantID] = struct{}{}
+		if err := command.ValidateMessage(test.valid); err != nil {
+			t.Fatalf("valid %T rejected: %v", test.valid, err)
+		}
+		if err := command.ValidateMessage(test.invalid); err == nil {
+			t.Fatalf("invalid %T passed go-command validation", test.invalid)
+		}
+	}
+}
+
+func TestHandlersDelegateExactlyOnceAndResultHandlersReturnReceipts(t *testing.T) {
 	ctx := context.Background()
-	defRepo := memory.NewDefinitionRepository()
-	tplRepo := memory.NewTemplateRepository()
-	translator := newTestTranslator(t)
-	tplSvc, err := templates.New(templates.Dependencies{
-		Repository: tplRepo,
-		Cache:      &cache.Nop{},
-		Logger:     &logger.Nop{},
-		Translator: translator,
+	definitionsSpy := &definitionServiceSpy{}
+	templatesSpy := &templateServiceSpy{}
+	preferencesSpy := &preferenceServiceSpy{}
+	inboxSpy := &inboxServiceSpy{}
+	eventsSpy := &eventServiceSpy{
+		enqueueReceipt: events.DispatchReceipt{EventID: uuid.New(), Status: receipts.StatusAccepted},
+		retryReceipt: events.DispatchReceipt{
+			EventID: uuid.New(), RetryOperationID: uuid.New(), Status: receipts.StatusProcessed,
+		},
+	}
+	catalog, catalogErr := NewCatalog(Dependencies{
+		Definitions: definitionsSpy,
+		Templates:   templatesSpy,
+		Preferences: preferencesSpy,
+		Inbox:       inboxSpy,
+		Events:      eventsSpy,
 	})
-	if err != nil {
-		t.Fatalf("templates service: %v", err)
+	if catalogErr != nil {
+		t.Fatalf("new catalog: %v", catalogErr)
 	}
-	prefRepo := memory.NewPreferenceRepository()
-	prefSvc, err := preferences.New(preferences.Dependencies{
-		Repository: prefRepo,
+	itemID := uuid.New().String()
+	assertCommandSucceeds(t, "definition", catalog.CreateDefinition.Execute(
+		ctx,
+		CreateDefinition{Code: "welcome"},
+	))
+	assertCommandSucceeds(t, "template", catalog.SaveTemplate.Execute(ctx, TemplateUpsert{
+		TemplateInput: templates.TemplateInput{Code: "welcome", Channel: "email", Locale: "en"},
+	}))
+	assertCommandSucceeds(t, "preference", catalog.UpsertPreference.Execute(ctx, preferences.PreferenceInput{
+		SubjectType: "user", SubjectID: "u1", DefinitionCode: "welcome", Channel: "email",
+	}))
+	assertCommandSucceeds(t, "mark read", catalog.InboxMarkRead.Execute(ctx, InboxMarkRead{
+		UserID: "u1", IDs: []string{itemID}, Read: true,
+	}))
+	assertCommandSucceeds(t, "dismiss", catalog.InboxDismiss.Execute(
+		ctx,
+		InboxDismiss{UserID: "u1", ID: itemID},
+	))
+	assertCommandSucceeds(t, "snooze", catalog.InboxSnooze.Execute(ctx, InboxSnooze{
+		UserID: "u1", ID: itemID, Until: time.Now().Add(time.Hour),
+	}))
+	enqueueReceipt, err := catalog.EnqueueEvent.Run(ctx, events.IntakeRequest{
+		DefinitionCode: "welcome", Recipients: []string{"u1"},
 	})
-	if err != nil {
-		t.Fatalf("preferences service: %v", err)
+	if err != nil || enqueueReceipt.EventID != eventsSpy.enqueueReceipt.EventID ||
+		enqueueReceipt.Status != eventsSpy.enqueueReceipt.Status {
+		t.Fatalf("enqueue result: receipt=%+v err=%v", enqueueReceipt, err)
 	}
-	inboxRepo := memory.NewInboxRepository()
-	inboxSvc, err := inbox.New(inbox.Dependencies{
-		Repository:  inboxRepo,
-		Broadcaster: &broadcaster.Nop{},
-		Logger:      &logger.Nop{},
+	retryReceipt, err := catalog.RetryEvent.Run(ctx, events.RetryRequest{
+		EventID: eventsSpy.retryReceipt.EventID, IdempotencyKey: "retry-1",
 	})
-	if err != nil {
-		t.Fatalf("inbox service: %v", err)
+	if err != nil || retryReceipt.EventID != eventsSpy.retryReceipt.EventID ||
+		retryReceipt.RetryOperationID != eventsSpy.retryReceipt.RetryOperationID ||
+		retryReceipt.Status != eventsSpy.retryReceipt.Status {
+		t.Fatalf("retry result: receipt=%+v err=%v", retryReceipt, err)
 	}
-	eventStub := &stubEvents{}
-
-	cat, err := NewCatalog(Dependencies{
-		Definitions: defRepo,
-		Templates:   tplSvc,
-		Preferences: prefSvc,
-		Inbox:       inboxSvc,
-		Events:      eventStub,
-	})
-	if err != nil {
-		t.Fatalf("catalog: %v", err)
-	}
-
-	if executeErr := cat.CreateDefinition.Execute(ctx, CreateDefinition{Code: "welcome", Name: "Welcome", AllowUpdate: true}); executeErr != nil {
-		t.Fatalf("create definition: %v", executeErr)
-	}
-	if executeErr := cat.SaveTemplate.Execute(ctx, TemplateUpsert{TemplateInput: templates.TemplateInput{Code: "welcome", Channel: "email", Locale: "en", Subject: "Hi", Body: "Body"}, AllowUpdate: true}); executeErr != nil {
-		t.Fatalf("save template: %v", executeErr)
-	}
-	if executeErr := cat.UpsertPreference.Execute(ctx, preferences.PreferenceInput{SubjectType: "user", SubjectID: "u1", DefinitionCode: "welcome", Channel: "email"}); executeErr != nil {
-		t.Fatalf("upsert preference: %v", executeErr)
-	}
-
-	item, err := inboxSvc.Create(ctx, inbox.CreateInput{UserID: "u1", Title: "Hello", Body: "World"})
-	if err != nil {
-		t.Fatalf("create inbox: %v", err)
-	}
-	if err := cat.InboxMarkRead.Execute(ctx, InboxMarkRead{UserID: "u1", IDs: []string{item.ID.String()}, Read: true}); err != nil {
-		t.Fatalf("mark read: %v", err)
-	}
-	if err := cat.InboxSnooze.Execute(ctx, InboxSnooze{UserID: "u1", ID: item.ID.String(), Until: time.Now().Add(time.Hour)}); err != nil {
-		t.Fatalf("snooze: %v", err)
-	}
-	if err := cat.InboxDismiss.Execute(ctx, InboxDismiss{UserID: "u1", ID: item.ID.String()}); err != nil {
-		t.Fatalf("dismiss: %v", err)
-	}
-
-	if err := cat.EnqueueEvent.Execute(ctx, events.IntakeRequest{DefinitionCode: "welcome", Recipients: []string{"u1"}}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	if len(eventStub.requests) != 1 {
-		t.Fatalf("expected enqueue call")
+	for operation, calls := range map[string]int{
+		"definition": definitionsSpy.calls,
+		"template":   templatesSpy.calls,
+		"preference": preferencesSpy.calls,
+		"mark read":  inboxSpy.markReadCalls,
+		"dismiss":    inboxSpy.dismissCalls,
+		"snooze":     inboxSpy.snoozeCalls,
+		"enqueue":    eventsSpy.enqueueCalls,
+		"retry":      eventsSpy.retryCalls,
+	} {
+		if calls != 1 {
+			t.Fatalf("%s delegated %d times", operation, calls)
+		}
 	}
 }
 
-func newTestTranslator(t *testing.T) i18n.Translator {
+func assertCommandSucceeds(t *testing.T, operation string, err error) {
 	t.Helper()
-	translations := i18n.Translations{
-		"en": &i18n.TranslationCatalog{Locale: i18n.Locale{Code: "en"}, Messages: map[string]i18n.Message{}},
-	}
-	store := i18n.NewStaticStore(translations)
-	translator, err := i18n.NewSimpleTranslator(store, i18n.WithTranslatorDefaultLocale("en"))
 	if err != nil {
-		t.Fatalf("translator: %v", err)
+		t.Fatalf("%s command: %v", operation, err)
 	}
-	return translator
 }
 
-type stubEvents struct {
-	requests []events.IntakeRequest
+type definitionServiceSpy struct{ calls int }
+
+func (s *definitionServiceSpy) Upsert(context.Context, definitions.UpsertInput) (*domain.NotificationDefinition, error) {
+	s.calls++
+	return &domain.NotificationDefinition{}, nil
 }
 
-func (s *stubEvents) Enqueue(ctx context.Context, req events.IntakeRequest) error {
-	s.requests = append(s.requests, req)
+type templateServiceSpy struct{ calls int }
+
+func (s *templateServiceSpy) Upsert(context.Context, templates.TemplateInput, bool) (*domain.NotificationTemplate, error) {
+	s.calls++
+	return &domain.NotificationTemplate{}, nil
+}
+
+type preferenceServiceSpy struct{ calls int }
+
+func (s *preferenceServiceSpy) Upsert(context.Context, preferences.PreferenceInput) (*domain.NotificationPreference, error) {
+	s.calls++
+	return &domain.NotificationPreference{}, nil
+}
+
+type inboxServiceSpy struct {
+	markReadCalls int
+	dismissCalls  int
+	snoozeCalls   int
+}
+
+func (s *inboxServiceSpy) MarkRead(context.Context, string, []string, bool) error {
+	s.markReadCalls++
 	return nil
+}
+
+func (s *inboxServiceSpy) Dismiss(context.Context, string, string) error {
+	s.dismissCalls++
+	return nil
+}
+
+func (s *inboxServiceSpy) Snooze(context.Context, string, string, int64) error {
+	s.snoozeCalls++
+	return nil
+}
+
+type eventServiceSpy struct {
+	enqueueCalls   int
+	retryCalls     int
+	enqueueReceipt events.DispatchReceipt
+	retryReceipt   events.DispatchReceipt
+}
+
+func (s *eventServiceSpy) EnqueueWithReceipt(context.Context, events.IntakeRequest) (events.DispatchReceipt, error) {
+	s.enqueueCalls++
+	return s.enqueueReceipt, nil
+}
+
+func (s *eventServiceSpy) RetryWithReceipt(context.Context, events.RetryRequest) (events.DispatchReceipt, error) {
+	s.retryCalls++
+	return s.retryReceipt, nil
 }

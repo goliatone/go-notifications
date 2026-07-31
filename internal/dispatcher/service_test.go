@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	"github.com/goliatone/go-notifications/pkg/links"
 	"github.com/goliatone/go-notifications/pkg/persistencepolicy"
+	prefsvc "github.com/goliatone/go-notifications/pkg/preferences"
 	"github.com/goliatone/go-notifications/pkg/privacy"
 	"github.com/goliatone/go-notifications/pkg/receipts"
 	"github.com/goliatone/go-notifications/pkg/templates"
@@ -196,6 +198,243 @@ func TestApplyResolvedLinksToPayloadAndMessage(t *testing.T) {
 	}
 	if _, ok := message.Metadata[links.ResolvedURLKey]; ok {
 		t.Fatalf("did not expect url in message metadata")
+	}
+}
+
+func TestRetryPlanIncludesOnlyFailedOutcomesAndCarriesLineage(t *testing.T) {
+	event := &domain.NotificationEvent{
+		Recipients: domain.StringList{"delivered-subject", "failed-subject"},
+	}
+	definition := &domain.NotificationDefinition{Channels: domain.StringList{"email"}}
+	delivered := &domain.NotificationMessage{
+		Receiver: "delivered-subject", Channel: "email", Status: domain.MessageStatusDelivered,
+	}
+	failed := &domain.NotificationMessage{
+		Receiver: "failed-subject", Channel: "email", Status: domain.MessageStatusFailed,
+	}
+	operationID := uuid.New()
+	jobs := buildDeliveryJobs(
+		event,
+		definition,
+		[]string{"email"},
+		persistencepolicy.Decision{
+			MessageMode:        persistencepolicy.Full,
+			InboxMode:          persistencepolicy.Full,
+			PersistLinkURLs:    true,
+			PersistLinkRecords: true,
+		},
+		map[string]*domain.NotificationMessage{
+			delivered.Receiver + "\x00" + delivered.Channel: delivered,
+			failed.Receiver + "\x00" + failed.Channel:       failed,
+		},
+		map[string][]string{
+			failed.Receiver + "\x00" + failed.Channel: {"smtp"},
+		},
+		DispatchOptions{RetryFailedOnly: true, RetryOperationID: operationID},
+	)
+	if len(jobs) != 1 || jobs[0].recipient != failed.Receiver || jobs[0].existing != failed {
+		t.Fatalf("retry plan included the wrong outcomes: %+v", jobs)
+	}
+	if jobs[0].retryOperationID != operationID {
+		t.Fatalf("retry lineage missing from job: %+v", jobs[0])
+	}
+}
+
+func TestRetryProviderPlansResumeOnlyUnsuccessfulProviders(t *testing.T) {
+	ctx := context.Background()
+	attempts := memory.NewDeliveryRepository()
+	message := &domain.NotificationMessage{
+		RecordMeta:   domain.RecordMeta{ID: uuid.New()},
+		Receiver:     "subject-1",
+		Channel:      "email",
+		ProviderPlan: domain.StringList{"provider-a", "provider-b"},
+		Status:       domain.MessageStatusDelivered,
+	}
+	for _, attempt := range []domain.DeliveryAttempt{
+		{MessageID: message.ID, Adapter: "provider-a", Status: domain.AttemptStatusSucceeded},
+		{MessageID: message.ID, Adapter: "provider-b", Status: domain.AttemptStatusFailed},
+	} {
+		if err := attempts.Create(ctx, &attempt); err != nil {
+			t.Fatalf("create attempt: %v", err)
+		}
+	}
+	service := &Service{
+		messages: memory.NewMessageRepository(),
+		attempts: attempts,
+		registry: adapters.NewRegistry(
+			&testAdapter{name: "provider-a", channels: []string{"email"}},
+			&testAdapter{name: "provider-b", channels: []string{"email"}},
+		),
+	}
+	key := message.Receiver + "\x00" + message.Channel
+	operationID := uuid.New()
+	plans, err := service.retryProviderPlans(ctx, DispatchOptions{
+		RetryFailedOnly: true, RetryOperationID: operationID,
+	}, map[string]*domain.NotificationMessage{key: message})
+	if err != nil || !slices.Equal(plans[key], []string{"provider-b"}) {
+		t.Fatalf("partial provider plan was not scoped to the failure: plan=%v err=%v", plans, err)
+	}
+
+	// A crash after the message is changed to pending must not strand the
+	// provider: the durable provider plan and attempts still select it.
+	message.Status = domain.MessageStatusPending
+	message.RetryOperationID = operationID
+	plans, err = service.retryProviderPlans(ctx, DispatchOptions{
+		RetryFailedOnly: true, RetryOperationID: operationID,
+	}, map[string]*domain.NotificationMessage{key: message})
+	if err != nil || !slices.Equal(plans[key], []string{"provider-b"}) {
+		t.Fatalf("pending retry could not resume: plan=%v err=%v", plans, err)
+	}
+
+	if createErr := attempts.Create(ctx, &domain.DeliveryAttempt{
+		MessageID: message.ID, RetryOperationID: operationID,
+		Adapter: "provider-b", Status: domain.AttemptStatusSucceeded,
+	}); createErr != nil {
+		t.Fatalf("create successful retry attempt: %v", createErr)
+	}
+	plans, err = service.retryProviderPlans(ctx, DispatchOptions{
+		RetryFailedOnly: true, RetryOperationID: operationID,
+	}, map[string]*domain.NotificationMessage{key: message})
+	if err != nil || len(plans) != 0 {
+		t.Fatalf("completed crashed retry should replay without another send: plan=%v err=%v", plans, err)
+	}
+	message.RetryOperationID = uuid.Nil
+	if _, err = service.retryProviderPlans(ctx, DispatchOptions{
+		RetryFailedOnly: true,
+	}, map[string]*domain.NotificationMessage{key: message}); err == nil {
+		t.Fatalf("zero retry operation incorrectly inherited empty lineage")
+	}
+}
+
+func TestRetryUsesDurableEventAndProviderPlanAfterConfigurationChanges(t *testing.T) {
+	ctx := context.Background()
+	providerA := &testAdapter{name: "provider-a", channels: []string{"email"}}
+	providerB := &testAdapter{
+		name: "provider-b", channels: []string{"email"},
+		err: errors.New("provider b unavailable"),
+	}
+	service, messages, templateService := newTestDispatcher(
+		t, nil, nil, nil, links.FailurePolicy{}, providerA,
+	)
+	service.registry = adapters.NewRegistry(providerA, providerB)
+	seedTemplate(t, templateService, "durable-email", "email")
+	definition := &domain.NotificationDefinition{
+		Code: "durable-plan", Channels: domain.StringList{"email"},
+		TemplateKeys: domain.StringList{"email:durable-email"},
+	}
+	if err := service.definitions.Create(ctx, definition); err != nil {
+		t.Fatalf("create definition: %v", err)
+	}
+	event := &domain.NotificationEvent{
+		DefinitionCode: definition.Code,
+		Recipients:     domain.StringList{testRecipient},
+		Channels:       domain.StringList{"email"},
+		Locale:         "en",
+	}
+	if err := service.events.Create(ctx, event); err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+	initial, err := service.DispatchWithReceipt(ctx, event, DispatchOptions{})
+	if err != nil || initial.Status != receipts.StatusPartial {
+		t.Fatalf("initial provider partial failed: receipt=%+v err=%v", initial, err)
+	}
+	storedMessages, err := messages.ListByEvent(ctx, event.ID)
+	if err != nil || len(storedMessages) != 1 {
+		t.Fatalf("load durable message: messages=%+v err=%v", storedMessages, err)
+	}
+	if !slices.Equal(storedMessages[0].ProviderPlan, domain.StringList{"provider-a", "provider-b"}) ||
+		storedMessages[0].Locale != "en" {
+		t.Fatalf("original delivery plan was not persisted: %+v", storedMessages[0])
+	}
+
+	// Current definition and registry state no longer describe the original
+	// delivery. Retry must still use the event/message plan.
+	definition.Channels = domain.StringList{"sms"}
+	definition.TemplateKeys = domain.StringList{"sms:changed-sms"}
+	if updateErr := service.definitions.Update(ctx, definition); updateErr != nil {
+		t.Fatalf("mutate definition: %v", updateErr)
+	}
+	providerB.err = nil
+	providerC := &testAdapter{name: "provider-c", channels: []string{"email"}}
+	service.registry = adapters.NewRegistry(providerB, providerC)
+	retryReceipt, err := service.DispatchWithReceipt(ctx, event, DispatchOptions{
+		RetryFailedOnly: true, RetryOperationID: uuid.New(),
+	})
+	if err != nil || retryReceipt.Status != receipts.StatusProcessed {
+		t.Fatalf("durable retry failed: receipt=%+v err=%v", retryReceipt, err)
+	}
+	if providerA.Count() != 1 || providerB.Count() != 2 || providerC.Count() != 0 {
+		t.Fatalf("retry did not preserve failed-provider plan: a=%d b=%d c=%d",
+			providerA.Count(), providerB.Count(), providerC.Count())
+	}
+}
+
+func TestExplicitAndPreferenceProviderRoutesAreExclusive(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		channel    string
+		preference bool
+	}{
+		{name: "explicit provider", channel: "email:provider-b"},
+		{name: "preference override", channel: "email", preference: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			providerA := &testAdapter{name: "provider-a", channels: []string{"email"}}
+			providerB := &testAdapter{name: "provider-b", channels: []string{"email"}}
+			service, messages, templateService := newTestDispatcher(
+				t, nil, nil, nil, links.FailurePolicy{}, providerA,
+			)
+			service.registry = adapters.NewRegistry(providerA, providerB)
+			seedTemplate(t, templateService, "exclusive-email", "email")
+			definition := &domain.NotificationDefinition{
+				Code: "exclusive-route", Channels: domain.StringList{test.channel},
+				TemplateKeys: domain.StringList{"email:exclusive-email"},
+			}
+			if err := service.definitions.Create(ctx, definition); err != nil {
+				t.Fatalf("create definition: %v", err)
+			}
+			event := &domain.NotificationEvent{
+				DefinitionCode: definition.Code,
+				Recipients:     domain.StringList{testRecipient},
+				Channels:       domain.StringList{test.channel},
+				Locale:         "en",
+			}
+			if err := service.events.Create(ctx, event); err != nil {
+				t.Fatalf("create event: %v", err)
+			}
+			if test.preference {
+				preferenceService, err := prefsvc.New(prefsvc.Dependencies{
+					Repository: memory.NewPreferenceRepository(),
+					Logger:     &logger.Nop{},
+				})
+				if err != nil {
+					t.Fatalf("create preference service: %v", err)
+				}
+				enabled := true
+				provider := "provider-b"
+				if _, err := preferenceService.Create(ctx, prefsvc.PreferenceInput{
+					SubjectType: "user", SubjectID: testRecipient,
+					DefinitionCode: definition.Code, Channel: "email",
+					Enabled: &enabled, Provider: &provider,
+				}); err != nil {
+					t.Fatalf("create preference: %v", err)
+				}
+				service.preferences = preferenceService
+			}
+			receipt, err := service.DispatchWithReceipt(ctx, event, DispatchOptions{})
+			if err != nil || receipt.Status != receipts.StatusProcessed {
+				t.Fatalf("dispatch exclusive route: receipt=%+v err=%v", receipt, err)
+			}
+			if providerA.Count() != 0 || providerB.Count() != 1 {
+				t.Fatalf("exclusive route broadcast to wrong providers: a=%d b=%d", providerA.Count(), providerB.Count())
+			}
+			stored, err := messages.ListByEvent(ctx, event.ID)
+			if err != nil || len(stored) != 1 ||
+				!slices.Equal(stored[0].ProviderPlan, domain.StringList{"provider-b"}) {
+				t.Fatalf("exclusive provider plan not persisted: messages=%+v err=%v", stored, err)
+			}
+		})
 	}
 }
 

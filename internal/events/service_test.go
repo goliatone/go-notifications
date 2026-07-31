@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,13 +53,11 @@ func TestConcurrentScopedIdempotencyCreatesOneEvent(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, 20)
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, enqueueErr := service.EnqueueWithReceipt(ctx, req); enqueueErr != nil {
 				errCh <- enqueueErr
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errCh)
@@ -80,7 +79,7 @@ func TestConcurrentScopedIdempotencyCreatesOneEvent(t *testing.T) {
 func TestConcurrentDigestIntakeCreatesOneDurableWindow(t *testing.T) {
 	ctx := context.Background()
 	defRepo, evtRepo, disp, _ := setupDeps(t)
-	publications := memory.NewPublicationRepository()
+	publications := memory.NewPublicationRepository(evtRepo)
 	q := &lockedQueue{}
 	service, err := NewService(Dependencies{
 		Definitions: defRepo, Events: evtRepo, Publications: publications,
@@ -92,9 +91,7 @@ func TestConcurrentDigestIntakeCreatesOneDurableWindow(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, 20)
 	for idx := range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, enqueueErr := service.EnqueueWithReceipt(ctx, IntakeRequest{
 				DefinitionCode: "welcome",
 				Recipients:     []string{fmt.Sprintf("subject-%d", idx)},
@@ -102,7 +99,7 @@ func TestConcurrentDigestIntakeCreatesOneDurableWindow(t *testing.T) {
 			}); enqueueErr != nil {
 				errCh <- enqueueErr
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errCh)
@@ -207,7 +204,7 @@ func TestScheduledIntakeRejectsNopQueue(t *testing.T) {
 	ctx := context.Background()
 	defRepo, evtRepo, disp, _ := setupDeps(t)
 	service, err := NewService(Dependencies{
-		Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(),
+		Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(evtRepo),
 		Dispatcher: disp, Queue: &queue.Nop{}, Logger: &logger.Nop{},
 	})
 	if err != nil {
@@ -220,6 +217,40 @@ func TestScheduledIntakeRejectsNopQueue(t *testing.T) {
 	var safe privacy.SafeError
 	if !errors.As(err, &safe) || safe.Code != "durable_queue_required" {
 		t.Fatalf("expected durable queue error, got %v", err)
+	}
+	if recoverErr := service.RecoverPending(ctx, 10); !errors.As(recoverErr, &safe) || safe.Code != "durable_queue_required" {
+		t.Fatalf("expected recovery to reject no-op queue, got %v", recoverErr)
+	}
+}
+
+func TestSubsecondFutureScheduleUsesDurablePublication(t *testing.T) {
+	ctx := context.Background()
+	defRepo, evtRepo, disp, q := setupDeps(t)
+	service := newTestService(t, defRepo, evtRepo, disp, q)
+	receipt, err := service.EnqueueWithReceipt(ctx, IntakeRequest{
+		DefinitionCode: "welcome",
+		Recipients:     []string{"subject-1"},
+		ScheduleAt:     time.Now().Add(500 * time.Millisecond),
+	})
+	if err != nil {
+		t.Fatalf("enqueue short schedule: %v", err)
+	}
+	if receipt.Status != receipts.StatusScheduled || len(q.jobs) != 1 || len(disp.events) != 0 {
+		t.Fatalf("short future schedule bypassed durable publication: receipt=%+v jobs=%d dispatches=%d", receipt, len(q.jobs), len(disp.events))
+	}
+}
+
+func TestDigestIdentityIsTextSafeAndUnambiguous(t *testing.T) {
+	first := digestIdentity(IntakeRequest{
+		DefinitionCode: "bc", IdempotencyScope: "a",
+		Digest: &DigestOptions{Key: "d"},
+	})
+	second := digestIdentity(IntakeRequest{
+		DefinitionCode: "c", IdempotencyScope: "ab",
+		Digest: &DigestOptions{Key: "d"},
+	})
+	if first == second || strings.ContainsRune(first, '\x00') || len(first) != sha256.Size*2 {
+		t.Fatalf("digest identity is not a safe, unambiguous hash: first=%q second=%q", first, second)
 	}
 }
 
@@ -282,7 +313,7 @@ func TestImmediateTransientSchemaAndCollision(t *testing.T) {
 func TestPublicationRecoveryUsesStableQueueKey(t *testing.T) {
 	ctx := context.Background()
 	defRepo, evtRepo, disp, _ := setupDeps(t)
-	publications := memory.NewPublicationRepository()
+	publications := memory.NewPublicationRepository(evtRepo)
 	failing := &failingQueue{err: errors.New("queue unavailable")}
 	service, err := NewService(Dependencies{
 		Definitions: defRepo, Events: evtRepo, Publications: publications,
@@ -311,7 +342,7 @@ func TestPublicationRecoveryUsesStableQueueKey(t *testing.T) {
 func TestFailedPublicationReplayDoesNotRedispatch(t *testing.T) {
 	ctx := context.Background()
 	defRepo, evtRepo, disp, q := setupDeps(t)
-	publications := memory.NewPublicationRepository()
+	publications := memory.NewPublicationRepository(evtRepo)
 	publication := &domain.NotificationPublication{
 		Kind: "scheduled", QueueKey: "notification-publication:" + uuid.NewString(),
 		Status: domain.PublicationStatusFailed, ErrorCode: "notification_delivery_failed",
@@ -346,7 +377,7 @@ func TestFailedPublicationReplayDoesNotRedispatch(t *testing.T) {
 func TestExpiredPublicationClaimRecoversOnce(t *testing.T) {
 	ctx := context.Background()
 	defRepo, evtRepo, disp, q := setupDeps(t)
-	publications := memory.NewPublicationRepository()
+	publications := memory.NewPublicationRepository(evtRepo)
 	publication := &domain.NotificationPublication{
 		Kind: "scheduled", QueueKey: "notification-publication:" + uuid.NewString(),
 		Status: domain.PublicationStatusProcessing, ClaimUntil: time.Now().Add(-time.Minute),
@@ -378,6 +409,46 @@ func TestExpiredPublicationClaimRecoversOnce(t *testing.T) {
 	}
 }
 
+func TestActivePublicationWorkerReturnsCurrentMemberReceipt(t *testing.T) {
+	ctx := context.Background()
+	defRepo, evtRepo, disp, q := setupDeps(t)
+	publications := memory.NewPublicationRepository(evtRepo)
+	publication := &domain.NotificationPublication{
+		Kind: "scheduled", QueueKey: "notification-publication:" + uuid.NewString(),
+		Status: domain.PublicationStatusProcessing, ClaimUntil: time.Now().Add(time.Minute),
+	}
+	if err := publications.Create(ctx, publication); err != nil {
+		t.Fatalf("create publication: %v", err)
+	}
+	event := &domain.NotificationEvent{
+		DefinitionCode: "welcome", Recipients: domain.StringList{"subject-1"},
+		PublicationID: publication.ID, Status: domain.EventStatusDispatching,
+		CorrelationID: "correlation-1", RequestID: "request-1",
+	}
+	if err := evtRepo.Create(ctx, event); err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+	service, err := NewService(Dependencies{
+		Definitions: defRepo, Events: evtRepo, Publications: publications,
+		Dispatcher: disp, Queue: q, Logger: &logger.Nop{},
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	receipt, err := service.ProcessPublication(ctx, PublicationJobPayload{PublicationID: publication.ID})
+	if err != nil {
+		t.Fatalf("process duplicate worker: %v", err)
+	}
+	if receipt.EventID != event.ID || receipt.PublicationID != publication.ID ||
+		receipt.Status != receipts.StatusDispatching || !receipt.Replay ||
+		receipt.CorrelationID != event.CorrelationID || receipt.RequestID != event.RequestID {
+		t.Fatalf("duplicate worker returned stale generic receipt: %+v", receipt)
+	}
+	if len(disp.events) != 0 {
+		t.Fatalf("duplicate worker redispatched event")
+	}
+}
+
 func TestRetryIsDurableAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	defRepo, evtRepo, disp, q := setupDeps(t)
@@ -389,7 +460,7 @@ func TestRetryIsDurableAndIdempotent(t *testing.T) {
 		t.Fatalf("create event: %v", err)
 	}
 	service, err := NewService(Dependencies{
-		Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(),
+		Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(evtRepo),
 		RetryOperations: memory.NewRetryOperationRepository(), Dispatcher: disp,
 		Queue: q, Logger: &logger.Nop{},
 	})
@@ -430,7 +501,7 @@ func TestRetryRecoversExpiredOperationAndEventLeases(t *testing.T) {
 		t.Fatalf("seed retry operation: %v", err)
 	}
 	service, err := NewService(Dependencies{
-		Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(),
+		Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(evtRepo),
 		RetryOperations: operations, Dispatcher: disp, Queue: q, Logger: &logger.Nop{},
 	})
 	if err != nil {
@@ -471,7 +542,7 @@ func TestConcurrentRetryKeysSerializeOneDelivery(t *testing.T) {
 	}
 	disp := newBlockingDispatcher()
 	service, err := NewService(Dependencies{
-		Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(),
+		Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(evtRepo),
 		RetryOperations: memory.NewRetryOperationRepository(), Dispatcher: disp,
 		Queue: &stubQueue{}, Logger: &logger.Nop{},
 	})
@@ -486,10 +557,11 @@ func TestConcurrentRetryKeysSerializeOneDelivery(t *testing.T) {
 	<-disp.started
 
 	second, secondErr := service.RetryWithReceipt(ctx, RetryRequest{EventID: event.ID, IdempotencyKey: "retry-b"})
-	if secondErr != nil {
-		t.Fatalf("concurrent retry should return current state: %v", secondErr)
+	var safe privacy.SafeError
+	if !errors.As(secondErr, &safe) || safe.Code != "retry_not_eligible" {
+		t.Fatalf("expected concurrent retry conflict, got receipt=%+v err=%#v", second, secondErr)
 	}
-	if second.Status != receipts.StatusRetrying || !second.Replay {
+	if second.Status != receipts.StatusRetrying {
 		t.Fatalf("expected current retrying receipt, got %+v", second)
 	}
 	close(disp.release)
@@ -498,6 +570,52 @@ func TestConcurrentRetryKeysSerializeOneDelivery(t *testing.T) {
 	}
 	if disp.count() != 1 {
 		t.Fatalf("different retry keys dispatched %d times", disp.count())
+	}
+}
+
+func TestConcurrentSameRetryKeyReplaysWithoutDuplicate(t *testing.T) {
+	ctx := context.Background()
+	defRepo := memory.NewDefinitionRepository()
+	if err := defRepo.Create(ctx, &domain.NotificationDefinition{Code: "welcome"}); err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+	evtRepo := memory.NewEventRepository()
+	event := &domain.NotificationEvent{
+		DefinitionCode: "welcome", Recipients: domain.StringList{"subject-1"},
+		Status: domain.EventStatusFailed,
+	}
+	if err := evtRepo.Create(ctx, event); err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+	disp := newBlockingDispatcher()
+	service, err := NewService(Dependencies{
+		Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(evtRepo),
+		RetryOperations: memory.NewRetryOperationRepository(), Dispatcher: disp,
+		Queue: &stubQueue{}, Logger: &logger.Nop{},
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, retryErr := service.RetryWithReceipt(ctx, RetryRequest{EventID: event.ID, IdempotencyKey: "same"})
+		firstDone <- retryErr
+	}()
+	<-disp.started
+
+	second, secondErr := service.RetryWithReceipt(ctx, RetryRequest{EventID: event.ID, IdempotencyKey: "same"})
+	if secondErr != nil {
+		t.Fatalf("same retry replay: %v", secondErr)
+	}
+	if second.Status != receipts.StatusRetrying || !second.Replay {
+		t.Fatalf("expected in-progress replay receipt, got %+v", second)
+	}
+	close(disp.release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first retry: %v", err)
+	}
+	if disp.count() != 1 {
+		t.Fatalf("same retry key dispatched %d times", disp.count())
 	}
 }
 
@@ -513,7 +631,7 @@ func TestRetryRejectsSuccessfulAndTransientRequiredEvents(t *testing.T) {
 		{name: "successful", status: domain.EventStatusProcessed, wantCode: "retry_not_eligible"},
 		{
 			name: "definition requires transient", status: domain.EventStatusFailed,
-			policy: domain.JSONMap{"transient_required_keys": []any{"credential_url"}},
+			policy:   domain.JSONMap{"transient_required_keys": []any{"credential_url"}},
 			wantCode: "transient_retry_forbidden",
 		},
 	} {
@@ -531,7 +649,7 @@ func TestRetryRejectsSuccessfulAndTransientRequiredEvents(t *testing.T) {
 			}
 			disp := &stubDispatcher{}
 			service, err := NewService(Dependencies{
-				Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(),
+				Definitions: defRepo, Events: evtRepo, Publications: memory.NewPublicationRepository(evtRepo),
 				RetryOperations: memory.NewRetryOperationRepository(), Dispatcher: disp,
 				Queue: &stubQueue{}, Logger: &logger.Nop{},
 			})
@@ -661,7 +779,7 @@ func newTestService(t *testing.T, defRepo *memory.DefinitionRepository, evtRepo 
 	service, err := NewService(Dependencies{
 		Definitions:  defRepo,
 		Events:       evtRepo,
-		Publications: memory.NewPublicationRepository(),
+		Publications: memory.NewPublicationRepository(evtRepo),
 		Dispatcher:   disp,
 		Queue:        q,
 		Logger:       &logger.Nop{},

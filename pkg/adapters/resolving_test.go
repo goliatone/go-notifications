@@ -11,9 +11,16 @@ import (
 
 func TestResolvingMessengerMutatesOnlyDeliveryCopy(t *testing.T) {
 	inner := &captureMessenger{name: "smtp"}
-	resolver := staticResolver{result: ResolvedRecipient{Destination: "person@example.com", Locale: "fr"}}
+	resolver := staticResolver{result: ResolvedRecipient{
+		Destination: "person@example.com",
+		Locale:      "fr",
+		Metadata:    map[string]any{"directory_hint": "safe"},
+	}}
 	messenger := ResolvingMessenger{Inner: inner, Resolver: resolver}
-	original := Message{ID: "message-1", Channel: "email", To: "subject-123", Locale: "en"}
+	original := Message{
+		ID: "message-1", Channel: "email", To: "subject-123", Locale: "en",
+		Metadata: map[string]any{"source": "original"},
+	}
 
 	if err := messenger.Send(context.Background(), original); err != nil {
 		t.Fatalf("send: %v", err)
@@ -23,6 +30,12 @@ func TestResolvingMessengerMutatesOnlyDeliveryCopy(t *testing.T) {
 	}
 	if inner.message.To != "person@example.com" || inner.message.Locale != "fr" {
 		t.Fatalf("resolved copy not delivered: %+v", inner.message)
+	}
+	if inner.message.Metadata["source"] != "original" || inner.message.Metadata["directory_hint"] != "safe" {
+		t.Fatalf("resolved metadata was not merged: %+v", inner.message.Metadata)
+	}
+	if _, ok := original.Metadata["directory_hint"]; ok {
+		t.Fatalf("original metadata was mutated: %+v", original.Metadata)
 	}
 }
 

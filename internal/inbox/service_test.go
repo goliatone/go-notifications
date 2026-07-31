@@ -51,7 +51,8 @@ func TestServiceCreateAndList(t *testing.T) {
 func TestServiceMarkReadSnoozeDismiss(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewInboxRepository()
-	svc := newTestService(t, repo, captureBroadcaster())
+	events := captureBroadcaster()
+	svc := newTestService(t, repo, events)
 
 	item, err := svc.Create(ctx, CreateInput{
 		UserID: "user-2",
@@ -63,6 +64,10 @@ func TestServiceMarkReadSnoozeDismiss(t *testing.T) {
 	}
 	if actionErr := svc.MarkRead(ctx, "user-2", []uuid.UUID{item.ID}, true); actionErr != nil {
 		t.Fatalf("mark read: %v", actionErr)
+	}
+	payload, ok := events.events[len(events.events)-1].Payload.(map[string]any)
+	if !ok || payload["unread"] != false {
+		t.Fatalf("mark-read broadcast contained stale state: %+v", events.events)
 	}
 	if actionErr := svc.Snooze(ctx, "user-2", item.ID, time.Now().Add(2*time.Hour)); actionErr != nil {
 		t.Fatalf("snooze: %v", actionErr)
