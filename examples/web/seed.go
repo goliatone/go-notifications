@@ -173,227 +173,227 @@ func seedDefinitions(ctx context.Context, app *App) error {
 	return nil
 }
 
-func seedTemplates(ctx context.Context, app *App) error {
-	templateData := []commands.TemplateUpsert{
-		// Welcome email - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "welcome.email",
-				Channel: "email",
-				Locale:  "en",
-				Subject: "Welcome to Notification Center!",
-				Body:    "Hello {{ name }},\n\nWelcome to our notification system. You can manage your preferences at any time.\n\nBest regards,\nThe Team",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+var demoTemplateData = []commands.TemplateUpsert{
+	// Welcome email - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "welcome.email",
+			Channel: "email",
+			Locale:  "en",
+			Subject: "Welcome to Notification Center!",
+			Body:    "Hello {{ name }},\n\nWelcome to our notification system. You can manage your preferences at any time.\n\nBest regards,\nThe Team",
+			Format:  "text",
 		},
-		// Welcome email - Spanish
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "welcome.email",
-				Channel: "email",
-				Locale:  "es",
-				Subject: "¡Bienvenido al Centro de Notificaciones!",
-				Body:    "Hola {{ name }},\n\n¡Bienvenido a nuestro sistema de notificaciones! Puedes gestionar tus preferencias en cualquier momento.\n\nSaludos,\nEl Equipo",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Welcome email - Spanish
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "welcome.email",
+			Channel: "email",
+			Locale:  "es",
+			Subject: "¡Bienvenido al Centro de Notificaciones!",
+			Body:    "Hola {{ name }},\n\n¡Bienvenido a nuestro sistema de notificaciones! Puedes gestionar tus preferencias en cualquier momento.\n\nSaludos,\nEl Equipo",
+			Format:  "text",
 		},
-		// Welcome in-app - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "welcome.in-app",
-				Channel: "in-app",
-				Locale:  "en",
-				Subject: "Welcome!",
-				Body:    "Welcome {{ name }}! Thanks for joining our notification center.",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Welcome in-app - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "welcome.in-app",
+			Channel: "in-app",
+			Locale:  "en",
+			Subject: "Welcome!",
+			Body:    "Welcome {{ name }}! Thanks for joining our notification center.",
+			Format:  "text",
 		},
-		// Welcome in-app - Spanish
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "welcome.in-app",
-				Channel: "in-app",
-				Locale:  "es",
-				Subject: "¡Bienvenido!",
-				Body:    "¡Bienvenido {{ name }}! Gracias por unirte a nuestro centro de notificaciones.",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Welcome in-app - Spanish
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "welcome.in-app",
+			Channel: "in-app",
+			Locale:  "es",
+			Subject: "¡Bienvenido!",
+			Body:    "¡Bienvenido {{ name }}! Gracias por unirte a nuestro centro de notificaciones.",
+			Format:  "text",
 		},
-		// System alert email - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "system_alert.email",
-				Channel: "email",
-				Locale:  "en",
-				Subject: "System Alert: {{ title }}",
-				Body:    "{{ message }}\n\nPlease check the dashboard for more details.",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// System alert email - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "system_alert.email",
+			Channel: "email",
+			Locale:  "en",
+			Subject: "System Alert: {{ title }}",
+			Body:    "{{ message }}\n\nPlease check the dashboard for more details.",
+			Format:  "text",
 		},
-		// System alert in-app - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "system_alert.in-app",
-				Channel: "in-app",
-				Locale:  "en",
-				Subject: "{{ title }}",
-				Body:    "{{ message }}",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// System alert in-app - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "system_alert.in-app",
+			Channel: "in-app",
+			Locale:  "en",
+			Subject: "{{ title }}",
+			Body:    "{{ message }}",
+			Format:  "text",
 		},
-		// Comment reply in-app - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "comment_reply.in-app",
-				Channel: "in-app",
-				Locale:  "en",
-				Subject: "New Reply",
-				Body:    "{{ author }} replied to your comment: \"{{ message }}\"",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Comment reply in-app - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "comment_reply.in-app",
+			Channel: "in-app",
+			Locale:  "en",
+			Subject: "New Reply",
+			Body:    "{{ author }} replied to your comment: \"{{ message }}\"",
+			Format:  "text",
 		},
-		// Comment reply in-app - Spanish
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "comment_reply.in-app",
-				Channel: "in-app",
-				Locale:  "es",
-				Subject: "Nueva Respuesta",
-				Body:    "{{ author }} respondió a tu comentario: \"{{ message }}\"",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Comment reply in-app - Spanish
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "comment_reply.in-app",
+			Channel: "in-app",
+			Locale:  "es",
+			Subject: "Nueva Respuesta",
+			Body:    "{{ author }} respondió a tu comentario: \"{{ message }}\"",
+			Format:  "text",
 		},
-		// Test email - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "test_notification.email",
-				Channel: "email",
-				Locale:  "en",
-				Subject: "Test Notification",
-				Body:    "Hello {{ name }},\n\n{{ message }}\n\nThis is a test of the multi-channel notification system.",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Test email - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "test_notification.email",
+			Channel: "email",
+			Locale:  "en",
+			Subject: "Test Notification",
+			Body:    "Hello {{ name }},\n\n{{ message }}\n\nThis is a test of the multi-channel notification system.",
+			Format:  "text",
 		},
-		// Test in-app - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "test_notification.in-app",
-				Channel: "in-app",
-				Locale:  "en",
-				Subject: "Test Notification",
-				Body:    "{{ message }}",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Test in-app - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "test_notification.in-app",
+			Channel: "in-app",
+			Locale:  "en",
+			Subject: "Test Notification",
+			Body:    "{{ message }}",
+			Format:  "text",
 		},
-		// Admin message in-app - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "admin_message.in-app",
-				Channel: "in-app",
-				Locale:  "en",
-				Subject: "Message from Admin",
-				Body:    "{{ message }}",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Admin message in-app - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "admin_message.in-app",
+			Channel: "in-app",
+			Locale:  "en",
+			Subject: "Message from Admin",
+			Body:    "{{ message }}",
+			Format:  "text",
 		},
-		// Admin message chat - English (for Slack/Telegram)
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "admin_message.chat",
-				Channel: "chat",
-				Locale:  "en",
-				Subject: "Admin Message",
-				Body:    "📢 *Admin Message*\n{{ message }}",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Admin message chat - English (for Slack/Telegram)
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "admin_message.chat",
+			Channel: "chat",
+			Locale:  "en",
+			Subject: "Admin Message",
+			Body:    "📢 *Admin Message*\n{{ message }}",
+			Format:  "text",
 		},
-		// Test chat - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "test_notification.chat",
-				Channel: "chat",
-				Locale:  "en",
-				Subject: "Test Notification",
-				Body:    "🧪 {{ message }}",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Test chat - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "test_notification.chat",
+			Channel: "chat",
+			Locale:  "en",
+			Subject: "Test Notification",
+			Body:    "🧪 {{ message }}",
+			Format:  "text",
 		},
-		// Test SMS - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "test_notification.sms",
-				Channel: "sms",
-				Locale:  "en",
-				Subject: "",
-				Body:    "{{ message }}",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Test SMS - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "test_notification.sms",
+			Channel: "sms",
+			Locale:  "en",
+			Subject: "Test Notification",
+			Body:    "{{ message }}",
+			Format:  "text",
 		},
-		// System alert SMS - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "system_alert.sms",
-				Channel: "sms",
-				Locale:  "en",
-				Subject: "",
-				Body:    "ALERT: {{ message }}",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// System alert SMS - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "system_alert.sms",
+			Channel: "sms",
+			Locale:  "en",
+			Subject: "System Alert",
+			Body:    "ALERT: {{ message }}",
+			Format:  "text",
 		},
-		// System alert Slack - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "system_alert.slack",
-				Channel: "slack",
-				Locale:  "en",
-				Subject: "System Alert",
-				Body:    "🚨 *{{ title }}*\n{{ message }}",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// System alert Slack - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "system_alert.slack",
+			Channel: "slack",
+			Locale:  "en",
+			Subject: "System Alert",
+			Body:    "🚨 *{{ title }}*\n{{ message }}",
+			Format:  "text",
 		},
-		// Welcome Slack - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "welcome.slack",
-				Channel: "slack",
-				Locale:  "en",
-				Subject: "Welcome!",
-				Body:    "👋 Welcome {{ name }}! Thanks for joining our notification center.",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Welcome Slack - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "welcome.slack",
+			Channel: "slack",
+			Locale:  "en",
+			Subject: "Welcome!",
+			Body:    "👋 Welcome {{ name }}! Thanks for joining our notification center.",
+			Format:  "text",
 		},
-		// Comment reply chat - English
-		{
-			TemplateInput: templates.TemplateInput{
-				Code:    "comment_reply.chat",
-				Channel: "chat",
-				Locale:  "en",
-				Subject: "New Reply",
-				Body:    "💬 {{ author }} replied: \"{{ message }}\"",
-				Format:  "text",
-			},
-			AllowUpdate: true,
+		AllowUpdate: true,
+	},
+	// Comment reply chat - English
+	{
+		TemplateInput: templates.TemplateInput{
+			Code:    "comment_reply.chat",
+			Channel: "chat",
+			Locale:  "en",
+			Subject: "New Reply",
+			Body:    "💬 {{ author }} replied: \"{{ message }}\"",
+			Format:  "text",
 		},
-	}
+		AllowUpdate: true,
+	},
+}
 
-	for _, tmpl := range templateData {
+func seedTemplates(ctx context.Context, app *App) error {
+	for _, tmpl := range demoTemplateData {
 		if err := app.Catalog.SaveTemplate.Execute(ctx, tmpl); err != nil {
 			return fmt.Errorf("seed template %s/%s/%s: %w", tmpl.Code, tmpl.Channel, tmpl.Locale, err)
 		}

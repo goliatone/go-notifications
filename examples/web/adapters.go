@@ -33,110 +33,142 @@ func BuildAdapters(lgr logger.Logger, cfg config.AdapterConfig, dir *Directory, 
 		AdapterConfig:   cfg,
 	}
 
-	wrap := func(m adapters.Messenger) adapters.Messenger {
-		if dir == nil {
-			return m
-		}
-		return ResolvingMessenger{
-			inner:     m,
-			directory: dir,
-			secrets:   resolver,
-			logs:      logs,
-			logger:    lgr,
-		}
-	}
-
 	// Console adapter is always enabled
-	consoleAdapter := wrap(console.New(lgr))
+	consoleAdapter := wrapMessenger(console.New(lgr), dir, resolver, logs, lgr)
 	registry.Adapters = append(registry.Adapters, consoleAdapter)
 	registry.EnabledAdapters = append(registry.EnabledAdapters, "console")
 	registry.addChannels("console", "email", "email:console")
 
-	// Slack
+	registry.addChatAdapters(lgr, dir, resolver, logs)
+	registry.addTwilio(lgr, dir, resolver, logs)
+	registry.addEmailAdapters(lgr, dir, resolver, logs)
+	registry.addWhatsApp(lgr, dir, resolver, logs)
+	return registry
+}
+
+func (r *AdapterRegistry) addChatAdapters(
+	lgr logger.Logger,
+	dir *Directory,
+	resolver secrets.Resolver,
+	logs *DeliveryLogStore,
+) {
+	cfg := r.AdapterConfig
 	if cfg.Slack.IsConfigured() {
-		slackAdapter := wrap(slack.New(lgr, slack.WithConfig(slack.Config{
+		slackAdapter := wrapMessenger(slack.New(lgr, slack.WithConfig(slack.Config{
 			Token:   cfg.Slack.Token,
 			Channel: cfg.Slack.Channel,
 			BaseURL: "https://slack.com/api",
 			Timeout: config.DefaultAdapterTimeout,
-		})))
-		registry.Adapters = append(registry.Adapters, slackAdapter)
-		registry.EnabledAdapters = append(registry.EnabledAdapters, "slack")
-		registry.addChannels("chat", "slack", "chat:slack")
+		})), dir, resolver, logs, lgr)
+		r.Adapters = append(r.Adapters, slackAdapter)
+		r.EnabledAdapters = append(r.EnabledAdapters, "slack")
+		r.addChannels("chat", "slack", "chat:slack")
 	}
 
-	// Telegram
 	if cfg.Telegram.IsConfigured() {
-		telegramAdapter := wrap(telegram.New(lgr, telegram.WithConfig(telegram.Config{
+		telegramAdapter := wrapMessenger(telegram.New(lgr, telegram.WithConfig(telegram.Config{
 			Token:   cfg.Telegram.BotToken,
 			ChatID:  cfg.Telegram.ChatID,
 			BaseURL: "https://api.telegram.org",
 			Timeout: config.DefaultAdapterTimeout,
-		})))
-		registry.Adapters = append(registry.Adapters, telegramAdapter)
-		registry.EnabledAdapters = append(registry.EnabledAdapters, "telegram")
-		registry.addChannels("chat", "chat:telegram", "telegram")
+		})), dir, resolver, logs, lgr)
+		r.Adapters = append(r.Adapters, telegramAdapter)
+		r.EnabledAdapters = append(r.EnabledAdapters, "telegram")
+		r.addChannels("chat", "chat:telegram", "telegram")
 	}
+}
 
-	// Twilio (SMS)
+func (r *AdapterRegistry) addTwilio(
+	lgr logger.Logger,
+	dir *Directory,
+	resolver secrets.Resolver,
+	logs *DeliveryLogStore,
+) {
+	cfg := r.AdapterConfig
 	if cfg.Twilio.IsConfigured() {
-		twilioAdapter := wrap(twilio.New(lgr, twilio.WithConfig(twilio.Config{
+		twilioAdapter := wrapMessenger(twilio.New(lgr, twilio.WithConfig(twilio.Config{
 			AccountSID: cfg.Twilio.AccountSID,
 			AuthToken:  cfg.Twilio.AuthToken,
 			From:       cfg.Twilio.FromPhone,
 			Timeout:    config.DefaultAdapterTimeout,
-		})))
-		registry.Adapters = append(registry.Adapters, twilioAdapter)
-		registry.EnabledAdapters = append(registry.EnabledAdapters, "twilio")
-		registry.addChannels("sms", "sms:twilio")
+		})), dir, resolver, logs, lgr)
+		r.Adapters = append(r.Adapters, twilioAdapter)
+		r.EnabledAdapters = append(r.EnabledAdapters, "twilio")
+		r.addChannels("sms", "sms:twilio")
 	}
+}
 
-	// SendGrid (Email)
+func (r *AdapterRegistry) addEmailAdapters(
+	lgr logger.Logger,
+	dir *Directory,
+	resolver secrets.Resolver,
+	logs *DeliveryLogStore,
+) {
+	cfg := r.AdapterConfig
 	if cfg.SendGrid.IsConfigured() {
 		fromEmail := cfg.SendGrid.FromEmail
 		if cfg.SendGrid.FromName != "" {
 			fromEmail = cfg.SendGrid.FromName + " <" + cfg.SendGrid.FromEmail + ">"
 		}
-		sendgridAdapter := wrap(sendgrid.New(lgr,
+		sendgridAdapter := wrapMessenger(sendgrid.New(lgr,
 			sendgrid.WithAPIKey(cfg.SendGrid.APIKey),
 			sendgrid.WithFrom(fromEmail),
 			sendgrid.WithTimeout(30),
-		))
-		registry.Adapters = append(registry.Adapters, sendgridAdapter)
-		registry.EnabledAdapters = append(registry.EnabledAdapters, "sendgrid")
-		registry.addChannels("email", "email:sendgrid")
+		), dir, resolver, logs, lgr)
+		r.Adapters = append(r.Adapters, sendgridAdapter)
+		r.EnabledAdapters = append(r.EnabledAdapters, "sendgrid")
+		r.addChannels("email", "email:sendgrid")
 	}
 
-	// Mailgun (Email)
 	if cfg.Mailgun.IsConfigured() {
 		fromEmail := cfg.Mailgun.FromEmail
 		if cfg.Mailgun.FromName != "" {
 			fromEmail = cfg.Mailgun.FromName + " <" + cfg.Mailgun.FromEmail + ">"
 		}
-		mailgunAdapter := wrap(mailgun.New(lgr, mailgun.WithConfig(mailgun.Config{
+		mailgunAdapter := wrapMessenger(mailgun.New(lgr, mailgun.WithConfig(mailgun.Config{
 			APIKey:     cfg.Mailgun.APIKey,
 			Domain:     cfg.Mailgun.Domain,
 			From:       fromEmail,
 			TimeoutSec: 30,
-		})))
-		registry.Adapters = append(registry.Adapters, mailgunAdapter)
-		registry.EnabledAdapters = append(registry.EnabledAdapters, "mailgun")
-		registry.addChannels("email", "email:mailgun")
+		})), dir, resolver, logs, lgr)
+		r.Adapters = append(r.Adapters, mailgunAdapter)
+		r.EnabledAdapters = append(r.EnabledAdapters, "mailgun")
+		r.addChannels("email", "email:mailgun")
 	}
+}
 
-	// WhatsApp
+func (r *AdapterRegistry) addWhatsApp(
+	lgr logger.Logger,
+	dir *Directory,
+	resolver secrets.Resolver,
+	logs *DeliveryLogStore,
+) {
+	cfg := r.AdapterConfig
 	if cfg.WhatsApp.IsConfigured() {
-		whatsappAdapter := wrap(whatsapp.New(lgr, whatsapp.WithConfig(whatsapp.Config{
+		whatsappAdapter := wrapMessenger(whatsapp.New(lgr, whatsapp.WithConfig(whatsapp.Config{
 			Token:         cfg.WhatsApp.AuthToken,
 			PhoneNumberID: cfg.WhatsApp.FromPhone,
 			Timeout:       config.DefaultAdapterTimeout,
-		})))
-		registry.Adapters = append(registry.Adapters, whatsappAdapter)
-		registry.EnabledAdapters = append(registry.EnabledAdapters, "whatsapp")
-		registry.addChannels("whatsapp", "whatsapp:whatsapp")
+		})), dir, resolver, logs, lgr)
+		r.Adapters = append(r.Adapters, whatsappAdapter)
+		r.EnabledAdapters = append(r.EnabledAdapters, "whatsapp")
+		r.addChannels("whatsapp", "whatsapp:whatsapp")
 	}
+}
 
-	return registry
+func wrapMessenger(
+	messenger adapters.Messenger,
+	directory *Directory,
+	resolver secrets.Resolver,
+	logs *DeliveryLogStore,
+	lgr logger.Logger,
+) adapters.Messenger {
+	if directory == nil {
+		return messenger
+	}
+	return ResolvingMessenger{
+		inner: messenger, directory: directory, secrets: resolver, logs: logs, logger: lgr,
+	}
 }
 
 // addChannels adds unique channels to the registry.

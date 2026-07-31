@@ -118,53 +118,39 @@ func providerFromRules(rules domain.JSONMap, channel string) string {
 		return ""
 	}
 	channel = strings.ToLower(channel)
-	if channelsRaw, ok := rules["channels"]; ok {
-		if channelsMap, ok := channelsRaw.(map[string]any); ok {
-			if entry, ok := channelsMap[channel]; ok {
-				if entryMap, ok := entry.(map[string]any); ok {
-					if provider, ok := entryMap["provider"]; ok {
-						if val, ok := provider.(string); ok {
-							return strings.TrimSpace(val)
-						}
-					}
-				}
-			}
-		}
+	channels, ok := rules["channels"].(map[string]any)
+	if !ok {
+		return mapString(rules, "provider")
 	}
-	if provider, ok := rules["provider"]; ok {
-		if val, ok := provider.(string); ok {
-			return strings.TrimSpace(val)
-		}
+	channelRules, ok := channels[channel].(map[string]any)
+	if !ok {
+		return mapString(rules, "provider")
 	}
-	return ""
+	if provider := mapString(channelRules, "provider"); provider != "" {
+		return provider
+	}
+	return mapString(rules, "provider")
+}
+
+func mapString(values map[string]any, key string) string {
+	value, ok := values[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }
 
 // MarkRead marks an inbox item as read.
 func (a *App) MarkRead(c router.Context) error {
-	user := GetUser(c)
-	if user == nil {
-		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
-	}
-
-	id := c.Param("id", "")
-	if id == "" {
-		return c.JSON(http.StatusBadRequest, map[string]any{"error": "id required"})
-	}
-
-	err := a.Catalog.InboxMarkRead.Execute(c.Context(), commands.InboxMarkRead{
-		UserID: user.ID,
-		IDs:    []string{id},
-		Read:   true,
-	})
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{"success": true})
+	return a.setReadState(c, true)
 }
 
 // MarkUnread marks an inbox item as unread.
 func (a *App) MarkUnread(c router.Context) error {
+	return a.setReadState(c, false)
+}
+
+func (a *App) setReadState(c router.Context, read bool) error {
 	user := GetUser(c)
 	if user == nil {
 		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
@@ -178,7 +164,7 @@ func (a *App) MarkUnread(c router.Context) error {
 	err := a.Catalog.InboxMarkRead.Execute(c.Context(), commands.InboxMarkRead{
 		UserID: user.ID,
 		IDs:    []string{id},
-		Read:   false,
+		Read:   read,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})

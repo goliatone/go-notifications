@@ -34,11 +34,17 @@ func (l *stdLogger) log(level, msg string, args ...any) {
 		i++
 	}
 	payload := strings.TrimSpace(strings.Join(parts, " "))
+	suffix := ""
 	if payload != "" {
-		log.Printf("[%s] %s %s", level, msg, payload)
-		return
+		suffix = " " + payload
 	}
-	log.Printf("[%s] %s", level, msg)
+	// #nosec G706 -- safeLogText escapes CR and LF in every dynamic field
+	// before it reaches the single-line standard logger sink.
+	log.Printf("[%s] %s%s", safeLogText(level), safeLogText(msg), safeLogText(suffix))
+}
+
+func safeLogText(value string) string {
+	return strings.NewReplacer("\r", `\r`, "\n", `\n`).Replace(value)
 }
 
 func newStdLogger() logger.Logger {

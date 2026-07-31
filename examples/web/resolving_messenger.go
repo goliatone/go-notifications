@@ -81,6 +81,7 @@ func (m ResolvingMessenger) Send(ctx context.Context, msg adapters.Message) erro
 			CreatedAt:      time.Now().UTC(),
 		}
 		if logErr := m.logs.Record(ctx, entry); logErr != nil {
+			m.logger.Error("failed to record delivery log", "error", logErr)
 			err = errors.Join(err, fmt.Errorf("record delivery log: %w", logErr))
 		}
 	}

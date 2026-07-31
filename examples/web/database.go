@@ -112,7 +112,7 @@ func ensureSQLiteDir(dsn string) error {
 	if dir == "" || dir == "." {
 		return nil
 	}
-	return os.MkdirAll(dir, 0o755)
+	return os.MkdirAll(dir, 0o750)
 }
 
 func ensureSchema(ctx context.Context, db *bun.DB) error {

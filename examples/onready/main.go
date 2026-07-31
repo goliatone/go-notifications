@@ -100,8 +100,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Send sample payload
-	err = exp.Send(ctx, onready.OnReadyEvent{
+	if err := sendSample(ctx, exp); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("onready notification sent (check console output)")
+}
+
+func sendSample(ctx context.Context, notifier onready.OnReadyNotifier) error {
+	return notifier.Send(ctx, onready.OnReadyEvent{
 		Recipients:  []string{"user-1"},
 		Locale:      "en",
 		FileName:    "orders.csv",
@@ -120,11 +127,6 @@ func main() {
 		},
 		Channels: []string{"email", "in-app"},
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Println("onready notification sent (check console output)")
 }
 
 // stdoutLogger is a minimal logger that prints to stdout for the example.
