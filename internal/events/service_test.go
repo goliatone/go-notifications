@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -67,6 +68,51 @@ func TestConcurrentScopedIdempotencyCreatesOneEvent(t *testing.T) {
 	}
 	if result.Total != 1 {
 		t.Fatalf("expected one event, got %d", result.Total)
+	}
+}
+
+func TestConcurrentDigestIntakeCreatesOneDurableWindow(t *testing.T) {
+	ctx := context.Background()
+	defRepo, evtRepo, disp, _ := setupDeps(t)
+	publications := memory.NewPublicationRepository()
+	q := &lockedQueue{}
+	service, err := NewService(Dependencies{
+		Definitions: defRepo, Events: evtRepo, Publications: publications,
+		Dispatcher: disp, Queue: q, Logger: &logger.Nop{},
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 20)
+	for idx := range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, enqueueErr := service.EnqueueWithReceipt(ctx, IntakeRequest{
+				DefinitionCode: "welcome",
+				Recipients:     []string{fmt.Sprintf("subject-%d", idx)},
+				Digest:         &DigestOptions{Key: "daily", Delay: time.Hour},
+			}); enqueueErr != nil {
+				errCh <- enqueueErr
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for enqueueErr := range errCh {
+		t.Errorf("enqueue digest member: %v", enqueueErr)
+	}
+	publicationResult, err := publications.List(ctx, store.ListOptions{})
+	if err != nil {
+		t.Fatalf("list publications: %v", err)
+	}
+	if publicationResult.Total != 1 || q.count() != 1 {
+		t.Fatalf("expected one publication/job, got publications=%d jobs=%d", publicationResult.Total, q.count())
+	}
+	events, err := evtRepo.ListByPublication(ctx, publicationResult.Items[0].ID)
+	if err != nil || len(events) != 20 {
+		t.Fatalf("expected 20 durable members, got %d (err=%v)", len(events), err)
 	}
 }
 
@@ -306,4 +352,22 @@ type failingQueue struct {
 func (q *failingQueue) Enqueue(_ context.Context, job queue.Job) error {
 	q.jobs = append(q.jobs, job)
 	return q.err
+}
+
+type lockedQueue struct {
+	mu   sync.Mutex
+	jobs []queue.Job
+}
+
+func (q *lockedQueue) Enqueue(_ context.Context, job queue.Job) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.jobs = append(q.jobs, job)
+	return nil
+}
+
+func (q *lockedQueue) count() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.jobs)
 }

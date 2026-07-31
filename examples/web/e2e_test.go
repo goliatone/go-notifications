@@ -13,6 +13,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/events"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/notifier"
+	"github.com/goliatone/go-notifications/pkg/privacy"
 	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/storage"
 )
@@ -180,6 +181,7 @@ func buildTestApp(ctx context.Context, t *testing.T, cfg config.Config, lgr logg
 		Broadcaster: nil,
 		Adapters:    adaptersList,
 		Secrets:     secretResolver,
+		Diagnostic:  diagnosticLogger{t: t},
 	})
 	if err != nil {
 		t.Fatalf("module: %v", err)
@@ -205,6 +207,12 @@ func buildTestApp(ctx context.Context, t *testing.T, cfg config.Config, lgr logg
 	}
 
 	return app, fakes
+}
+
+type diagnosticLogger struct{ t *testing.T }
+
+func (d diagnosticLogger) Report(_ context.Context, event privacy.DiagnosticEvent) {
+	d.t.Logf("diagnostic %s: %v", event.Operation, event.Cause)
 }
 
 type capturingMessenger struct {

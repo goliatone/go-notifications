@@ -76,8 +76,8 @@ func TestManagerSendMultiChannelSuccess(t *testing.T) {
 		Channels:     domain.StringList{"email:console", "sms:twilio"},
 		TemplateKeys: domain.StringList{"email:welcome-email", "sms:welcome-sms"},
 	}
-	if err := defRepo.Create(ctx, definition); err != nil {
-		t.Fatalf("create definition: %v", err)
+	if createErr := defRepo.Create(ctx, definition); createErr != nil {
+		t.Fatalf("create definition: %v", createErr)
 	}
 
 	registry := adapters.NewRegistry(
@@ -189,8 +189,8 @@ func TestManagerEmitsActivityEvents(t *testing.T) {
 		Channels:     domain.StringList{"email:console"},
 		TemplateKeys: domain.StringList{"email:activity-email"},
 	}
-	if err := defRepo.Create(ctx, definition); err != nil {
-		t.Fatalf("create definition: %v", err)
+	if createErr := defRepo.Create(ctx, definition); createErr != nil {
+		t.Fatalf("create definition: %v", createErr)
 	}
 
 	registry := adapters.NewRegistry(console.New(&logger.Nop{}))
@@ -328,8 +328,8 @@ func TestManagerSendRecordsFailures(t *testing.T) {
 		Channels:     domain.StringList{"email:failing"},
 		TemplateKeys: domain.StringList{"email:alert-email"},
 	}
-	if err := defRepo.Create(ctx, def); err != nil {
-		t.Fatalf("create definition: %v", err)
+	if createErr := defRepo.Create(ctx, def); createErr != nil {
+		t.Fatalf("create definition: %v", createErr)
 	}
 
 	failAdapter := &failingAdapter{
@@ -423,21 +423,21 @@ func TestManagerSkipsBlockedPreferences(t *testing.T) {
 		Channels:     domain.StringList{"email:console"},
 		TemplateKeys: domain.StringList{"email:pref-email"},
 	}
-	if err := defRepo.Create(ctx, definition); err != nil {
-		t.Fatalf("create definition: %v", err)
+	if createErr := defRepo.Create(ctx, definition); createErr != nil {
+		t.Fatalf("create definition: %v", createErr)
 	}
 
 	prefs := newPreferenceService(t, prefRepo)
 	inboxSvc := newInboxService(t, inboxRepo)
 	enabled := new(false)
-	if _, err := prefs.Upsert(ctx, prefsvc.PreferenceInput{
+	if _, upsertErr := prefs.Upsert(ctx, prefsvc.PreferenceInput{
 		SubjectType:    "user",
 		SubjectID:      "blocked@example.com",
 		DefinitionCode: "pref-block",
 		Channel:        "email",
 		Enabled:        enabled,
-	}); err != nil {
-		t.Fatalf("seed preference: %v", err)
+	}); upsertErr != nil {
+		t.Fatalf("seed preference: %v", upsertErr)
 	}
 
 	registry := adapters.NewRegistry(console.New(&logger.Nop{}))
@@ -462,12 +462,12 @@ func TestManagerSkipsBlockedPreferences(t *testing.T) {
 		t.Fatalf("manager: %v", err)
 	}
 
-	if err := manager.Send(ctx, Event{
+	if sendErr := manager.Send(ctx, Event{
 		DefinitionCode: "pref-block",
 		Recipients:     []string{"blocked@example.com"},
 		Context:        map[string]any{"Name": "Blocked"},
-	}); err != nil {
-		t.Fatalf("send: %v", err)
+	}); sendErr != nil {
+		t.Fatalf("send: %v", sendErr)
 	}
 
 	msgs, err := msgRepo.List(ctx, store.ListOptions{})

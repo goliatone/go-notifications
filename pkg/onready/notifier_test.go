@@ -80,8 +80,8 @@ func TestOnReadyNotifierSendsEmail(t *testing.T) {
 		},
 	}
 
-	if err := exportNotifier.Send(ctx, payload); err != nil {
-		t.Fatalf("send: %v", err)
+	if sendErr := exportNotifier.Send(ctx, payload); sendErr != nil {
+		t.Fatalf("send: %v", sendErr)
 	}
 
 	msgs, err := msgRepo.List(ctx, store.ListOptions{})
@@ -194,8 +194,8 @@ func TestOnReadyNotifierChannelAttachmentsOverride(t *testing.T) {
 		},
 	}
 
-	if err := exportNotifier.Send(ctx, payload); err != nil {
-		t.Fatalf("send: %v", err)
+	if sendErr := exportNotifier.Send(ctx, payload); sendErr != nil {
+		t.Fatalf("send: %v", sendErr)
 	}
 
 	sent := registry.List("email")

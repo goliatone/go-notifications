@@ -14,9 +14,17 @@ func TestDefaultPolicyMasksAddressesAndDropsSensitiveFields(t *testing.T) {
 	}
 	safe := policy.SafeMetadata(map[string]any{
 		"provider": "smtp", "authorization": "secret", "action_url": "https://private",
+		"nested": map[string]any{"token": "private", "result": "ok"},
 	})
 	if safe["provider"] != "smtp" || safe["authorization"] != nil || safe["action_url"] != nil {
 		t.Fatalf("unexpected safe metadata: %#v", safe)
+	}
+	nested, ok := safe["nested"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested safe metadata map, got %T", safe["nested"])
+	}
+	if nested["token"] != nil || nested["result"] != "ok" {
+		t.Fatalf("nested metadata was not sanitized: %#v", nested)
 	}
 }
 

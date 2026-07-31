@@ -43,11 +43,11 @@ func TestRegisterIdempotent(t *testing.T) {
 	}
 
 	// Re-run to ensure idempotency (no new revisions/records)
-	if _, err := Register(ctx, Dependencies{
+	if _, registerErr := Register(ctx, Dependencies{
 		Definitions: defRepo,
 		Templates:   tplSvc,
-	}, Options{}); err != nil {
-		t.Fatalf("second register: %v", err)
+	}, Options{}); registerErr != nil {
+		t.Fatalf("second register: %v", registerErr)
 	}
 
 	defs, err := defRepo.List(ctx, store.ListOptions{})
