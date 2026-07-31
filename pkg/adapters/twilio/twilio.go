@@ -2,8 +2,8 @@ package twilio
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -156,7 +156,6 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[twilio:during-dry-run] send skipped",
-			"to", to,
 			"channel", msg.Channel,
 		)
 		return nil
@@ -177,10 +176,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if err != nil {
 		return fmt.Errorf("twilio: request failed: %w", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := adapters.ReadResponseBody(resp)
+	closeErr := resp.Body.Close()
+	if responseErr := errors.Join(err, closeErr); responseErr != nil {
+		return fmt.Errorf("twilio: %w", responseErr)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return adapters.HTTPStatusError("twilio", resp.StatusCode, bodyBytes)

@@ -3,8 +3,8 @@ package firebase
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"strings"
@@ -146,8 +146,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[firebase:during-dry-run] send skipped",
-			"to", target,
-			"subject", msg.Subject,
+			"channel", msg.Channel,
 		)
 		return nil
 	}
@@ -170,10 +169,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if err != nil {
 		return fmt.Errorf("firebase: request failed: %w", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := adapters.ReadResponseBody(resp)
+	closeErr := resp.Body.Close()
+	if responseErr := errors.Join(err, closeErr); responseErr != nil {
+		return fmt.Errorf("firebase: %w", responseErr)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return adapters.HTTPStatusError("firebase", resp.StatusCode, respBody)

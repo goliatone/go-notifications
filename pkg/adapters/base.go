@@ -1,6 +1,7 @@
 package adapters
 
 import "github.com/goliatone/go-notifications/pkg/interfaces/logger"
+import "github.com/goliatone/go-notifications/pkg/privacy"
 
 // BaseAdapter provides shared helpers for simple adapters.
 type BaseAdapter struct {
@@ -15,11 +16,20 @@ func NewBaseAdapter(l logger.Logger) BaseAdapter {
 }
 
 func (b BaseAdapter) LogSuccess(name string, msg Message) {
-	b.logger.Info("adapter delivered message", "adapter", name, "channel", msg.Channel, "to", msg.To)
+	b.logger.Info("adapter delivered message",
+		"adapter", name,
+		"channel", msg.Channel,
+		"subject_id", privacy.DefaultPolicy{}.SafeSubjectID(msg.To),
+	)
 }
 
 func (b BaseAdapter) LogFailure(name string, msg Message, err error) {
-	b.logger.Error("adapter delivery failed", "adapter", name, "channel", msg.Channel, "to", msg.To, "error", err)
+	b.logger.Error("adapter delivery failed",
+		"adapter", name,
+		"channel", msg.Channel,
+		"subject_id", privacy.DefaultPolicy{}.SafeSubjectID(msg.To),
+		"error_code", privacy.DefaultPolicy{}.SafeError(err).Code,
+	)
 }
 
 // Logger exposes the adapter logger for structured diagnostics.

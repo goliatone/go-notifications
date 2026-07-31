@@ -1,9 +1,10 @@
 package mailgun
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -119,84 +120,109 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	}
 
 	endpoint := fmt.Sprintf("%s/%s/messages", strings.TrimRight(a.cfg.APIBase, "/"), url.PathEscape(a.cfg.Domain))
-	pr, pw := io.Pipe()
-	mw := multipart.NewWriter(pw)
-
-	go func() {
-		defer func() {
-			_ = pw.Close()
-		}()
-		defer func() {
-			_ = mw.Close()
-		}()
-
-		_ = mw.WriteField("from", from)
-		_ = mw.WriteField("to", to)
-		if subj := strings.TrimSpace(msg.Subject); subj != "" {
-			_ = mw.WriteField("subject", subj)
-		}
-		if textBody != "" {
-			_ = mw.WriteField("text", textBody)
-		}
-		if htmlBody != "" {
-			_ = mw.WriteField("html", htmlBody)
-		}
-		if rt := stringValue(msg.Metadata, "reply_to"); rt != "" {
-			_ = mw.WriteField("h:Reply-To", rt)
-		}
-		if cc := stringSlice(msg.Metadata, "cc"); len(cc) > 0 {
-			for _, addr := range cc {
-				_ = mw.WriteField("cc", addr)
-			}
-		}
-		if bcc := stringSlice(msg.Metadata, "bcc"); len(bcc) > 0 {
-			for _, addr := range bcc {
-				_ = mw.WriteField("bcc", addr)
-			}
-		}
-		for k, v := range msg.Headers {
-			if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
-				continue
-			}
-			_ = mw.WriteField("h:"+k, v)
-		}
-		for _, att := range attachments {
-			ct := strings.TrimSpace(att.ContentType)
-			if ct == "" {
-				ct = "application/octet-stream"
-			}
-			header := textproto.MIMEHeader{}
-			header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="attachment"; filename="%s"`, att.Filename))
-			header.Set("Content-Type", ct)
-			part, err := mw.CreatePart(header)
-			if err != nil {
-				continue
-			}
-			_, _ = part.Write(att.Content)
-		}
-	}()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, pr)
+	body, contentType, err := buildMultipartBody(msg, from, to, textBody, htmlBody, attachments)
+	if err != nil {
+		return fmt.Errorf("mailgun: build multipart body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return fmt.Errorf("mailgun: build request: %w", err)
 	}
 	req.SetBasicAuth("api", a.cfg.APIKey)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Content-Type", contentType)
 
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("mailgun: request failed: %w", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := adapters.ReadResponseBody(resp)
+	closeErr := resp.Body.Close()
+	if responseErr := errors.Join(err, closeErr); responseErr != nil {
+		return fmt.Errorf("mailgun: %w", responseErr)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return adapters.HTTPStatusError("mailgun", resp.StatusCode, respBody)
 	}
 
 	a.base.LogSuccess(a.name, msg)
+	return nil
+}
+
+func buildMultipartBody(
+	msg adapters.Message,
+	from string,
+	to string,
+	textBody string,
+	htmlBody string,
+	attachments []adapters.Attachment,
+) (*bytes.Buffer, string, error) {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	fields := [][2]string{
+		{"from", from},
+		{"to", to},
+		{"subject", strings.TrimSpace(msg.Subject)},
+		{"text", textBody},
+		{"html", htmlBody},
+		{"h:Reply-To", stringValue(msg.Metadata, "reply_to")},
+	}
+	for _, field := range fields {
+		if field[1] == "" {
+			continue
+		}
+		if err := writer.WriteField(field[0], field[1]); err != nil {
+			return nil, "", err
+		}
+	}
+	for _, address := range stringSlice(msg.Metadata, "cc") {
+		if err := writer.WriteField("cc", address); err != nil {
+			return nil, "", err
+		}
+	}
+	for _, address := range stringSlice(msg.Metadata, "bcc") {
+		if err := writer.WriteField("bcc", address); err != nil {
+			return nil, "", err
+		}
+	}
+	for key, value := range msg.Headers {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			continue
+		}
+		if err := writer.WriteField("h:"+key, value); err != nil {
+			return nil, "", err
+		}
+	}
+	if err := writeAttachments(writer, attachments); err != nil {
+		return nil, "", err
+	}
+	contentType := writer.FormDataContentType()
+	if err := writer.Close(); err != nil {
+		return nil, "", err
+	}
+	return body, contentType, nil
+}
+
+func writeAttachments(writer *multipart.Writer, attachments []adapters.Attachment) error {
+	for _, attachment := range attachments {
+		contentType := strings.TrimSpace(attachment.ContentType)
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		header := textproto.MIMEHeader{}
+		header.Set("Content-Disposition", fmt.Sprintf(
+			`form-data; name="attachment"; filename="%s"`,
+			attachment.Filename,
+		))
+		header.Set("Content-Type", contentType)
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			return err
+		}
+		if _, err := part.Write(attachment.Content); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

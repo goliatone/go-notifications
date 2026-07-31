@@ -3,8 +3,8 @@ package webhook
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -148,10 +148,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if err != nil {
 		return fmt.Errorf("webhook: request failed: %w", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := adapters.ReadResponseBody(resp)
+	closeErr := resp.Body.Close()
+	if responseErr := errors.Join(err, closeErr); responseErr != nil {
+		return fmt.Errorf("webhook: %w", responseErr)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return adapters.HTTPStatusError("webhook", resp.StatusCode, respBody)

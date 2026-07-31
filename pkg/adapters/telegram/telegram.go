@@ -3,8 +3,8 @@ package telegram
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -126,7 +126,6 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[telegram:during-dry-run] send skipped",
-			"recipient", chatID,
 			"channel", msg.Channel,
 		)
 		return nil
@@ -182,10 +181,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if err != nil {
 		return fmt.Errorf("telegram: request failed: %w", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	bodyBytes, _ = io.ReadAll(resp.Body) // drain for keep-alive reuse
+	bodyBytes, err = adapters.ReadResponseBody(resp)
+	closeErr := resp.Body.Close()
+	if responseErr := errors.Join(err, closeErr); responseErr != nil {
+		return fmt.Errorf("telegram: %w", responseErr)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return adapters.HTTPStatusError("telegram", resp.StatusCode, bodyBytes)

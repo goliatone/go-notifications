@@ -5,8 +5,8 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -127,9 +127,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if a.cfg.DryRun {
 		a.base.LogSuccess(a.name, msg)
 		a.base.Logger().Info("[aws_sns:during-dry-run] send skipped",
-			"to", msg.To,
 			"channel", msg.Channel,
-			"subject", msg.Subject,
 		)
 		return nil
 	}
@@ -143,7 +141,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		region = "us-east-1"
 	}
 
-	req, signedHeaders, err := a.signRequest(creds, region, params)
+	req, signedHeaders, err := a.signRequest(ctx, creds, region, params)
 	if err != nil {
 		return err
 	}
@@ -155,10 +153,11 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if err != nil {
 		return fmt.Errorf("aws_sns: request failed: %w", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := adapters.ReadResponseBody(resp)
+	closeErr := resp.Body.Close()
+	if responseErr := errors.Join(err, closeErr); responseErr != nil {
+		return fmt.Errorf("aws_sns: %w", responseErr)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return adapters.HTTPStatusError("aws_sns", resp.StatusCode, respBody)
@@ -216,7 +215,7 @@ func (a *Adapter) loadCredentials() credentials {
 	return creds
 }
 
-func (a *Adapter) signRequest(creds credentials, region string, params url.Values) (*http.Request, map[string]string, error) {
+func (a *Adapter) signRequest(ctx context.Context, creds credentials, region string, params url.Values) (*http.Request, map[string]string, error) {
 	endpoint := fmt.Sprintf("https://sns.%s.amazonaws.com/", region)
 	bodyStr := params.Encode()
 	payloadHash := sha256Hex([]byte(bodyStr))
@@ -259,7 +258,7 @@ func (a *Adapter) signRequest(creds credentials, region string, params url.Value
 	authHeader := fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
 		creds.AccessKey, credentialScope, signedHeaders, signature)
 
-	req, err := http.NewRequest("POST", endpoint, strings.NewReader(bodyStr))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(bodyStr))
 	if err != nil {
 		return nil, nil, err
 	}

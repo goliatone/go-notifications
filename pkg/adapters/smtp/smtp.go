@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net"
@@ -136,7 +137,7 @@ func (a *Adapter) Name() string { return a.name }
 
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
-func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
+func (a *Adapter) Send(ctx context.Context, msg adapters.Message) (returnErr error) {
 	if strings.TrimSpace(a.cfg.Host) == "" {
 		return fmt.Errorf("smtp: host is required")
 	}
@@ -148,45 +149,45 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if from == "" {
 		return fmt.Errorf("smtp: from address is required")
 	}
-	if err := ensureNoCRLF(from); err != nil {
-		return fmt.Errorf("smtp: invalid from address: %w", err)
+	if validationErr := ensureNoCRLF(from); validationErr != nil {
+		return fmt.Errorf("smtp: invalid from address: %w", validationErr)
 	}
-	fromAddr, err := mail.ParseAddress(from)
-	if err != nil {
-		return fmt.Errorf("smtp: invalid from address: %w", err)
+	fromAddr, parseErr := mail.ParseAddress(from)
+	if parseErr != nil {
+		return fmt.Errorf("smtp: invalid from address: %w", parseErr)
 	}
-	if err := ensureNoCRLF(msg.To); err != nil {
-		return fmt.Errorf("smtp: invalid to address: %w", err)
+	if validationErr := ensureNoCRLF(msg.To); validationErr != nil {
+		return fmt.Errorf("smtp: invalid to address: %w", validationErr)
 	}
-	toAddr, err := mail.ParseAddress(msg.To)
-	if err != nil {
-		return fmt.Errorf("smtp: invalid to address: %w", err)
+	toAddr, parseErr := mail.ParseAddress(msg.To)
+	if parseErr != nil {
+		return fmt.Errorf("smtp: invalid to address: %w", parseErr)
 	}
 
 	subject := strings.TrimSpace(msg.Subject)
-	if err := ensureNoCRLF(subject); err != nil {
-		return fmt.Errorf("smtp: invalid subject: %w", err)
+	if validationErr := ensureNoCRLF(subject); validationErr != nil {
+		return fmt.Errorf("smtp: invalid subject: %w", validationErr)
 	}
 
 	replyToRaw := firstNonEmpty(msg.Metadata, "reply_to", a.cfg.ReplyTo)
 	var replyTo *mail.Address
 	if strings.TrimSpace(replyToRaw) != "" {
-		if err := ensureNoCRLF(replyToRaw); err != nil {
-			return fmt.Errorf("smtp: invalid reply_to: %w", err)
+		if validationErr := ensureNoCRLF(replyToRaw); validationErr != nil {
+			return fmt.Errorf("smtp: invalid reply_to: %w", validationErr)
 		}
-		replyTo, err = mail.ParseAddress(replyToRaw)
-		if err != nil {
-			return fmt.Errorf("smtp: invalid reply_to address: %w", err)
+		replyTo, parseErr = mail.ParseAddress(replyToRaw)
+		if parseErr != nil {
+			return fmt.Errorf("smtp: invalid reply_to address: %w", parseErr)
 		}
 	}
 
-	ccAddresses, err := parseAddressList(append(append([]string(nil), a.cfg.CC...), stringSlice(msg.Metadata, "cc")...))
-	if err != nil {
-		return fmt.Errorf("smtp: invalid cc: %w", err)
+	ccAddresses, addressErr := parseAddressList(append(append([]string(nil), a.cfg.CC...), stringSlice(msg.Metadata, "cc")...))
+	if addressErr != nil {
+		return fmt.Errorf("smtp: invalid cc: %w", addressErr)
 	}
-	bccAddresses, err := parseAddressList(append(append([]string(nil), a.cfg.BCC...), stringSlice(msg.Metadata, "bcc")...))
-	if err != nil {
-		return fmt.Errorf("smtp: invalid bcc: %w", err)
+	bccAddresses, addressErr := parseAddressList(append(append([]string(nil), a.cfg.BCC...), stringSlice(msg.Metadata, "bcc")...))
+	if addressErr != nil {
+		return fmt.Errorf("smtp: invalid bcc: %w", addressErr)
 	}
 
 	textBody := firstNonEmpty(msg.Metadata, "text_body", "text", "body", msg.Body)
@@ -198,12 +199,12 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 	if contentType == "" {
 		contentType = "text/plain; charset=UTF-8"
 	}
-	if err := ensureNoCRLF(contentType); err != nil {
-		return fmt.Errorf("smtp: invalid content_type: %w", err)
+	if validationErr := ensureNoCRLF(contentType); validationErr != nil {
+		return fmt.Errorf("smtp: invalid content_type: %w", validationErr)
 	}
 
 	attachments := adapters.EmailAttachments(msg.Attachments)
-	messageBytes, err := composeMessage(composeMessageInput{
+	messageBytes, composeErr := composeMessage(composeMessageInput{
 		From:        fromAddr,
 		To:          toAddr,
 		Subject:     subject,
@@ -215,66 +216,72 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 		PlainOnly:   a.cfg.PlainOnly,
 		Attachments: attachments,
 	})
-	if err != nil {
-		return err
+	if composeErr != nil {
+		return composeErr
 	}
 
 	addr := fmt.Sprintf("%s:%d", a.cfg.Host, a.cfg.Port)
 	dialer := &net.Dialer{Timeout: a.cfg.Timeout}
 	tlsCfg := &tls.Config{ServerName: a.cfg.Host}
 	if a.cfg.TLSPolicy == adapters.TLSPolicyInsecureSkipVerify {
+		// #nosec G402 -- this is an explicit opt-in compatibility policy;
+		// certificate verification remains enabled by default.
 		tlsCfg.InsecureSkipVerify = true
 	}
 
-	client, conn, err := a.newClient(ctx, dialer, addr, tlsCfg)
-	if err != nil {
-		return err
+	client, conn, clientErr := a.newClient(ctx, dialer, addr, tlsCfg)
+	if clientErr != nil {
+		return clientErr
 	}
 	defer func() {
-		_ = client.Quit()
-		_ = conn.Close()
+		if quitErr := client.Quit(); quitErr != nil {
+			closeErr := conn.Close()
+			if returnErr == nil {
+				returnErr = errors.Join(quitErr, closeErr)
+			}
+		}
 	}()
 
 	if strings.TrimSpace(a.cfg.LocalName) != "" {
-		if err := client.Hello(strings.TrimSpace(a.cfg.LocalName)); err != nil {
-			return fmt.Errorf("smtp: hello failed: %w", err)
+		if helloErr := client.Hello(strings.TrimSpace(a.cfg.LocalName)); helloErr != nil {
+			return fmt.Errorf("smtp: hello failed: %w", helloErr)
 		}
 	}
 
 	if a.cfg.UseStartTLS && !a.cfg.UseTLS {
 		if ok, _ := client.Extension("STARTTLS"); ok {
-			if err := client.StartTLS(tlsCfg); err != nil {
-				return fmt.Errorf("smtp: starttls failed: %w", err)
+			if startTLSErr := client.StartTLS(tlsCfg); startTLSErr != nil {
+				return fmt.Errorf("smtp: starttls failed: %w", startTLSErr)
 			}
 		}
 	}
 
 	if !a.cfg.AuthDisabled && a.cfg.Username != "" {
 		auth := gosmtp.PlainAuth("", a.cfg.Username, a.cfg.Password, a.cfg.Host)
-		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("smtp: auth failed: %w", err)
+		if authErr := client.Auth(auth); authErr != nil {
+			return fmt.Errorf("smtp: auth failed: %w", authErr)
 		}
 	}
 
-	if err := client.Mail(fromAddr.Address); err != nil {
-		return fmt.Errorf("smtp: mail from failed: %w", err)
+	if mailErr := client.Mail(fromAddr.Address); mailErr != nil {
+		return fmt.Errorf("smtp: mail from failed: %w", mailErr)
 	}
 	for _, rcpt := range collectRecipients(toAddr, ccAddresses, bccAddresses) {
-		if err := client.Rcpt(rcpt.Address); err != nil {
-			return fmt.Errorf("smtp: rcpt to failed: %w", err)
+		if recipientErr := client.Rcpt(rcpt.Address); recipientErr != nil {
+			return fmt.Errorf("smtp: rcpt to failed: %w", recipientErr)
 		}
 	}
 
-	w, err := client.Data()
-	if err != nil {
-		return fmt.Errorf("smtp: open data: %w", err)
+	w, dataErr := client.Data()
+	if dataErr != nil {
+		return fmt.Errorf("smtp: open data: %w", dataErr)
 	}
-	if _, err := w.Write(messageBytes); err != nil {
-		_ = w.Close()
-		return fmt.Errorf("smtp: write data: %w", err)
+	if _, writeErr := w.Write(messageBytes); writeErr != nil {
+		closeErr := w.Close()
+		return errors.Join(fmt.Errorf("smtp: write data: %w", writeErr), closeErr)
 	}
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("smtp: close data: %w", err)
+	if closeErr := w.Close(); closeErr != nil {
+		return fmt.Errorf("smtp: close data: %w", closeErr)
 	}
 
 	a.base.LogSuccess(a.name, msg)
@@ -283,14 +290,15 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 
 func (a *Adapter) newClient(ctx context.Context, dialer *net.Dialer, addr string, tlsCfg *tls.Config) (*gosmtp.Client, net.Conn, error) {
 	if a.cfg.UseTLS {
-		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsCfg)
+		tlsDialer := &tls.Dialer{NetDialer: dialer, Config: tlsCfg}
+		conn, err := tlsDialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return nil, nil, fmt.Errorf("smtp: tls dial failed: %w", err)
 		}
 		client, err := gosmtp.NewClient(conn, a.cfg.Host)
 		if err != nil {
-			_ = conn.Close()
-			return nil, nil, fmt.Errorf("smtp: new client failed: %w", err)
+			closeErr := conn.Close()
+			return nil, nil, errors.Join(fmt.Errorf("smtp: new client failed: %w", err), closeErr)
 		}
 		return client, conn, nil
 	}
@@ -301,8 +309,8 @@ func (a *Adapter) newClient(ctx context.Context, dialer *net.Dialer, addr string
 	}
 	client, err := gosmtp.NewClient(conn, a.cfg.Host)
 	if err != nil {
-		_ = conn.Close()
-		return nil, nil, fmt.Errorf("smtp: new client failed: %w", err)
+		closeErr := conn.Close()
+		return nil, nil, errors.Join(fmt.Errorf("smtp: new client failed: %w", err), closeErr)
 	}
 	return client, conn, nil
 }
@@ -425,8 +433,8 @@ func writeBodyPart(writer *multipart.Writer, textBody, htmlBody, contentType str
 		return fmt.Errorf("smtp: create alternative container: %w", err)
 	}
 	altWriter := multipart.NewWriter(altPart)
-	if err := altWriter.SetBoundary(boundary); err != nil {
-		return fmt.Errorf("smtp: set alternative boundary: %w", err)
+	if boundaryErr := altWriter.SetBoundary(boundary); boundaryErr != nil {
+		return fmt.Errorf("smtp: set alternative boundary: %w", boundaryErr)
 	}
 
 	plainHeader := textproto.MIMEHeader{}
@@ -435,8 +443,8 @@ func writeBodyPart(writer *multipart.Writer, textBody, htmlBody, contentType str
 	if err != nil {
 		return fmt.Errorf("smtp: create text part: %w", err)
 	}
-	if _, err := plainPart.Write([]byte(textBody)); err != nil {
-		return fmt.Errorf("smtp: write text part: %w", err)
+	if _, writeErr := plainPart.Write([]byte(textBody)); writeErr != nil {
+		return fmt.Errorf("smtp: write text part: %w", writeErr)
 	}
 
 	htmlHeader := textproto.MIMEHeader{}
@@ -465,8 +473,8 @@ func buildAlternativeBody(textBody, htmlBody string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("smtp: create text part: %w", err)
 	}
-	if _, err := plainPart.Write([]byte(textBody)); err != nil {
-		return nil, "", fmt.Errorf("smtp: write text part: %w", err)
+	if _, writeErr := plainPart.Write([]byte(textBody)); writeErr != nil {
+		return nil, "", fmt.Errorf("smtp: write text part: %w", writeErr)
 	}
 
 	htmlHeader := textproto.MIMEHeader{}
@@ -494,8 +502,8 @@ func writeAttachmentPart(writer *multipart.Writer, attachment adapters.Attachmen
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	if err := ensureNoCRLF(contentType); err != nil {
-		return fmt.Errorf("smtp: invalid attachment content_type: %w", err)
+	if validationErr := ensureNoCRLF(contentType); validationErr != nil {
+		return fmt.Errorf("smtp: invalid attachment content_type: %w", validationErr)
 	}
 
 	header := textproto.MIMEHeader{}
