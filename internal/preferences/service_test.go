@@ -244,9 +244,3 @@ func newTestService(t *testing.T, repo *memory.PreferenceRepository) *Service {
 	}
 	return svc
 }
-
-//go:fix inline
-func boolPtr(v bool) *bool { return new(v) }
-
-//go:fix inline
-func strPtr(v string) *string { return new(v) }

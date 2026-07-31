@@ -26,7 +26,11 @@ func TestMaskValuesMasksSecretsAndPreservesVersion(t *testing.T) {
 	if entry["version"] != "v1" {
 		t.Fatalf("expected version v1, got %v", entry["version"])
 	}
-	if maskedValue, _ := entry["value"].(string); maskedValue == "supersecretvalue" || strings.Contains(maskedValue, "supersecretvalue") {
+	maskedValue, ok := entry["value"].(string)
+	if !ok {
+		t.Fatalf("expected token value to be a string, got %T", entry["value"])
+	}
+	if maskedValue == "supersecretvalue" || strings.Contains(maskedValue, "supersecretvalue") {
 		t.Fatalf("expected token value to be masked, got %s", maskedValue)
 	}
 
@@ -34,7 +38,11 @@ func TestMaskValuesMasksSecretsAndPreservesVersion(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected provider fallback key to be present")
 	}
-	if maskedValue, _ := providerEntry["value"].(string); maskedValue == "abcd1234" {
+	maskedProviderValue, ok := providerEntry["value"].(string)
+	if !ok {
+		t.Fatalf("expected provider value to be a string, got %T", providerEntry["value"])
+	}
+	if maskedProviderValue == "abcd1234" {
 		t.Fatalf("expected provider entry to be masked")
 	}
 }

@@ -1,6 +1,7 @@
 package options
 
 import (
+	"errors"
 	"testing"
 
 	opts "github.com/goliatone/go-options"
@@ -66,7 +67,7 @@ func TestNewResolverMergesSnapshots(t *testing.T) {
 
 func TestNewResolverValidation(t *testing.T) {
 	_, err := NewResolver()
-	if err != ErrNoSnapshots {
+	if !errors.Is(err, ErrNoSnapshots) {
 		t.Fatalf("expected ErrNoSnapshots, got %v", err)
 	}
 

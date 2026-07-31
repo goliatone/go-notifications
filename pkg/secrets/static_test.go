@@ -33,7 +33,10 @@ func TestMaskValues(t *testing.T) {
 		t.Fatalf("expected 1 masked entry")
 	}
 	for _, v := range masked {
-		entry := v.(map[string]any)
+		entry, ok := v.(map[string]any)
+		if !ok {
+			t.Fatalf("expected masked entry map, got %T", v)
+		}
 		if entry["value"] == "abcd1234" {
 			t.Fatalf("expected value to be masked")
 		}

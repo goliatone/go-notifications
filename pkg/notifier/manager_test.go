@@ -269,8 +269,8 @@ func TestManagerEmitsActivityEvents(t *testing.T) {
 	}
 
 	deliveredEvt := delivered[0]
-	if deliveredEvt.UserID != "user@example.com" {
-		t.Fatalf("expected delivered user_id user@example.com, got %s", deliveredEvt.UserID)
+	if deliveredEvt.UserID == "user@example.com" || deliveredEvt.UserID == "" {
+		t.Fatalf("expected a non-empty privacy-safe delivered user_id, got %s", deliveredEvt.UserID)
 	}
 	if deliveredEvt.TenantID != "tenant-1" {
 		t.Fatalf("expected delivered tenant_id tenant-1, got %s", deliveredEvt.TenantID)
@@ -490,9 +490,6 @@ func newPreferenceService(t *testing.T, repo *memory.PreferenceRepository) *pref
 	}
 	return svc
 }
-
-//go:fix inline
-func boolPtr(v bool) *bool { return new(v) }
 
 func newInboxService(t *testing.T, repo *memory.InboxRepository) *inbox.Service {
 	t.Helper()

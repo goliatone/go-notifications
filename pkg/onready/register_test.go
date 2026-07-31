@@ -66,7 +66,10 @@ func TestRegisterIdempotent(t *testing.T) {
 		t.Fatalf("expected 2 templates, got %d", templates.Total)
 	}
 
-	emailTplAfter, _ := tplSvc.Get(ctx, EmailTemplateCode, "email", "en")
+	emailTplAfter, err := tplSvc.Get(ctx, EmailTemplateCode, "email", "en")
+	if err != nil {
+		t.Fatalf("get email template after registration: %v", err)
+	}
 	if emailTplAfter.Revision != emailTpl.Revision {
 		t.Fatalf("expected email template revision unchanged, got %d", emailTplAfter.Revision)
 	}

@@ -58,14 +58,14 @@ func TestServiceMarkReadSnoozeDismiss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := svc.MarkRead(ctx, "user-2", []uuid.UUID{item.ID}, true); err != nil {
-		t.Fatalf("mark read: %v", err)
+	if actionErr := svc.MarkRead(ctx, "user-2", []uuid.UUID{item.ID}, true); actionErr != nil {
+		t.Fatalf("mark read: %v", actionErr)
 	}
-	if err := svc.Snooze(ctx, "user-2", item.ID, time.Now().Add(2*time.Hour)); err != nil {
-		t.Fatalf("snooze: %v", err)
+	if actionErr := svc.Snooze(ctx, "user-2", item.ID, time.Now().Add(2*time.Hour)); actionErr != nil {
+		t.Fatalf("snooze: %v", actionErr)
 	}
-	if err := svc.Dismiss(ctx, "user-2", item.ID); err != nil {
-		t.Fatalf("dismiss: %v", err)
+	if actionErr := svc.Dismiss(ctx, "user-2", item.ID); actionErr != nil {
+		t.Fatalf("dismiss: %v", actionErr)
 	}
 	count, err := svc.BadgeCount(ctx, "user-2")
 	if err != nil {

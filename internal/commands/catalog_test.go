@@ -59,14 +59,14 @@ func TestCatalogCommands(t *testing.T) {
 		t.Fatalf("catalog: %v", err)
 	}
 
-	if err := cat.CreateDefinition.Execute(ctx, CreateDefinition{Code: "welcome", Name: "Welcome", AllowUpdate: true}); err != nil {
-		t.Fatalf("create definition: %v", err)
+	if executeErr := cat.CreateDefinition.Execute(ctx, CreateDefinition{Code: "welcome", Name: "Welcome", AllowUpdate: true}); executeErr != nil {
+		t.Fatalf("create definition: %v", executeErr)
 	}
-	if err := cat.SaveTemplate.Execute(ctx, TemplateUpsert{TemplateInput: templates.TemplateInput{Code: "welcome", Channel: "email", Locale: "en", Subject: "Hi", Body: "Body"}, AllowUpdate: true}); err != nil {
-		t.Fatalf("save template: %v", err)
+	if executeErr := cat.SaveTemplate.Execute(ctx, TemplateUpsert{TemplateInput: templates.TemplateInput{Code: "welcome", Channel: "email", Locale: "en", Subject: "Hi", Body: "Body"}, AllowUpdate: true}); executeErr != nil {
+		t.Fatalf("save template: %v", executeErr)
 	}
-	if err := cat.UpsertPreference.Execute(ctx, preferences.PreferenceInput{SubjectType: "user", SubjectID: "u1", DefinitionCode: "welcome", Channel: "email"}); err != nil {
-		t.Fatalf("upsert preference: %v", err)
+	if executeErr := cat.UpsertPreference.Execute(ctx, preferences.PreferenceInput{SubjectType: "user", SubjectID: "u1", DefinitionCode: "welcome", Channel: "email"}); executeErr != nil {
+		t.Fatalf("upsert preference: %v", executeErr)
 	}
 
 	item, err := inboxSvc.Create(ctx, inbox.CreateInput{UserID: "u1", Title: "Hello", Body: "World"})

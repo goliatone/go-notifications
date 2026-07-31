@@ -151,6 +151,9 @@ func asString(value any) string {
 	if value == nil {
 		return ""
 	}
-	text, _ := value.(string)
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
 	return text
 }

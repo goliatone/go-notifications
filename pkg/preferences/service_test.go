@@ -69,6 +69,3 @@ func newPublicService(t *testing.T, repo *memory.PreferenceRepository) *Service 
 	}
 	return svc
 }
-
-//go:fix inline
-func boolPtr(v bool) *bool { return new(v) }

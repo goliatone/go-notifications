@@ -35,7 +35,10 @@ func TestCachingResolverCachesUntilTTL(t *testing.T) {
 	counter := &countingResolver{
 		data: map[Reference]SecretValue{ref: val},
 	}
-	resolver := NewCachingResolver(counter, 50*time.Millisecond).(*CachingResolver)
+	resolver, ok := NewCachingResolver(counter, 50*time.Millisecond).(*CachingResolver)
+	if !ok {
+		t.Fatal("expected caching resolver")
+	}
 	resolver.now = func() time.Time { return time.Unix(0, 0) }
 
 	out, err := resolver.Resolve(ref)
@@ -71,7 +74,10 @@ func TestCachingResolverCachesUntilTTL(t *testing.T) {
 func TestCachingResolverPropagatesErrors(t *testing.T) {
 	ref := Reference{Scope: ScopeUser, SubjectID: "u1", Channel: "chat", Provider: "slack", Key: "token"}
 	counter := &countingResolver{err: errors.New("boom")}
-	resolver := NewCachingResolver(counter, time.Minute).(*CachingResolver)
+	resolver, ok := NewCachingResolver(counter, time.Minute).(*CachingResolver)
+	if !ok {
+		t.Fatal("expected caching resolver")
+	}
 	resolver.now = time.Now
 
 	if _, err := resolver.Resolve(ref); !errors.Is(err, counter.err) {

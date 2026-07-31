@@ -75,28 +75,28 @@ func TestTemplatesFromBlockSnapshot(t *testing.T) {
 		t.Fatalf("unexpected source type: %s", en.Source.Type)
 	}
 
-	subject, _ := en.Source.Payload["subject"].(string)
+	subject := mustValue[string](t, en.Source.Payload["subject"], "subject")
 	if subject == "" {
 		t.Fatalf("expected subject in payload: %#v", en.Source.Payload)
 	}
 
-	body, _ := en.Source.Payload["body"].(string)
+	body := mustValue[string](t, en.Source.Payload["body"], "body")
 	if body == "" {
 		t.Fatalf("expected body in payload")
 	}
 
-	blocks, ok := en.Source.Payload["blocks"].([]any)
-	if !ok || len(blocks) != 1 {
+	blocks := mustValue[[]any](t, en.Source.Payload["blocks"], "blocks")
+	if len(blocks) != 1 {
 		t.Fatalf("expected blocks array in payload: %#v", en.Source.Payload["blocks"])
 	}
 
-	config, ok := en.Source.Payload["configuration"].(map[string]any)
-	if !ok || config["layout"] != "hero" {
+	config := mustValue[map[string]any](t, en.Source.Payload["configuration"], "configuration")
+	if config["layout"] != "hero" {
 		t.Fatalf("expected configuration clone in payload: %#v", en.Source.Payload["configuration"])
 	}
 
-	metadata, ok := en.Source.Payload["metadata"].(map[string]any)
-	if !ok || metadata["definition"] != "notification.hero" {
+	metadata := mustValue[map[string]any](t, en.Source.Payload["metadata"], "metadata")
+	if metadata["definition"] != "notification.hero" {
 		t.Fatalf("expected metadata clone in payload: %#v", en.Source.Payload["metadata"])
 	}
 
@@ -112,7 +112,7 @@ func TestTemplatesFromBlockSnapshot(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected es template")
 	}
-	esBody, _ := es.Source.Payload["body"].(string)
+	esBody := mustValue[string](t, es.Source.Payload["body"], "body")
 	if esBody != "<p>Hola {{ Name }}</p>" {
 		t.Fatalf("expected override body, got %q", esBody)
 	}
@@ -155,19 +155,31 @@ func TestTemplatesFromWidgetDocument(t *testing.T) {
 	if payload == nil {
 		t.Fatalf("expected payload")
 	}
-	subject, _ := payload["subject"].(string)
+	subject := mustValue[string](t, payload["subject"], "subject")
 	if subject == "" {
 		t.Fatalf("expected subject in payload: %#v", payload)
 	}
-	blocks, _ := payload["blocks"].([]any)
+	blocks := mustValue[[]any](t, payload["blocks"], "blocks")
 	if len(blocks) != 1 {
 		t.Fatalf("expected blocks slice: %#v", payload["blocks"])
 	}
-	content, _ := payload["content"].(map[string]any)
+	content := mustValue[map[string]any](t, payload["content"], "content")
 	if _, ok := content["sections"]; !ok {
-		buf, _ := json.Marshal(payload)
+		buf, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			t.Fatalf("marshal diagnostic payload: %v", marshalErr)
+		}
 		t.Fatalf("expected content clone (payload=%s)", buf)
 	}
+}
+
+func mustValue[T any](t *testing.T, value any, name string) T {
+	t.Helper()
+	typed, ok := value.(T)
+	if !ok {
+		t.Fatalf("expected %s to have type %T, got %T", name, *new(T), value)
+	}
+	return typed
 }
 
 func TestTemplatesFromBlockSnapshotErrors(t *testing.T) {

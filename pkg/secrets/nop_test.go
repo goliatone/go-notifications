@@ -1,14 +1,17 @@
 package secrets
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestNopProvider(t *testing.T) {
 	ref := Reference{Scope: ScopeUser, SubjectID: "u1", Channel: "chat", Provider: "slack", Key: "token"}
 	var p NopProvider
-	if _, err := p.Get(ref); err != ErrNotFound {
+	if _, err := p.Get(ref); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound")
 	}
-	if err := p.Delete(ref); err != ErrUnsupported {
+	if err := p.Delete(ref); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("expected ErrUnsupported on delete")
 	}
 }

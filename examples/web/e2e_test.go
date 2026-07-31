@@ -24,14 +24,20 @@ func TestPhase7EndToEndDemo(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Features.EnableWebSocket = false
 	tmpDB := filepath.Join(os.TempDir(), "phase7-e2e-demo.db")
-	_ = os.Remove(tmpDB)
+	if err := os.Remove(tmpDB); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove stale test database: %v", err)
+	}
 	cfg.Persistence.DSN = "file:phase7-e2e?mode=memory&cache=shared&_busy_timeout=5000&_fk=1"
 
 	lgr := &captureLogger{}
 	app, fakes := buildTestApp(ctx, t, cfg, lgr)
 	t.Cleanup(func() {
-		_ = app.Close()
-		_ = os.Remove(tmpDB)
+		if err := app.Close(); err != nil {
+			t.Errorf("close app: %v", err)
+		}
+		if err := os.Remove(tmpDB); err != nil && !os.IsNotExist(err) {
+			t.Errorf("remove test database: %v", err)
+		}
 	})
 
 	bob := app.Users["bob@example.com"]
@@ -236,7 +242,11 @@ func (m *capturingMessenger) logMaskedSecrets(msg adapters.Message) {
 	if !ok {
 		return
 	}
-	userID, _ := msg.Metadata["recipient_id"].(string)
+	userID, ok := msg.Metadata["recipient_id"].(string)
+	if !ok {
+		m.logger.Warn("recipient identifier is not a string")
+		return
+	}
 	values := make(map[secrets.Reference]secrets.SecretValue)
 
 	switch secretsMap := raw.(type) {

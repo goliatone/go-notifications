@@ -98,10 +98,10 @@ func TestTemplatesRenderEmailAndInApp(t *testing.T) {
 	if !strings.Contains(email.Subject, `orders.csv`) {
 		t.Fatalf("email subject missing filename: %s", email.Subject)
 	}
-	if !strings.Contains(email.Body, payload["url"].(string)) {
+	if !strings.Contains(email.Body, mustPayloadString(t, payload, "url")) {
 		t.Fatalf("email body missing URL: %s", email.Body)
 	}
-	if !strings.Contains(email.Body, payload["manifest_url"].(string)) {
+	if !strings.Contains(email.Body, mustPayloadString(t, payload, "manifest_url")) {
 		t.Fatalf("email body missing manifest URL: %s", email.Body)
 	}
 	if !strings.Contains(email.Body, "Rows: 1200") || !strings.Contains(email.Body, "Parts: 3") {
@@ -125,9 +125,18 @@ func TestTemplatesRenderEmailAndInApp(t *testing.T) {
 	if strings.Contains(inapp.Body, "Rows:") || strings.Contains(inapp.Body, "Parts:") || strings.Contains(inapp.Body, "Manifest") {
 		t.Fatalf("in-app body should omit optional fields when absent: %s", inapp.Body)
 	}
-	if !strings.Contains(inapp.Subject, payload["file_name"].(string)) {
+	if !strings.Contains(inapp.Subject, mustPayloadString(t, payload, "file_name")) {
 		t.Fatalf("in-app subject missing filename: %s", inapp.Subject)
 	}
+}
+
+func mustPayloadString(t *testing.T, payload map[string]any, key string) string {
+	t.Helper()
+	value, ok := payload[key].(string)
+	if !ok {
+		t.Fatalf("expected payload %q to be a string, got %T", key, payload[key])
+	}
+	return value
 }
 
 func TestTemplatesRespectChannelOverrides(t *testing.T) {

@@ -108,9 +108,3 @@ func TestPreferenceSnapshotStoreSaveCreatesAndUpdates(t *testing.T) {
 		t.Fatalf("subscriptions not stored: %+v", updated.AdditionalRules)
 	}
 }
-
-//go:fix inline
-func boolPtr(v bool) *bool { return new(v) }
-
-//go:fix inline
-func stringPtr(v string) *string { return new(v) }
