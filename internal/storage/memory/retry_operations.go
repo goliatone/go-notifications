@@ -65,7 +65,18 @@ func (r *RetryOperationRepository) List(ctx context.Context, opts store.ListOpti
 }
 
 func (r *RetryOperationRepository) SoftDelete(ctx context.Context, id uuid.UUID) error {
-	return r.base.softDelete(ctx, id)
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	operation, ok := r.base.records[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	now := time.Now().UTC()
+	operation.DeletedAt = now
+	operation.UpdatedAt = now
+	r.base.records[id] = operation
+	delete(r.identity, retryIdentity(operation.EventID, operation.RetryScope, operation.IdempotencyKey))
+	return nil
 }
 
 func (r *RetryOperationRepository) Claim(_ context.Context, id uuid.UUID, until time.Time) (bool, error) {
@@ -76,7 +87,7 @@ func (r *RetryOperationRepository) Claim(_ context.Context, id uuid.UUID, until 
 		return false, store.ErrNotFound
 	}
 	now := time.Now().UTC()
-	if item.Status == domain.RetryStatusCompleted {
+	if item.Status == domain.RetryStatusCompleted || item.Status == domain.RetryStatusFailed {
 		return false, nil
 	}
 	if item.Status == domain.RetryStatusProcessing && item.ClaimUntil.After(now) {

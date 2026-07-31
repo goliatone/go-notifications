@@ -18,6 +18,59 @@ type baseMemoryRepo[T any] struct {
 	entityStr string
 }
 
+type memoryCRUDRepository[T any] struct {
+	base       baseMemoryRepo[T]
+	initialize func(*T)
+}
+
+func newMemoryCRUDRepository[T any](
+	entity string,
+	extract func(*T) *domain.RecordMeta,
+	initialize func(*T),
+) memoryCRUDRepository[T] {
+	return memoryCRUDRepository[T]{
+		base:       newBaseMemoryRepo(entity, extract),
+		initialize: initialize,
+	}
+}
+
+func (r *memoryCRUDRepository[T]) Create(ctx context.Context, record *T) error {
+	if r.initialize != nil {
+		r.initialize(record)
+	}
+	return r.base.create(ctx, record)
+}
+
+func (r *memoryCRUDRepository[T]) Update(ctx context.Context, record *T) error {
+	return r.base.update(ctx, record)
+}
+
+func (r *memoryCRUDRepository[T]) GetByID(ctx context.Context, id uuid.UUID) (*T, error) {
+	return r.base.getByID(ctx, id, false)
+}
+
+func (r *memoryCRUDRepository[T]) List(ctx context.Context, opts store.ListOptions) (store.ListResult[T], error) {
+	return r.base.list(ctx, opts)
+}
+
+func (r *memoryCRUDRepository[T]) SoftDelete(ctx context.Context, id uuid.UUID) error {
+	return r.base.softDelete(ctx, id)
+}
+
+func (r *memoryCRUDRepository[T]) listMatching(ctx context.Context, matches func(T) bool) ([]T, error) {
+	result, err := r.base.list(ctx, store.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]T, 0)
+	for _, item := range result.Items {
+		if matches(item) {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
 func newBaseMemoryRepo[T any](entity string, extract func(*T) *domain.RecordMeta) baseMemoryRepo[T] {
 	return baseMemoryRepo[T]{
 		records:   make(map[uuid.UUID]T),

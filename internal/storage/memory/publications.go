@@ -50,8 +50,10 @@ func (r *PublicationRepository) ListPending(ctx context.Context, limit int) ([]d
 		return nil, err
 	}
 	out := make([]domain.NotificationPublication, 0)
+	now := time.Now().UTC()
 	for _, item := range result.Items {
-		if item.Status == domain.PublicationStatusPending {
+		if item.Status == domain.PublicationStatusPending ||
+			(item.Status == domain.PublicationStatusProcessing && !item.ClaimUntil.After(now)) {
 			out = append(out, item)
 			if limit > 0 && len(out) == limit {
 				break
@@ -76,6 +78,31 @@ func (r *PublicationRepository) FindOpenDigest(ctx context.Context, digestKey st
 	return nil, store.ErrNotFound
 }
 
+func (r *PublicationRepository) CreateOrGetOpenDigest(_ context.Context, value *domain.NotificationPublication) (*domain.NotificationPublication, bool, error) {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	for _, item := range r.base.records {
+		if item.DigestKey == value.DigestKey && item.DeletedAt.IsZero() &&
+			(item.Status == domain.PublicationStatusPending ||
+				item.Status == domain.PublicationStatusPublished) {
+			copy := item
+			return &copy, false, nil
+		}
+	}
+	value.EnsureID()
+	now := time.Now().UTC()
+	if value.CreatedAt.IsZero() {
+		value.CreatedAt = now
+	}
+	value.UpdatedAt = now
+	if value.Status == "" {
+		value.Status = domain.PublicationStatusPending
+	}
+	r.base.records[value.ID] = *value
+	copy := *value
+	return &copy, true, nil
+}
+
 func (r *PublicationRepository) Claim(_ context.Context, id uuid.UUID, until time.Time) (bool, error) {
 	r.base.mu.Lock()
 	defer r.base.mu.Unlock()
@@ -84,10 +111,16 @@ func (r *PublicationRepository) Claim(_ context.Context, id uuid.UUID, until tim
 		return false, store.ErrNotFound
 	}
 	now := time.Now().UTC()
-	if item.Status == domain.PublicationStatusCompleted {
+	if item.Status == domain.PublicationStatusCompleted ||
+		item.Status == domain.PublicationStatusFailed {
 		return false, nil
 	}
 	if item.Status == domain.PublicationStatusProcessing && item.ClaimUntil.After(now) {
+		return false, nil
+	}
+	if item.Status != domain.PublicationStatusPending &&
+		item.Status != domain.PublicationStatusPublished &&
+		item.Status != domain.PublicationStatusProcessing {
 		return false, nil
 	}
 	item.Status = domain.PublicationStatusProcessing
