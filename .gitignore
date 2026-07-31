@@ -26,3 +26,4 @@ vendor/
 node_modules/
 .envset
 tmp
+.tmp
