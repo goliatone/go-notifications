@@ -7,8 +7,9 @@ CREATE TABLE IF NOT EXISTS notification_definitions (
 CREATE TABLE IF NOT EXISTS notification_templates (
   id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMPTZ,
-  code TEXT NOT NULL UNIQUE, channel TEXT NOT NULL, description TEXT, body TEXT,
-  subject TEXT, locale TEXT, format TEXT, revision INTEGER, source JSONB, schema JSONB, metadata JSONB
+  code TEXT NOT NULL, channel TEXT NOT NULL, description TEXT, body TEXT,
+  subject TEXT, locale TEXT, format TEXT, revision INTEGER, source JSONB, schema JSONB, metadata JSONB,
+  UNIQUE (code, channel, locale)
 );
 CREATE TABLE IF NOT EXISTS notification_events (
   id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -20,12 +21,14 @@ CREATE TABLE IF NOT EXISTS notification_messages (
   id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMPTZ,
   event_id UUID NOT NULL, channel TEXT NOT NULL, locale TEXT, subject TEXT, body TEXT,
-  action_url TEXT, manifest_url TEXT, url TEXT, receiver TEXT NOT NULL, status TEXT, metadata JSONB
+  action_url TEXT, manifest_url TEXT, url TEXT, receiver TEXT NOT NULL, status TEXT, metadata JSONB,
+  FOREIGN KEY (event_id) REFERENCES notification_events(id)
 );
 CREATE TABLE IF NOT EXISTS notification_delivery_attempts (
   id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMPTZ,
-  message_id UUID NOT NULL, adapter TEXT NOT NULL, status TEXT, error TEXT, payload JSONB
+  message_id UUID NOT NULL, adapter TEXT NOT NULL, status TEXT, error TEXT, payload JSONB,
+  FOREIGN KEY (message_id) REFERENCES notification_messages(id)
 );
 CREATE TABLE IF NOT EXISTS notification_preferences (
   id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -43,5 +46,17 @@ CREATE TABLE IF NOT EXISTS notification_inbox_items (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMPTZ,
   user_id TEXT NOT NULL, message_id UUID, title TEXT, body TEXT, locale TEXT,
   unread BOOLEAN, pinned BOOLEAN, action_url TEXT, metadata JSONB,
-  read_at TIMESTAMPTZ, dismissed_at TIMESTAMPTZ, snoozed_until TIMESTAMPTZ
+  read_at TIMESTAMPTZ, dismissed_at TIMESTAMPTZ, snoozed_until TIMESTAMPTZ,
+  FOREIGN KEY (message_id) REFERENCES notification_messages(id)
 );
+
+CREATE INDEX IF NOT EXISTS notification_templates_lookup_idx
+  ON notification_templates (code, channel, locale);
+CREATE INDEX IF NOT EXISTS notification_messages_event_idx
+  ON notification_messages (event_id);
+CREATE INDEX IF NOT EXISTS notification_delivery_attempts_message_idx
+  ON notification_delivery_attempts (message_id);
+CREATE INDEX IF NOT EXISTS notification_preferences_subject_idx
+  ON notification_preferences (subject_type, subject_id);
+CREATE INDEX IF NOT EXISTS notification_inbox_items_user_idx
+  ON notification_inbox_items (user_id, unread, created_at);

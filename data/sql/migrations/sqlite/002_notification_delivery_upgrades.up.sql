@@ -13,8 +13,12 @@ ALTER TABLE notification_delivery_attempts ADD COLUMN retry_operation_id TEXT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS notification_events_idempotency_uidx
   ON notification_events (idempotency_scope, definition_code, idempotency_key)
-  WHERE idempotency_key IS NOT NULL AND idempotency_key <> '' AND deleted_at IS NULL;
+  WHERE idempotency_key IS NOT NULL AND idempotency_key <> '';
 CREATE INDEX IF NOT EXISTS notification_events_publication_idx ON notification_events (publication_id);
+CREATE INDEX IF NOT EXISTS notification_messages_retry_operation_idx
+  ON notification_messages (retry_operation_id);
+CREATE INDEX IF NOT EXISTS notification_delivery_attempts_retry_operation_idx
+  ON notification_delivery_attempts (retry_operation_id);
 
 CREATE TABLE IF NOT EXISTS notification_publications (
   id TEXT PRIMARY KEY, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -26,6 +30,9 @@ CREATE INDEX IF NOT EXISTS notification_publications_pending_idx
   ON notification_publications (status, run_at);
 CREATE INDEX IF NOT EXISTS notification_publications_digest_idx
   ON notification_publications (digest_key, status);
+CREATE UNIQUE INDEX IF NOT EXISTS notification_publications_open_digest_uidx
+  ON notification_publications (digest_key)
+  WHERE kind = 'digest' AND status IN ('pending', 'published') AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS notification_retry_operations (
   id TEXT PRIMARY KEY, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -36,3 +43,5 @@ CREATE TABLE IF NOT EXISTS notification_retry_operations (
 CREATE UNIQUE INDEX IF NOT EXISTS notification_retry_operations_identity_uidx
   ON notification_retry_operations (event_id, retry_scope, idempotency_key)
   WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS notification_retry_operations_event_idx
+  ON notification_retry_operations (event_id, status);
