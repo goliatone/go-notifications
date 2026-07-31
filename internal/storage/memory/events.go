@@ -2,7 +2,9 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"time"
 
 	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
@@ -10,12 +12,14 @@ import (
 )
 
 type EventRepository struct {
-	base baseMemoryRepo[domain.NotificationEvent]
+	base     baseMemoryRepo[domain.NotificationEvent]
+	identity map[string]uuid.UUID
 }
 
 func NewEventRepository() *EventRepository {
 	return &EventRepository{
-		base: newBaseMemoryRepo("event", func(e *domain.NotificationEvent) *domain.RecordMeta { return &e.RecordMeta }),
+		base:     newBaseMemoryRepo("event", func(e *domain.NotificationEvent) *domain.RecordMeta { return &e.RecordMeta }),
+		identity: make(map[string]uuid.UUID),
 	}
 }
 
@@ -23,7 +27,48 @@ func (r *EventRepository) Create(ctx context.Context, event *domain.Notification
 	if event.Status == "" {
 		event.Status = domain.EventStatusPending
 	}
-	return r.base.create(ctx, event)
+	_, _, err := r.CreateIdempotent(ctx, event)
+	return err
+}
+
+func (r *EventRepository) CreateIdempotent(_ context.Context, event *domain.NotificationEvent) (*domain.NotificationEvent, bool, error) {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+
+	if event.Status == "" {
+		event.Status = domain.EventStatusPending
+	}
+	key := eventIdentity(event.IdempotencyScope, event.DefinitionCode, event.IdempotencyKey)
+	if event.IdempotencyKey != "" {
+		if id, ok := r.identity[key]; ok {
+			stored := r.base.records[id]
+			copy := stored
+			return &copy, false, nil
+		}
+	}
+	event.EnsureID()
+	now := time.Now().UTC()
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = now
+	}
+	event.UpdatedAt = now
+	r.base.records[event.ID] = *event
+	if event.IdempotencyKey != "" {
+		r.identity[key] = event.ID
+	}
+	copy := *event
+	return &copy, true, nil
+}
+
+func (r *EventRepository) GetByIdempotency(_ context.Context, scope, definitionCode, key string) (*domain.NotificationEvent, error) {
+	r.base.mu.RLock()
+	defer r.base.mu.RUnlock()
+	id, ok := r.identity[eventIdentity(scope, definitionCode, key)]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	event := r.base.records[id]
+	return &event, nil
 }
 
 func (r *EventRepository) Update(ctx context.Context, event *domain.NotificationEvent) error {
@@ -59,6 +104,20 @@ func (r *EventRepository) ListPending(ctx context.Context, limit int) ([]domain.
 	return pending, nil
 }
 
+func (r *EventRepository) ListByPublication(ctx context.Context, publicationID uuid.UUID) ([]domain.NotificationEvent, error) {
+	result, err := r.base.list(ctx, store.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]domain.NotificationEvent, 0)
+	for _, event := range result.Items {
+		if event.PublicationID == publicationID {
+			items = append(items, event)
+		}
+	}
+	return items, nil
+}
+
 func (r *EventRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
 	event, err := r.base.getByID(ctx, id, true)
 	if err != nil {
@@ -66,4 +125,30 @@ func (r *EventRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status
 	}
 	event.Status = status
 	return r.base.update(ctx, event)
+}
+
+func (r *EventRepository) ClaimRetry(_ context.Context, id uuid.UUID, until time.Time) (bool, error) {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	event, ok := r.base.records[id]
+	if !ok {
+		return false, store.ErrNotFound
+	}
+	now := time.Now().UTC()
+	if event.Status == domain.EventStatusRetrying && event.RetryClaimUntil.After(now) {
+		return false, nil
+	}
+	if event.Status != domain.EventStatusFailed && event.Status != domain.EventStatusPartial &&
+		(event.Status != domain.EventStatusRetrying || event.RetryClaimUntil.After(now)) {
+		return false, nil
+	}
+	event.Status = domain.EventStatusRetrying
+	event.RetryClaimUntil = until
+	event.UpdatedAt = now
+	r.base.records[id] = event
+	return true, nil
+}
+
+func eventIdentity(scope, definitionCode, key string) string {
+	return fmt.Sprintf("%s\x00%s\x00%s", scope, definitionCode, key)
 }
