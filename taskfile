@@ -22,9 +22,14 @@ PATH=$(pwd)/node_modules/.bin:$PATH
 # This will make all scripts available in the ./src/bin directory
 PATH=$(pwd)/src/bin:$PATH
 
-GO_CACHE_DIR=${GO_CACHE_DIR:-$(pwd)/tmp/go-cache}
-mkdir -p "${GO_CACHE_DIR}"
-export GOCACHE=${GOCACHE:-${GO_CACHE_DIR}}
+GO_TOOLCHAIN="${GO_TOOLCHAIN:-local}"
+GO_GOLANGCI_LINT_VERSION="${GO_GOLANGCI_LINT_VERSION:-v2.12.2}"
+GO_GOLANGCI_LINT_VERSION_FILE="${GO_GOLANGCI_LINT_VERSION_FILE:-.golangci-lint-version}"
+GO_GOVULNCHECK_VERSION="${GO_GOVULNCHECK_VERSION:-v1.1.4}"
+GO_GOSEC_VERSION="${GO_GOSEC_VERSION:-v2.25.0}"
+GO_QUALITY_GOCACHE="${GO_QUALITY_GOCACHE:-$(pwd)/.tmp/go-cache}"
+GO_QUALITY_GOTMPDIR="${GO_QUALITY_GOTMPDIR:-$(pwd)/.tmp/go-tmp}"
+GO_LINT_NEW_FROM_REV="${GO_LINT_NEW_FROM_REV:-origin/main}"
 
 
 #################################################
@@ -73,6 +78,139 @@ function _install:envset {
     fi
 }
 
+function _go:bin {
+    if command -v go >/dev/null 2>&1; then
+        command -v go
+        return 0
+    fi
+
+    echo "go binary not found in PATH" >&2
+    return 1
+}
+
+function _go:quality:prepare_env {
+    export GOCACHE="${GOCACHE:-${GO_QUALITY_GOCACHE}}"
+    export GOTMPDIR="${GOTMPDIR:-${GO_QUALITY_GOTMPDIR}}"
+    mkdir -p "${GOCACHE}" "${GOTMPDIR}"
+}
+
+function _go:golangci_lint_version {
+    if [ -f "${GO_GOLANGCI_LINT_VERSION_FILE}" ]; then
+        awk 'NF { print $1; exit }' "${GO_GOLANGCI_LINT_VERSION_FILE}"
+        return 0
+    fi
+
+    printf '%s\n' "${GO_GOLANGCI_LINT_VERSION}"
+}
+
+function _go:tool_bin_dir {
+    local go_bin
+    local gobin
+    local gopath
+
+    go_bin=$(_go:bin) || return 1
+    gobin="$("${go_bin}" env GOBIN)"
+    if [ -n "${gobin}" ]; then
+        printf '%s\n' "${gobin}"
+        return 0
+    fi
+
+    gopath="$("${go_bin}" env GOPATH)"
+    if [ -n "${gopath}" ]; then
+        printf '%s\n' "${gopath%/}/bin"
+        return 0
+    fi
+
+    echo "unable to resolve Go tool bin directory" >&2
+    return 1
+}
+
+function _go:tool:path {
+    local name=$1
+    local bin_dir
+
+    if command -v "${name}" >/dev/null 2>&1; then
+        command -v "${name}"
+        return 0
+    fi
+
+    bin_dir=$(_go:tool_bin_dir) || return 1
+    if [ -x "${bin_dir}/${name}" ]; then
+        printf '%s\n' "${bin_dir}/${name}"
+        return 0
+    fi
+
+    return 1
+}
+
+function _go:tool:matches {
+    local path=$1
+    local module=$2
+    local version=$3
+
+    go version -m "${path}" 2>/dev/null \
+        | awk -v module="${module}" -v version="${version}" \
+            '$1 == "mod" && $2 == module && $3 == version { found = 1 } END { exit !found }'
+}
+
+function _go:tool:install {
+    local name=$1
+    local target=$2
+    local go_bin
+
+    go_bin=$(_go:bin) || return 1
+    _go:quality:prepare_env || return 1
+    echo "Installing ${name} (${target})" >&2
+    GOTOOLCHAIN="${GO_TOOLCHAIN}" "${go_bin}" install "${target}" || return 1
+    _go:tool:path "${name}" || return 1
+}
+
+function _go:tool:ensure {
+    local name=$1
+    local module=$2
+    local version=$3
+    local target=$4
+    local tool_path
+
+    if tool_path=$(_go:tool:path "${name}" 2>/dev/null); then
+        if _go:tool:matches "${tool_path}" "${module}" "${version}"; then
+            printf '%s\n' "${tool_path}"
+            return 0
+        fi
+    fi
+
+    _go:tool:install "${name}" "${target}"
+}
+
+function _go:module_dirs {
+    printf '%s\n' "."
+    if [ -f "examples/web/go.mod" ]; then
+        printf '%s\n' "examples/web"
+    fi
+}
+
+function _go:run_in_modules {
+    local module
+
+    while IFS= read -r module; do
+        if [ "${module}" = "." ]; then
+            "$@" || return 1
+        else
+            (cd "${module}" && "$@") || return 1
+        fi
+    done < <(_go:module_dirs)
+}
+
+function _go:files {
+    find . -type f -name '*.go' \
+        -not -path './.git/*' \
+        -not -path './.ctx/*' \
+        -not -path './.tmp/*' \
+        -not -path './tmp/*' \
+        -not -path './node_modules/*' \
+        | sort
+}
+
 ##########################################
 # Application management
 ##########################################
@@ -111,9 +249,9 @@ function dev:cover {
 ##
 ## test
 ##
-## Run Go unit tests
+## Run Go unit tests in every module
 function test {
-    go test ./...
+    go:test "$@"
 }
 
 ##
@@ -123,18 +261,209 @@ function test {
 ##
 ## Run Go linters via golangci-lint
 function lint {
-    local timeout="${GOLANGCI_LINT_TIMEOUT:-5m}"
-    golangci-lint run --timeout="${timeout}" ./...
+    go:lint "$@"
 }
 
-##
-## -----
-##
-## lint:errcheck
-##
-## Run errcheck to ensure critical errors are not silently ignored.
-function lint:errcheck {
-    go run github.com/kisielk/errcheck@v1.9.0 ./...
+function go:tools:golangci-lint {
+    local version
+
+    version="$(_go:golangci_lint_version)" || return 1
+    _go:tool:install \
+        "golangci-lint" \
+        "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${version}"
+}
+
+function go:tools:govulncheck {
+    _go:tool:install \
+        "govulncheck" \
+        "golang.org/x/vuln/cmd/govulncheck@${GO_GOVULNCHECK_VERSION}"
+}
+
+function go:tools:gosec {
+    _go:tool:install \
+        "gosec" \
+        "github.com/securego/gosec/v2/cmd/gosec@${GO_GOSEC_VERSION}"
+}
+
+function go:tools:all {
+    go:tools:golangci-lint || return 1
+    go:tools:govulncheck || return 1
+    go:tools:gosec || return 1
+}
+
+function go:fmt {
+    local gofmt_bin
+    local -a files=()
+
+    gofmt_bin="$(dirname "$(_go:bin)")/gofmt"
+    while IFS= read -r file; do
+        if [ -n "${file}" ]; then
+            files+=("${file}")
+        fi
+    done < <(_go:files)
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "No Go files found"
+        return 0
+    fi
+
+    "${gofmt_bin}" -w "${files[@]}"
+}
+
+function go:fix {
+    local go_bin
+
+    go_bin=$(_go:bin) || return 1
+    _go:quality:prepare_env || return 1
+    _go:run_in_modules "${go_bin}" fix ./...
+}
+
+function go:fmt:check {
+    local gofmt_bin
+    local -a files=()
+    local unformatted
+
+    gofmt_bin="$(dirname "$(_go:bin)")/gofmt"
+    while IFS= read -r file; do
+        if [ -n "${file}" ]; then
+            files+=("${file}")
+        fi
+    done < <(_go:files)
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "No Go files found"
+        return 0
+    fi
+
+    unformatted="$("${gofmt_bin}" -l "${files[@]}")"
+    if [ -n "${unformatted}" ]; then
+        echo "The following Go files need formatting:"
+        echo "${unformatted}"
+        return 1
+    fi
+}
+
+function go:test {
+    local go_bin
+
+    go_bin=$(_go:bin) || return 1
+    _go:quality:prepare_env || return 1
+    _go:run_in_modules "${go_bin}" test "$@" ./...
+}
+
+function go:race {
+    local go_bin
+
+    go_bin=$(_go:bin) || return 1
+    _go:quality:prepare_env || return 1
+    _go:run_in_modules "${go_bin}" test -race -count=1 "$@" ./...
+}
+
+function go:cover {
+    local go_bin
+    local module
+    local output_file=${GO_COVERPROFILE:-coverage.out}
+
+    go_bin=$(_go:bin) || return 1
+    _go:quality:prepare_env || return 1
+    while IFS= read -r module; do
+        if [ "${module}" = "." ]; then
+            "${go_bin}" test -coverprofile="${output_file}" ./... \
+                && "${go_bin}" tool cover -func "${output_file}" || return 1
+        else
+            (cd "${module}" \
+                && "${go_bin}" test -coverprofile="${output_file}" ./... \
+                && "${go_bin}" tool cover -func "${output_file}") || return 1
+        fi
+    done < <(_go:module_dirs)
+}
+
+function _go:golangci-lint:ensure {
+    local version
+
+    version="$(_go:golangci_lint_version)" || return 1
+    _go:tool:ensure \
+        "golangci-lint" \
+        "github.com/golangci/golangci-lint/v2" \
+        "${version}" \
+        "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${version}"
+}
+
+function go:lint {
+    local golangci_lint_bin
+
+    golangci_lint_bin=$(_go:golangci-lint:ensure) || return 1
+    _go:quality:prepare_env || return 1
+    _go:run_in_modules "${golangci_lint_bin}" run "$@" ./...
+}
+
+function go:lint:fix {
+    local golangci_lint_bin
+
+    golangci_lint_bin=$(_go:golangci-lint:ensure) || return 1
+    _go:quality:prepare_env || return 1
+    _go:run_in_modules "${golangci_lint_bin}" run --fix "$@" ./...
+}
+
+function go:lint:new {
+    local golangci_lint_bin
+
+    golangci_lint_bin=$(_go:golangci-lint:ensure) || return 1
+    _go:quality:prepare_env || return 1
+    _go:run_in_modules \
+        "${golangci_lint_bin}" run \
+        --new-from-rev="${GO_LINT_NEW_FROM_REV}" \
+        --whole-files "$@" ./...
+}
+
+function go:lint:report {
+    local golangci_lint_bin
+
+    golangci_lint_bin=$(_go:golangci-lint:ensure) || return 1
+    _go:quality:prepare_env || return 1
+    _go:run_in_modules \
+        "${golangci_lint_bin}" run --issues-exit-code=0 "$@" ./...
+}
+
+function go:security:govulncheck {
+    local govulncheck_bin
+
+    govulncheck_bin=$(_go:tool:ensure \
+        "govulncheck" \
+        "golang.org/x/vuln" \
+        "${GO_GOVULNCHECK_VERSION}" \
+        "golang.org/x/vuln/cmd/govulncheck@${GO_GOVULNCHECK_VERSION}") || return 1
+    _go:quality:prepare_env || return 1
+    _go:run_in_modules "${govulncheck_bin}" "$@" ./...
+}
+
+function go:security:gosec {
+    local gosec_bin
+
+    gosec_bin=$(_go:tool:ensure \
+        "gosec" \
+        "github.com/securego/gosec/v2" \
+        "${GO_GOSEC_VERSION}" \
+        "github.com/securego/gosec/v2/cmd/gosec@${GO_GOSEC_VERSION}") || return 1
+    _go:quality:prepare_env || return 1
+    _go:run_in_modules "${gosec_bin}" -exclude-dir=.tmp "$@" ./...
+}
+
+function go:security:all {
+    go:security:govulncheck "$@" || return 1
+    go:security:gosec "$@" || return 1
+}
+
+function go:quality:pr {
+    go:fmt:check || return 1
+    go:test || return 1
+    go:lint:new || return 1
+}
+
+function go:quality:all {
+    go:fmt:check || return 1
+    go:test || return 1
+    go:race || return 1
+    go:lint || return 1
+    go:security:all || return 1
 }
 
 
@@ -213,16 +542,39 @@ function go:mod:update {
 ##
 ## docs:lint
 ##
-## Lint Markdown docs using markdownlint (CLI or npx)
-## Uses DOCS_LINT_GLOB environment variable or defaults to **/*.md
+## Lint changed, tracked Markdown docs using markdownlint (CLI or npx)
+## DOCS_LINT_BASE selects the comparison commit; DOCS_LINT_GLOB can override
+## changed-file discovery for an explicit local full-tree check.
 function docs:lint {
-    local docs_glob="${DOCS_LINT_GLOB:-**/*.md}"
+    local docs_base="${DOCS_LINT_BASE:-${GO_LINT_NEW_FROM_REV}}"
+    local -a docs=()
 
     set -euo pipefail
+    if [ -n "${DOCS_LINT_GLOB:-}" ]; then
+        while IFS= read -r file; do
+            [ -n "${file}" ] && docs+=("${file}")
+        done < <(find . -type f -name "${DOCS_LINT_GLOB}" \
+            -not -path './.git/*' -not -path './.ctx/*' \
+            -not -path './.tmp/*' -not -path './tmp/*' \
+            -not -path './node_modules/*' | sort)
+    elif git rev-parse --verify "${docs_base}^{commit}" >/dev/null 2>&1; then
+        while IFS= read -r file; do
+            case "${file}" in
+                .ctx/*|.tmp/*|tmp/*|node_modules/*) continue ;;
+            esac
+            [ -n "${file}" ] && docs+=("${file}")
+        done < <(git diff --name-only --diff-filter=ACMR "${docs_base}" HEAD -- '*.md')
+    fi
+
+    if [ "${#docs[@]}" -eq 0 ]; then
+        echo "No changed Markdown files to lint"
+        return 0
+    fi
+
     if command -v markdownlint >/dev/null 2>&1; then
-        markdownlint $docs_glob
+        markdownlint "${docs[@]}"
     elif command -v npx >/dev/null 2>&1; then
-        npx --yes markdownlint-cli2 "$docs_glob"
+        npx --yes markdownlint-cli2 "${docs[@]}"
     else
         echo "markdownlint (or npx) is required for docs:lint" >&2
         exit 1
@@ -266,7 +618,7 @@ function test:onready {
 ##
 ## Run linters, tests, and docs checks
 function ci {
-    lint && lint:errcheck && test && samples && ci:onready
+    go:quality:all && docs:lint && samples && ci:onready
 }
 
 ##
