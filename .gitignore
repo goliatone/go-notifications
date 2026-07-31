@@ -27,3 +27,4 @@ node_modules/
 .envset
 tmp
 .tmp
+**/__pycache__
