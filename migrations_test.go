@@ -369,7 +369,7 @@ func TestSQLiteCRMOrderedMigrationCompositionIsRepeatableAndDetectsDrift(t *test
 	}
 }
 
-func TestSQLiteCRMOrderedMigrationCompositionUpgradesExistingUsersJournal(t *testing.T) { //nolint:gocyclo // Linear upgrade and safety fixture.
+func TestSQLiteCRMOrderedMigrationCompositionUpgradesExistingUsersJournal(t *testing.T) { //nolint:gocyclo,funlen // Linear upgrade and safety fixture.
 	db, sqldb := newSQLiteMigrationDB(t)
 	ctx := context.Background()
 	users := persistence.NewStableOrderedMigrationSource(
@@ -407,6 +407,9 @@ func TestSQLiteCRMOrderedMigrationCompositionUpgradesExistingUsersJournal(t *tes
 	}
 	if migrateErr := upgraded.Migrate(ctx, db); !errors.Is(migrateErr, persistence.ErrOrderedSourceDrift) {
 		t.Fatalf("expected explicit graph repair gate, got %v", migrateErr)
+	}
+	if adoptionErr := notifications.AdoptAdditiveOrderedMigrationGraph(ctx, db, baseline); !errors.Is(adoptionErr, notifications.ErrUnsafeMigrationGraphAdoption) {
+		t.Fatalf("expected no-op graph adoption rejection, got %v", adoptionErr)
 	}
 	unsafePrefix := persistence.NewStableOrderedMigrationSource(
 		"unsafe-prefix",

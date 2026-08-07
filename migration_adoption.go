@@ -49,26 +49,26 @@ func AdoptAdditiveOrderedMigrationGraph(ctx context.Context, db *bun.DB, manager
 	if err != nil {
 		return err
 	}
-	var persisted []orderedSourceIdentityRecord
-	if scanErr := db.NewSelect().Model(&persisted).Scan(ctx); scanErr != nil {
-		return fmt.Errorf("%w: load persisted graph: %w", ErrUnsafeMigrationGraphAdoption, scanErr)
-	}
-	if len(persisted) == 0 {
-		return fmt.Errorf("%w: no persisted source-stable graph to extend", ErrUnsafeMigrationGraphAdoption)
-	}
 	expectedByKey := make(map[string]orderedSourceIdentityRecord, len(expected))
 	for _, row := range expected {
 		expectedByKey[row.SourceKey] = row
 	}
-	maxOrder, maxPosition, persistedKeys, err := validatePersistedSources(persisted, expectedByKey)
-	if err != nil {
-		return err
-	}
-	if err := validateAdditiveSources(expected, persistedKeys, maxOrder, maxPosition); err != nil {
-		return err
-	}
 	now := time.Now().UTC()
 	return db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var persisted []orderedSourceIdentityRecord
+		if scanErr := tx.NewSelect().Model(&persisted).Scan(ctx); scanErr != nil {
+			return fmt.Errorf("%w: load persisted graph: %w", ErrUnsafeMigrationGraphAdoption, scanErr)
+		}
+		if len(persisted) == 0 {
+			return fmt.Errorf("%w: no persisted source-stable graph to extend", ErrUnsafeMigrationGraphAdoption)
+		}
+		maxOrder, maxPosition, persistedKeys, validationErr := validatePersistedSources(persisted, expectedByKey)
+		if validationErr != nil {
+			return validationErr
+		}
+		if validationErr := validateAdditiveSources(expected, persistedKeys, maxOrder, maxPosition); validationErr != nil {
+			return validationErr
+		}
 		for i := range expected {
 			expected[i].GraphFingerprint = fingerprint
 			expected[i].UpdatedAt = now
@@ -108,13 +108,18 @@ func validateAdditiveSources(
 	maxOrder int,
 	maxPosition int,
 ) error {
+	added := 0
 	for _, candidate := range expected {
 		if _, exists := persistedKeys[candidate.SourceKey]; exists {
 			continue
 		}
+		added++
 		if candidate.SourceOrder <= maxOrder || candidate.ResolvedPosition <= maxPosition {
 			return fmt.Errorf("%w: new source %q must follow the persisted graph", ErrUnsafeMigrationGraphAdoption, candidate.SourceKey)
 		}
+	}
+	if added == 0 {
+		return fmt.Errorf("%w: proposed graph does not add a source", ErrUnsafeMigrationGraphAdoption)
 	}
 	return nil
 }
