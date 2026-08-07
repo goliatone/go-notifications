@@ -11,6 +11,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/definitions"
+	"github.com/goliatone/go-notifications/pkg/events"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	"github.com/goliatone/go-notifications/pkg/persistencepolicy"
@@ -152,6 +153,42 @@ func TestModuleDefaultsAllowImmediateAndRejectAsyncWithNopQueue(t *testing.T) {
 	after, err := repositories.Events.List(ctx, store.ListOptions{})
 	if err != nil || after.Total != before.Total {
 		t.Fatalf("rejected transient schedule persisted an event: before=%d after=%d err=%v", before.Total, after.Total, err)
+	}
+}
+
+func TestModuleDelegatesReceiptLookup(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Defaults()
+	cfg.Dispatcher.EnvFallbackAllowlist = []string{"subject-1"}
+	module, err := NewModule(ModuleOptions{
+		Config: cfg, Translator: moduleTranslator(t), Logger: &logger.Nop{},
+		Storage: storage.NewMemoryProviders(), Adapters: []adapters.Messenger{moduleAdapter{}},
+	})
+	if err != nil {
+		t.Fatalf("module: %v", err)
+	}
+	if _, err := module.Definitions().Upsert(ctx, definitions.UpsertInput{
+		Code: "welcome", Channels: []string{"email:module"}, TemplateIDs: []string{"email:welcome-email"},
+	}); err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+	if _, err := module.Templates().Create(ctx, templates.TemplateInput{
+		Code: "welcome-email", Channel: "email", Locale: "en", Subject: "Hello", Body: "Body",
+	}); err != nil {
+		t.Fatalf("seed template: %v", err)
+	}
+	first, err := module.Manager().SendWithReceipt(ctx, Event{
+		DefinitionCode: "welcome", Recipients: []string{"subject-1"},
+		IdempotencyScope: "system", IdempotencyKey: "lookup",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	got, err := module.LookupReceipt(ctx, events.ReceiptLookup{
+		DefinitionCode: "welcome", IdempotencyScope: "system", IdempotencyKey: "lookup",
+	})
+	if err != nil || got.EventID != first.EventID || !got.Replay {
+		t.Fatalf("module lookup: receipt=%+v err=%v", got, err)
 	}
 }
 

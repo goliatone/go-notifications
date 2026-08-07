@@ -42,6 +42,79 @@ func TestScopedIdempotencyReturnsReplayWithoutRedispatch(t *testing.T) {
 	}
 }
 
+func TestLookupReceiptIsSideEffectFreeAndDoesNotRequireOriginalPayload(t *testing.T) {
+	ctx := context.Background()
+	defRepo, evtRepo, disp, q := setupDeps(t)
+	service := newTestService(t, defRepo, evtRepo, disp, q)
+	first, err := service.DispatchImmediate(ctx, ImmediateRequest{
+		DefinitionCode: "welcome", Recipients: []string{"subject-1"},
+		IdempotencyScope: " tenant:one ", IdempotencyKey: " receipt-1 ",
+		Transient: map[string]any{"credential_link": "https://secret.invalid/token"},
+	})
+	if err != nil {
+		t.Fatalf("dispatch immediate: %v", err)
+	}
+	storedBefore, err := evtRepo.GetByID(ctx, first.EventID)
+	if err != nil {
+		t.Fatalf("load event before lookup: %v", err)
+	}
+	dispatchesBefore, jobsBefore := len(disp.events), len(q.jobs)
+
+	got, err := service.LookupReceipt(ctx, ReceiptLookup{
+		DefinitionCode: " welcome ", IdempotencyScope: " tenant:one ", IdempotencyKey: " receipt-1 ",
+	})
+	if err != nil {
+		t.Fatalf("lookup receipt: %v", err)
+	}
+	if got.EventID != first.EventID || got.Status != first.Status || !got.Replay {
+		t.Fatalf("lookup receipt mismatch: first=%+v got=%+v", first, got)
+	}
+	storedAfter, err := evtRepo.GetByID(ctx, first.EventID)
+	if err != nil {
+		t.Fatalf("load event after lookup: %v", err)
+	}
+	if len(disp.events) != dispatchesBefore || len(q.jobs) != jobsBefore || storedAfter.UpdatedAt != storedBefore.UpdatedAt {
+		t.Fatalf("lookup produced a side effect: dispatches=%d/%d jobs=%d/%d updated=%s/%s",
+			len(disp.events), dispatchesBefore, len(q.jobs), jobsBefore, storedAfter.UpdatedAt, storedBefore.UpdatedAt)
+	}
+	if !storedAfter.TransientDependent {
+		t.Fatalf("lookup target lost transient dependency marker")
+	}
+}
+
+func TestLookupReceiptValidationAndScopeIsolationUseSafeErrors(t *testing.T) {
+	ctx := context.Background()
+	defRepo, evtRepo, disp, q := setupDeps(t)
+	service := newTestService(t, defRepo, evtRepo, disp, q)
+	_, err := service.EnqueueWithReceipt(ctx, IntakeRequest{
+		DefinitionCode: "welcome", Recipients: []string{"subject-1"},
+		IdempotencyScope: "tenant:one", IdempotencyKey: "receipt-1",
+	})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	tests := []struct {
+		name string
+		req  ReceiptLookup
+		code string
+	}{
+		{name: "definition required", req: ReceiptLookup{IdempotencyKey: "receipt-1"}, code: "definition_required"},
+		{name: "key required", req: ReceiptLookup{DefinitionCode: "welcome"}, code: "idempotency_key_required"},
+		{name: "key too long", req: ReceiptLookup{DefinitionCode: "welcome", IdempotencyKey: strings.Repeat("x", maxIdempotencyKeyLength+1)}, code: "idempotency_key_too_long"},
+		{name: "other scope is indistinguishable from missing", req: ReceiptLookup{DefinitionCode: "welcome", IdempotencyScope: "tenant:two", IdempotencyKey: "receipt-1"}, code: "receipt_not_found"},
+		{name: "unknown identity", req: ReceiptLookup{DefinitionCode: "welcome", IdempotencyScope: "tenant:one", IdempotencyKey: "missing"}, code: "receipt_not_found"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, lookupErr := service.LookupReceipt(ctx, tc.req)
+			var safe privacy.SafeError
+			if !errors.As(lookupErr, &safe) || safe.Code != tc.code || errors.Unwrap(lookupErr) != nil {
+				t.Fatalf("lookup error = %#v, want safe code %q without unwrap", lookupErr, tc.code)
+			}
+		})
+	}
+}
+
 func TestConcurrentScopedIdempotencyCreatesOneEvent(t *testing.T) {
 	ctx := context.Background()
 	defRepo, evtRepo, disp, q := setupDeps(t)

@@ -150,6 +150,15 @@ func (m *Module) RetryWithReceipt(ctx context.Context, req events.RetryRequest) 
 	return m.container.Events.RetryWithReceipt(ctx, req)
 }
 
+// LookupReceipt delegates side-effect-free durable receipt recovery to the
+// canonical event service.
+func (m *Module) LookupReceipt(ctx context.Context, req events.ReceiptLookup) (events.DispatchReceipt, error) {
+	if m == nil || m.container == nil || m.container.Events == nil {
+		return events.DispatchReceipt{}, errors.New("notifier: module is not initialized")
+	}
+	return m.container.Events.LookupReceipt(ctx, req)
+}
+
 // RecoverPending republishes durable asynchronous work through the event service.
 func (m *Module) RecoverPending(ctx context.Context, limit int) error {
 	if m == nil || m.container == nil || m.container.Events == nil {

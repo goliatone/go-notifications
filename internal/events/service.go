@@ -96,6 +96,14 @@ type RetryRequest struct {
 	RequestID        string    `json:"request_id,omitempty"`
 }
 
+// ReceiptLookup identifies an existing idempotent notification without
+// carrying the original request payload or any transient render data.
+type ReceiptLookup struct {
+	DefinitionCode   string `json:"definition_code"`
+	IdempotencyScope string `json:"idempotency_scope"`
+	IdempotencyKey   string `json:"idempotency_key"`
+}
+
 func (RetryRequest) Type() string { return "notifications.event.retry" }
 
 func (req RetryRequest) Validate() error {
@@ -199,6 +207,46 @@ func NewService(deps Dependencies) (*Service, error) {
 		queue: deps.Queue, logger: deps.Logger, activity: deps.Activity,
 		privacy: deps.Privacy, diagnostic: deps.Diagnostic,
 	}, nil
+}
+
+// LookupReceipt reconstructs the current durable receipt for an idempotent
+// event. It deliberately performs no dispatch, publication, claim, activity,
+// diagnostic, or durable-state mutation.
+func (s *Service) LookupReceipt(ctx context.Context, req ReceiptLookup) (receipts.DispatchReceipt, error) {
+	definitionCode := strings.TrimSpace(req.DefinitionCode)
+	if definitionCode == "" {
+		return receipts.DispatchReceipt{}, privacy.SafeError{
+			Category: "validation", Code: "definition_required", Message: "definition code is required",
+		}
+	}
+	scope, key, err := normalizeIdempotency(req.IdempotencyScope, "", req.IdempotencyKey)
+	if err != nil {
+		return receipts.DispatchReceipt{}, err
+	}
+	if key == "" {
+		return receipts.DispatchReceipt{}, privacy.SafeError{
+			Category: "validation", Code: "idempotency_key_required", Message: "idempotency key is required",
+		}
+	}
+	event, err := s.events.GetByIdempotency(ctx, scope, definitionCode, key)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return receipts.DispatchReceipt{}, privacy.SafeError{
+				Category: "not_found", Code: "receipt_not_found", Message: "notification receipt was not found",
+			}
+		}
+		return receipts.DispatchReceipt{}, privacy.SafeError{
+			Category: "notification", Code: "receipt_lookup_failed", Message: "notification receipt lookup failed",
+		}
+	}
+	receipt, err := s.receiptForEvent(ctx, event)
+	receipt.Replay = true
+	if err != nil {
+		return receipt, privacy.SafeError{
+			Category: "notification", Code: "receipt_reconstruction_failed", Message: "notification receipt reconstruction failed",
+		}
+	}
+	return receipt, nil
 }
 
 // RetryWithReceipt explicitly redelivers an eligible persisted event while

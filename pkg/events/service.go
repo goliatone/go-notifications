@@ -18,6 +18,7 @@ import (
 type (
 	IntakeRequest         = interevents.IntakeRequest
 	ImmediateRequest      = interevents.ImmediateRequest
+	ReceiptLookup         = interevents.ReceiptLookup
 	RetryRequest          = interevents.RetryRequest
 	DigestOptions         = interevents.DigestOptions
 	PublicationJobPayload = interevents.PublicationJobPayload
@@ -75,6 +76,15 @@ func (s *Service) RetryWithReceipt(ctx context.Context, req RetryRequest) (Dispa
 		return DispatchReceipt{}, errServiceNotInitialised
 	}
 	return s.internal.RetryWithReceipt(ctx, req)
+}
+
+// LookupReceipt reconstructs the current receipt for an existing idempotent
+// event without resubmitting or dispatching the original request.
+func (s *Service) LookupReceipt(ctx context.Context, req ReceiptLookup) (DispatchReceipt, error) {
+	if s == nil || s.internal == nil {
+		return DispatchReceipt{}, errServiceNotInitialised
+	}
+	return s.internal.LookupReceipt(ctx, req)
 }
 
 func (s *Service) EnqueueWithReceipt(ctx context.Context, req IntakeRequest) (DispatchReceipt, error) {
