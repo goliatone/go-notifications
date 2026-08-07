@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestRetentionRepositoryPurgesBoundedTerminalGraphAndPreservesActiveWork(t *testing.T) {
+func TestRetentionRepositoryPurgesBoundedTerminalGraphAndPreservesActiveWork(t *testing.T) { //nolint:funlen // Linear dependency graph fixture.
 	old := time.Now().UTC().Add(-2 * time.Hour)
 	cutoff := time.Now().UTC().Add(-time.Hour)
 	events := NewEventRepository()

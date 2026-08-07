@@ -54,6 +54,44 @@ type RetentionRepository interface {
 	PurgeTerminal(ctx context.Context, cutoffs RetentionCutoffs, batchSize int) (RetentionCounts, bool, error)
 }
 
+// DeliveryQuery is a fixed, scope-bound metadata query used by the public
+// delivery inspection service.
+type DeliveryQuery struct {
+	TenantID       string
+	EventID        uuid.UUID
+	MessageID      uuid.UUID
+	DefinitionCode string
+	Channel        string
+	Status         string
+	ErrorCode      string
+	CreatedAfter   time.Time
+	CreatedBefore  time.Time
+	CursorTime     time.Time
+	CursorID       uuid.UUID
+	Limit          int
+}
+
+// DeliveryRecord is intentionally a safe projection rather than a domain
+// event, message, or attempt entity.
+type DeliveryRecord struct {
+	EventID       uuid.UUID
+	MessageID     uuid.UUID
+	Definition    string
+	Channel       string
+	Provider      string
+	Status        string
+	AttemptCount  int
+	ErrorCode     string
+	CorrelationID string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type DeliveryQueryRepository interface {
+	GetDelivery(ctx context.Context, query DeliveryQuery) (DeliveryRecord, error)
+	ListDeliveries(ctx context.Context, query DeliveryQuery) ([]DeliveryRecord, bool, error)
+}
+
 // Repository defines base CRUD helpers reused by entity-specific interfaces.
 type Repository[T any] interface {
 	Create(ctx context.Context, record *T) error

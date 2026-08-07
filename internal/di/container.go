@@ -11,6 +11,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/commands"
 	"github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/definitions"
+	"github.com/goliatone/go-notifications/pkg/deliveries"
 	"github.com/goliatone/go-notifications/pkg/events"
 	"github.com/goliatone/go-notifications/pkg/inbox"
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
@@ -62,6 +63,7 @@ type Container struct {
 	Preferences       *preferences.Service
 	Inbox             *inbox.Service
 	Events            *events.Service
+	Deliveries        *deliveries.Service
 	Retention         *retention.Service
 	Dispatcher        *dispatcher.Service
 	Commands          *commands.Registry
@@ -117,6 +119,7 @@ func New(opts Options) (*Container, error) {
 		Preferences:       core.preferences,
 		Inbox:             core.inbox,
 		Events:            delivery.events,
+		Deliveries:        delivery.deliveries,
 		Retention:         delivery.retention,
 		Dispatcher:        delivery.dispatcher,
 		Commands:          delivery.commands,
@@ -182,6 +185,7 @@ type deliveryServices struct {
 	dispatcher *dispatcher.Service
 	events     *events.Service
 	retention  *retention.Service
+	deliveries *deliveries.Service
 	commands   *commands.Registry
 }
 
@@ -224,6 +228,10 @@ func buildDeliveryServices(
 	if err != nil {
 		return deliveryServices{}, err
 	}
+	deliveryQueryService, err := deliveries.New(providers.DeliveryQueries)
+	if err != nil {
+		return deliveryServices{}, err
+	}
 	commandRegistry, err := commands.New(commands.Dependencies{
 		DefinitionService: core.definitions, Templates: core.templates,
 		Preferences: core.preferences, Inbox: core.inbox, Events: eventService,
@@ -233,7 +241,8 @@ func buildDeliveryServices(
 		return deliveryServices{}, err
 	}
 	return deliveryServices{
-		dispatcher: dispatcherService, events: eventService, retention: retentionService, commands: commandRegistry,
+		dispatcher: dispatcherService, events: eventService, retention: retentionService,
+		deliveries: deliveryQueryService, commands: commandRegistry,
 	}, nil
 }
 

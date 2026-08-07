@@ -70,6 +70,16 @@ func TestSQLiteMigrationsApplyBaselineAndUpgrades(t *testing.T) {
 		"notification_publications_open_digest_uidx",
 		"notification_retry_operations_identity_uidx",
 		"notification_retry_operations_event_idx",
+		"notification_events_retention_idx",
+		"notification_messages_retention_idx",
+		"notification_delivery_attempts_retention_idx",
+		"notification_inbox_items_retention_idx",
+		"notification_publications_retention_idx",
+		"notification_retry_operations_retention_idx",
+		"notification_events_scope_created_idx",
+		"notification_events_scope_definition_created_idx",
+		"notification_messages_inspection_idx",
+		"notification_delivery_attempts_inspection_idx",
 	} {
 		assertSQLiteIndex(ctx, t, sqldb, index)
 	}
@@ -279,7 +289,7 @@ func TestOrderedMigrationSourceSupportsHostSelectedPlacement(t *testing.T) {
 		t.Fatalf("configured source changed stable identity: %+v", source)
 	}
 	for _, order := range []int{-1, persistence.MaxOrderedMigrationSourceOrder + 1} {
-		if _, err := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{Order: order}); err == nil {
+		if _, orderErr := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{Order: order}); orderErr == nil {
 			t.Fatalf("invalid order %d was accepted", order)
 		}
 	}
@@ -294,8 +304,8 @@ func TestOrderedMigrationSourceSupportsHostSelectedPlacement(t *testing.T) {
 		t.Fatalf("build inverted source: %v", err)
 	}
 	manager := persistence.NewMigrations()
-	if err := manager.RegisterOrderedMigrationSources(users, inverted); !errors.Is(err, persistence.ErrOrderedSourceOrderInversion) {
-		t.Fatalf("expected framework order inversion, got %v", err)
+	if registerErr := manager.RegisterOrderedMigrationSources(users, inverted); !errors.Is(registerErr, persistence.ErrOrderedSourceOrderInversion) {
+		t.Fatalf("expected framework order inversion, got %v", registerErr)
 	}
 	unknown, err := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{
 		Order: 100, Dependencies: []string{"missing-source"},
@@ -304,8 +314,8 @@ func TestOrderedMigrationSourceSupportsHostSelectedPlacement(t *testing.T) {
 		t.Fatalf("build unknown-dependency source: %v", err)
 	}
 	manager = persistence.NewMigrations()
-	if err := manager.RegisterOrderedMigrationSources(unknown); !errors.Is(err, persistence.ErrOrderedSourceUnknownDep) {
-		t.Fatalf("expected framework unknown dependency, got %v", err)
+	if registerErr := manager.RegisterOrderedMigrationSources(unknown); !errors.Is(registerErr, persistence.ErrOrderedSourceUnknownDep) {
+		t.Fatalf("expected framework unknown dependency, got %v", registerErr)
 	}
 }
 
@@ -330,14 +340,14 @@ func TestSQLiteCRMOrderedMigrationCompositionIsRepeatableAndDetectsDrift(t *test
 		persistence.WithOrderedMigrationDependencies(notifications.MigrationSourceKey),
 	)
 	manager := persistence.NewMigrations()
-	if err := manager.RegisterOrderedMigrationSources(users, notificationSource, evidence); err != nil {
-		t.Fatalf("register CRM graph: %v", err)
+	if registerErr := manager.RegisterOrderedMigrationSources(users, notificationSource, evidence); registerErr != nil {
+		t.Fatalf("register CRM graph: %v", registerErr)
 	}
-	if err := manager.Migrate(ctx, db); err != nil {
-		t.Fatalf("migrate CRM graph: %v", err)
+	if migrateErr := manager.Migrate(ctx, db); migrateErr != nil {
+		t.Fatalf("migrate CRM graph: %v", migrateErr)
 	}
-	if err := manager.Migrate(ctx, db); err != nil {
-		t.Fatalf("repeat CRM graph: %v", err)
+	if migrateErr := manager.Migrate(ctx, db); migrateErr != nil {
+		t.Fatalf("repeat CRM graph: %v", migrateErr)
 	}
 	for _, table := range []string{"crm_users", "notification_events", "crm_notification_evidence"} {
 		assertSQLiteTable(ctx, t, sqldb, table)
@@ -381,7 +391,7 @@ func TestMigrationDialectsHaveVersionParity(t *testing.T) {
 	if strings.Join(versions["postgres"], ",") != strings.Join(versions["sqlite"], ",") {
 		t.Fatalf("migration version mismatch: postgres=%v sqlite=%v", versions["postgres"], versions["sqlite"])
 	}
-	if strings.Join(versions["sqlite"], ",") != "001,002,003,004" {
+	if strings.Join(versions["sqlite"], ",") != "001,002,003,004,005" {
 		t.Fatalf("unexpected released migration versions: %v", versions["sqlite"])
 	}
 }

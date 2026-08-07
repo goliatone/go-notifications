@@ -70,8 +70,8 @@ func TestModuleConstructionRemainsCompatibleWithoutRetentionProvider(t *testing.
 	if err != nil {
 		t.Fatalf("module with legacy provider set: %v", err)
 	}
-	if module.Retention() == nil || module.Commands().PurgeRetention == nil {
-		t.Fatalf("expected unavailable retention facade and command")
+	if module.Retention() == nil || module.Deliveries() == nil || module.Commands().PurgeRetention == nil {
+		t.Fatalf("expected unavailable additive service facades and retention command")
 	}
 }
 
@@ -91,7 +91,7 @@ func TestModuleExposesEffectivePoliciesResolverAndCanonicalServices(t *testing.T
 	if err != nil {
 		t.Fatalf("module: %v", err)
 	}
-	if module.Definitions() == nil || module.Events() == nil || module.Commands().RetryEvent == nil {
+	if module.Definitions() == nil || module.Events() == nil || module.Deliveries() == nil || module.Commands().RetryEvent == nil {
 		t.Fatalf("canonical definition/event/retry services were not exposed")
 	}
 	if module.PersistencePolicy() == nil || module.PrivacyPolicy() == nil ||
@@ -126,16 +126,16 @@ func TestModuleDefaultsAllowImmediateAndRejectAsyncWithNopQueue(t *testing.T) {
 	if moduleErr != nil {
 		t.Fatalf("module: %v", moduleErr)
 	}
-	if _, err := module.Definitions().Upsert(ctx, definitions.UpsertInput{
+	if _, seedErr := module.Definitions().Upsert(ctx, definitions.UpsertInput{
 		Code: "welcome", Channels: []string{"email:module"},
 		TemplateIDs: []string{"email:welcome-email"},
-	}); err != nil {
-		t.Fatalf("seed definition: %v", err)
+	}); seedErr != nil {
+		t.Fatalf("seed definition: %v", seedErr)
 	}
-	if _, err := module.Templates().Create(ctx, templates.TemplateInput{
+	if _, seedErr := module.Templates().Create(ctx, templates.TemplateInput{
 		Code: "welcome-email", Channel: "email", Locale: "en", Subject: "Hello", Body: "Body",
-	}); err != nil {
-		t.Fatalf("seed template: %v", err)
+	}); seedErr != nil {
+		t.Fatalf("seed template: %v", seedErr)
 	}
 	immediate, err := module.Manager().SendWithReceipt(ctx, Event{
 		DefinitionCode: "welcome", Recipients: []string{"subject-1"},
@@ -181,15 +181,15 @@ func TestModuleDelegatesReceiptLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("module: %v", err)
 	}
-	if _, err := module.Definitions().Upsert(ctx, definitions.UpsertInput{
+	if _, seedErr := module.Definitions().Upsert(ctx, definitions.UpsertInput{
 		Code: "welcome", Channels: []string{"email:module"}, TemplateIDs: []string{"email:welcome-email"},
-	}); err != nil {
-		t.Fatalf("seed definition: %v", err)
+	}); seedErr != nil {
+		t.Fatalf("seed definition: %v", seedErr)
 	}
-	if _, err := module.Templates().Create(ctx, templates.TemplateInput{
+	if _, seedErr := module.Templates().Create(ctx, templates.TemplateInput{
 		Code: "welcome-email", Channel: "email", Locale: "en", Subject: "Hello", Body: "Body",
-	}); err != nil {
-		t.Fatalf("seed template: %v", err)
+	}); seedErr != nil {
+		t.Fatalf("seed template: %v", seedErr)
 	}
 	first, err := module.Manager().SendWithReceipt(ctx, Event{
 		DefinitionCode: "welcome", Recipients: []string{"subject-1"},

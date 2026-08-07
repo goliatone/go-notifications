@@ -1,0 +1,4 @@
+DROP INDEX IF EXISTS notification_delivery_attempts_inspection_idx;
+DROP INDEX IF EXISTS notification_messages_inspection_idx;
+DROP INDEX IF EXISTS notification_events_scope_definition_created_idx;
+DROP INDEX IF EXISTS notification_events_scope_created_idx;

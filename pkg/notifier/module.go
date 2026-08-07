@@ -11,6 +11,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/commands"
 	"github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/definitions"
+	"github.com/goliatone/go-notifications/pkg/deliveries"
 	"github.com/goliatone/go-notifications/pkg/events"
 	"github.com/goliatone/go-notifications/pkg/inbox"
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
@@ -150,6 +151,14 @@ func (m *Module) Retention() *retention.Service {
 		return nil
 	}
 	return m.container.Retention
+}
+
+// Deliveries exposes scoped, metadata-only, read-only delivery inspection.
+func (m *Module) Deliveries() *deliveries.Service {
+	if m == nil || m.container == nil {
+		return nil
+	}
+	return m.container.Deliveries
 }
 
 // RetryWithReceipt delegates to the canonical event retry service.

@@ -30,6 +30,7 @@ type Providers struct {
 	SubscriptionGroups store.SubscriptionGroupRepository
 	Inbox              store.InboxRepository
 	Retention          store.RetentionRepository
+	DeliveryQueries    store.DeliveryQueryRepository
 	Transaction        store.TransactionManager
 	Metrics            MetricsCollector
 }
@@ -63,6 +64,7 @@ func NewMemoryProviders(opts ...Option) Providers {
 		SubscriptionGroups: memory.NewSubscriptionRepository(),
 		Inbox:              inbox,
 		Retention:          memory.NewRetentionRepository(events, messages, attempts, inbox, publications, retryOperations),
+		DeliveryQueries:    memory.NewDeliveryQueryRepository(events, messages, attempts),
 		Transaction:        &store.NopTransactionManager{},
 	}
 	for _, opt := range opts {
@@ -107,6 +109,7 @@ func NewBunProviders(db *bun.DB, opts ...Option) Providers {
 		SubscriptionGroups: bunrepo.NewSubscriptionRepository(db),
 		Inbox:              bunrepo.NewInboxRepository(db),
 		Retention:          bunrepo.NewRetentionRepository(db),
+		DeliveryQueries:    bunrepo.NewDeliveryQueryRepository(db),
 		Transaction:        txManager,
 	}
 

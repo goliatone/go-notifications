@@ -15,7 +15,7 @@ import (
 	"github.com/uptrace/bun/driver/sqliteshim"
 )
 
-func TestBunRetentionRepositoryPurgesTerminalGraphTransactionally(t *testing.T) {
+func TestBunRetentionRepositoryPurgesTerminalGraphTransactionally(t *testing.T) { //nolint:gocyclo,funlen // Linear dependency graph fixture.
 	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
 	sqldb, err := sql.Open(sqliteshim.DriverName(), dsn)
 	if err != nil {
@@ -23,7 +23,11 @@ func TestBunRetentionRepositoryPurgesTerminalGraphTransactionally(t *testing.T) 
 	}
 	sqldb.SetMaxOpenConns(1)
 	db := bun.NewDB(sqldb, sqlitedialect.New())
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Errorf("close database: %v", closeErr)
+		}
+	})
 	ctx := context.Background()
 	for _, model := range []any{
 		(*domain.NotificationEvent)(nil), (*domain.NotificationMessage)(nil),
