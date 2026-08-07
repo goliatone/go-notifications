@@ -18,6 +18,7 @@ import (
 	persistence "github.com/goliatone/go-persistence-bun"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/driver/sqliteshim"
 )
@@ -365,6 +366,166 @@ func TestSQLiteCRMOrderedMigrationCompositionIsRepeatableAndDetectsDrift(t *test
 	}
 	if err := drifted.Migrate(ctx, db); !errors.Is(err, persistence.ErrOrderedSourceDrift) {
 		t.Fatalf("expected graph drift, got %v", err)
+	}
+}
+
+func TestSQLiteCRMOrderedMigrationCompositionUpgradesExistingUsersJournal(t *testing.T) { //nolint:gocyclo // Linear upgrade and safety fixture.
+	db, sqldb := newSQLiteMigrationDB(t)
+	ctx := context.Background()
+	users := persistence.NewStableOrderedMigrationSource(
+		"nice-guys-delivery-users",
+		fstest.MapFS{"001_users.up.sql": {Data: []byte("CREATE TABLE crm_users (id TEXT PRIMARY KEY);")}},
+		"nice-guys-delivery-users", 90,
+	)
+	baseline := persistence.NewMigrations()
+	if registerErr := baseline.RegisterOrderedMigrationSources(users); registerErr != nil {
+		t.Fatalf("register existing Users graph: %v", registerErr)
+	}
+	if migrateErr := baseline.Migrate(ctx, db); migrateErr != nil {
+		t.Fatalf("migrate existing Users graph: %v", migrateErr)
+	}
+	var before int
+	if err := sqldb.QueryRowContext(ctx, "SELECT COUNT(*) FROM bun_migrations").Scan(&before); err != nil {
+		t.Fatalf("inspect existing journal: %v", err)
+	}
+
+	notificationSource, err := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{
+		Order: 100, Dependencies: []string{"nice-guys-delivery-users"},
+	})
+	if err != nil {
+		t.Fatalf("notifications source: %v", err)
+	}
+	evidence := persistence.NewStableOrderedMigrationSource(
+		"crm-notification-evidence",
+		fstest.MapFS{"001_evidence.up.sql": {Data: []byte("CREATE TABLE crm_notification_evidence (id TEXT PRIMARY KEY);")}},
+		"crm-notification-evidence", 110,
+		persistence.WithOrderedMigrationDependencies(notifications.MigrationSourceKey),
+	)
+	upgraded := persistence.NewMigrations()
+	if registerErr := upgraded.RegisterOrderedMigrationSources(users, notificationSource, evidence); registerErr != nil {
+		t.Fatalf("register upgraded graph: %v", registerErr)
+	}
+	if migrateErr := upgraded.Migrate(ctx, db); !errors.Is(migrateErr, persistence.ErrOrderedSourceDrift) {
+		t.Fatalf("expected explicit graph repair gate, got %v", migrateErr)
+	}
+	unsafePrefix := persistence.NewStableOrderedMigrationSource(
+		"unsafe-prefix",
+		fstest.MapFS{"001_prefix.up.sql": {Data: []byte("CREATE TABLE unsafe_prefix (id TEXT PRIMARY KEY);")}},
+		"unsafe-prefix", 80,
+	)
+	unsafeGraph := persistence.NewMigrations()
+	if registerErr := unsafeGraph.RegisterOrderedMigrationSources(unsafePrefix, users); registerErr != nil {
+		t.Fatalf("register unsafe reordered graph: %v", registerErr)
+	}
+	if adoptionErr := notifications.AdoptAdditiveOrderedMigrationGraph(ctx, db, unsafeGraph); !errors.Is(adoptionErr, notifications.ErrUnsafeMigrationGraphAdoption) {
+		t.Fatalf("expected reordered graph adoption rejection, got %v", adoptionErr)
+	}
+	if repairErr := notifications.AdoptAdditiveOrderedMigrationGraph(ctx, db, upgraded); repairErr != nil {
+		t.Fatalf("repair existing graph identity: %v", repairErr)
+	}
+	var afterAdoption int
+	if err := sqldb.QueryRowContext(ctx, "SELECT COUNT(*) FROM bun_migrations").Scan(&afterAdoption); err != nil {
+		t.Fatalf("inspect adopted journal: %v", err)
+	}
+	if afterAdoption != before {
+		t.Fatalf("graph adoption rewrote migration journal: before=%d after=%d", before, afterAdoption)
+	}
+	if migrateErr := upgraded.Migrate(ctx, db); migrateErr != nil {
+		t.Fatalf("upgrade existing graph: %v", migrateErr)
+	}
+	if migrateErr := upgraded.Migrate(ctx, db); migrateErr != nil {
+		t.Fatalf("repeat upgraded graph: %v", migrateErr)
+	}
+	for _, table := range []string{"crm_users", "notification_events", "crm_notification_evidence"} {
+		assertSQLiteTable(ctx, t, sqldb, table)
+	}
+	var after int
+	if err := sqldb.QueryRowContext(ctx, "SELECT COUNT(*) FROM bun_migrations").Scan(&after); err != nil {
+		t.Fatalf("inspect upgraded journal: %v", err)
+	}
+	if after <= before {
+		t.Fatalf("upgrade did not preserve and extend journal: before=%d after=%d", before, after)
+	}
+}
+
+func TestPostgresCRMOrderedMigrationCompositionUpgradesExistingUsersJournal(t *testing.T) { //nolint:gocyclo // Linear optional PostgreSQL graph fixture.
+	dsn := strings.TrimSpace(os.Getenv("NOTIFICATIONS_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("NOTIFICATIONS_POSTGRES_DSN is not configured")
+	}
+	ctx := context.Background()
+	adminDB, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	schema := "notifications_crm_graph_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, schemaErr := adminDB.ExecContext(ctx, `CREATE SCHEMA `+schema); schemaErr != nil {
+		t.Fatalf("create schema: %v", schemaErr)
+	}
+	t.Cleanup(func() {
+		if _, dropErr := adminDB.ExecContext(context.Background(), `DROP SCHEMA `+schema+` CASCADE`); dropErr != nil {
+			t.Errorf("drop schema: %v", dropErr)
+		}
+		if closeErr := adminDB.Close(); closeErr != nil {
+			t.Errorf("close postgres: %v", closeErr)
+		}
+	})
+	sqldb, err := sql.Open("postgres", postgresDSNWithSearchPath(dsn, schema))
+	if err != nil {
+		t.Fatalf("open schema database: %v", err)
+	}
+	sqldb.SetMaxOpenConns(1)
+	db := bun.NewDB(sqldb, pgdialect.New())
+	t.Cleanup(func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Errorf("close schema database: %v", closeErr)
+		}
+	})
+	users := persistence.NewStableOrderedMigrationSource(
+		"nice-guys-delivery-users",
+		fstest.MapFS{"001_users.up.sql": {Data: []byte("CREATE TABLE crm_users (id UUID PRIMARY KEY);")}},
+		"nice-guys-delivery-users", 90,
+	)
+	baseline := persistence.NewMigrations()
+	if registerErr := baseline.RegisterOrderedMigrationSources(users); registerErr != nil {
+		t.Fatalf("register Users graph: %v", registerErr)
+	}
+	if migrateErr := baseline.Migrate(ctx, db); migrateErr != nil {
+		t.Fatalf("migrate Users graph: %v", migrateErr)
+	}
+	notificationSource, err := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{
+		Order: 100, Dependencies: []string{"nice-guys-delivery-users"},
+	})
+	if err != nil {
+		t.Fatalf("notifications source: %v", err)
+	}
+	evidence := persistence.NewStableOrderedMigrationSource(
+		"crm-notification-evidence",
+		fstest.MapFS{"001_evidence.up.sql": {Data: []byte("CREATE TABLE crm_notification_evidence (id UUID PRIMARY KEY);")}},
+		"crm-notification-evidence", 110,
+		persistence.WithOrderedMigrationDependencies(notifications.MigrationSourceKey),
+	)
+	upgraded := persistence.NewMigrations()
+	if registerErr := upgraded.RegisterOrderedMigrationSources(users, notificationSource, evidence); registerErr != nil {
+		t.Fatalf("register upgraded graph: %v", registerErr)
+	}
+	if migrateErr := upgraded.Migrate(ctx, db); !errors.Is(migrateErr, persistence.ErrOrderedSourceDrift) {
+		t.Fatalf("expected explicit graph adoption gate, got %v", migrateErr)
+	}
+	if adoptionErr := notifications.AdoptAdditiveOrderedMigrationGraph(ctx, db, upgraded); adoptionErr != nil {
+		t.Fatalf("adopt upgraded graph: %v", adoptionErr)
+	}
+	if migrateErr := upgraded.Migrate(ctx, db); migrateErr != nil {
+		t.Fatalf("migrate upgraded graph: %v", migrateErr)
+	}
+	if migrateErr := upgraded.Migrate(ctx, db); migrateErr != nil {
+		t.Fatalf("repeat upgraded graph: %v", migrateErr)
+	}
+	for _, table := range []string{"crm_users", "notification_events", "crm_notification_evidence"} {
+		var name sql.NullString
+		if err := sqldb.QueryRowContext(ctx, "SELECT to_regclass($1)", table).Scan(&name); err != nil || !name.Valid {
+			t.Fatalf("expected table %s: name=%v err=%v", table, name, err)
+		}
 	}
 }
 

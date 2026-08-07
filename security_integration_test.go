@@ -20,6 +20,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/adapters"
 	"github.com/goliatone/go-notifications/pkg/config"
 	"github.com/goliatone/go-notifications/pkg/definitions"
+	"github.com/goliatone/go-notifications/pkg/deliveries"
 	"github.com/goliatone/go-notifications/pkg/domain"
 	"github.com/goliatone/go-notifications/pkg/events"
 	"github.com/goliatone/go-notifications/pkg/interfaces/broadcaster"
@@ -30,6 +31,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/notifier"
 	"github.com/goliatone/go-notifications/pkg/privacy"
 	"github.com/goliatone/go-notifications/pkg/receipts"
+	"github.com/goliatone/go-notifications/pkg/retention"
 	"github.com/goliatone/go-notifications/pkg/storage"
 	"github.com/goliatone/go-notifications/pkg/templates"
 	"github.com/google/uuid"
@@ -240,6 +242,22 @@ func runSensitiveNotificationContract(t *testing.T, repositories storage.Provide
 	if !adapter.contains(sensitiveValue) || !adapter.destinationSeen(resolvedDestination) {
 		t.Fatalf("adapter did not receive transient render data at resolved destination")
 	}
+	sendsBeforeLookup := adapter.count()
+	recovered, err := module.LookupReceipt(ctx, events.ReceiptLookup{
+		DefinitionCode: "sensitive", IdempotencyScope: "system", IdempotencyKey: "sensitive-once",
+	})
+	if err != nil || recovered.EventID != first.EventID || !recovered.Replay || adapter.count() != sendsBeforeLookup {
+		t.Fatalf("side-effect-free receipt recovery: receipt=%+v sends=%d err=%v", recovered, adapter.count(), err)
+	}
+	inspection, err := module.Deliveries().List(ctx, deliveries.ListQuery{
+		Scope: "system", DefinitionCode: "sensitive", Limit: 100,
+	})
+	if err != nil || len(inspection.Items) == 0 {
+		t.Fatalf("safe delivery inspection: page=%+v err=%v", inspection, err)
+	}
+	if containsSecret(inspection) || strings.Contains(fmt.Sprint(inspection), "subject-sensitive") {
+		t.Fatalf("delivery inspection leaked sensitive state: %+v", inspection)
+	}
 	if !linkBuilder.contains(sensitiveValue) {
 		t.Fatalf("link builder did not receive transient render data")
 	}
@@ -377,6 +395,54 @@ func runSensitiveNotificationContract(t *testing.T, repositories storage.Provide
 	if err != nil || !duplicate.Replay || adapter.countForSubject(scheduledDestination) != 1 {
 		t.Fatalf("duplicate publication redelivered: receipt=%+v err=%v", duplicate, err)
 	}
+
+	active := &domain.NotificationEvent{
+		DefinitionCode: "scheduled", TenantID: "", Status: domain.EventStatusPending,
+		Recipients: domain.StringList{"active-subject"},
+	}
+	if createErr := repositories.Events.Create(ctx, active); createErr != nil {
+		t.Fatalf("create active retention control: %v", createErr)
+	}
+	hostEvidence := map[uuid.UUID]string{first.EventID: "credential-delivery-recorded"}
+	cutoff := time.Now().UTC()
+	purgeRequest := retention.Request{
+		EventsBefore: cutoff, MessagesBefore: cutoff, AttemptsBefore: cutoff,
+		InboxBefore: cutoff, PublicationsBefore: cutoff, RetryOperationsBefore: cutoff,
+		BatchSize: 3,
+	}
+	deleted := 0
+	for run := range 20 {
+		result, purgeErr := module.Commands().PurgeRetention.Run(ctx, purgeRequest)
+		if purgeErr != nil {
+			t.Fatalf("retention command run %d: %v", run, purgeErr)
+		}
+		deleted += result.EventsDeleted + result.MessagesDeleted + result.AttemptsDeleted + result.InboxDeleted +
+			result.PublicationsDeleted + result.RetryOperationsDeleted
+		if !result.HasMore {
+			break
+		}
+		if run == 19 {
+			t.Fatalf("retention did not converge")
+		}
+	}
+	if deleted == 0 || hostEvidence[first.EventID] == "" {
+		t.Fatalf("retention did not delete package records or invalidated host evidence: deleted=%d evidence=%v", deleted, hostEvidence)
+	}
+	if _, getErr := repositories.Events.GetByID(ctx, active.ID); getErr != nil {
+		t.Fatalf("retention deleted active work: %v", getErr)
+	}
+	if _, lookupErr := module.LookupReceipt(ctx, events.ReceiptLookup{
+		DefinitionCode: "sensitive", IdempotencyScope: "system", IdempotencyKey: "sensitive-once",
+	}); lookupErr == nil {
+		t.Fatalf("retained receipt remained after eligible event purge")
+	}
+	if _, inspectionErr := module.Deliveries().Get(ctx, deliveries.GetQuery{Scope: "system", EventID: first.EventID}); inspectionErr == nil {
+		t.Fatalf("inspection returned a purged delivery")
+	}
+	directResult, err := module.Retention().Purge(ctx, purgeRequest)
+	if err != nil || directResult.HasMore {
+		t.Fatalf("direct retention did not share converged service behavior: result=%+v err=%v", directResult, err)
+	}
 }
 
 func seedSecurityDefinitions(t *testing.T, ctx context.Context, module *notifier.Module) {
@@ -490,6 +556,8 @@ func applySecurityMigrations(t *testing.T, db *bun.DB, dialect string) {
 		"001_notifications_core.up.sql",
 		"002_notification_delivery_upgrades.up.sql",
 		"003_notification_delivery_integrity.up.sql",
+		"004_notification_retention_indexes.up.sql",
+		"005_notification_delivery_inspection_indexes.up.sql",
 	} {
 		body, err := fs.ReadFile(root, dialect+"/"+name)
 		if err != nil {
