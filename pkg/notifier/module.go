@@ -21,6 +21,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/persistencepolicy"
 	"github.com/goliatone/go-notifications/pkg/preferences"
 	"github.com/goliatone/go-notifications/pkg/privacy"
+	"github.com/goliatone/go-notifications/pkg/retention"
 	"github.com/goliatone/go-notifications/pkg/retry"
 	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/storage"
@@ -140,6 +141,15 @@ func (m *Module) Events() *events.Service {
 		return nil
 	}
 	return m.container.Events
+}
+
+// Retention exposes bounded terminal-record deletion. Hosts own cutoffs,
+// authorization, confirmation, and scheduling.
+func (m *Module) Retention() *retention.Service {
+	if m == nil || m.container == nil {
+		return nil
+	}
+	return m.container.Retention
 }
 
 // RetryWithReceipt delegates to the canonical event retry service.

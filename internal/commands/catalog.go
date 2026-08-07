@@ -12,6 +12,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/events"
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/retention"
 	"github.com/goliatone/go-notifications/pkg/templates"
 	"github.com/google/uuid"
 )
@@ -38,6 +39,7 @@ type Catalog struct {
 	InboxSnooze      command.Commander[InboxSnooze]
 	EnqueueEvent     resultCommander[events.IntakeRequest, events.DispatchReceipt]
 	RetryEvent       resultCommander[events.RetryRequest, events.DispatchReceipt]
+	PurgeRetention   resultCommander[retention.Request, retention.Result]
 }
 
 type definitionService interface {
@@ -63,6 +65,10 @@ type eventService interface {
 	RetryWithReceipt(context.Context, events.RetryRequest) (events.DispatchReceipt, error)
 }
 
+type retentionService interface {
+	Purge(context.Context, retention.Request) (retention.Result, error)
+}
+
 // Dependencies wires services into the command catalog.
 type Dependencies struct {
 	Definitions definitionService
@@ -70,6 +76,7 @@ type Dependencies struct {
 	Preferences preferenceService
 	Inbox       inboxService
 	Events      eventService
+	Retention   retentionService
 	Logger      logger.Logger
 }
 
@@ -90,6 +97,9 @@ func NewCatalog(deps Dependencies) (*Catalog, error) {
 	if deps.Events == nil {
 		return nil, errors.New("commands: events service is required")
 	}
+	if deps.Retention == nil {
+		return nil, errors.New("commands: retention service is required")
+	}
 	if deps.Logger == nil {
 		deps.Logger = logger.Default()
 	}
@@ -103,6 +113,7 @@ func NewCatalog(deps Dependencies) (*Catalog, error) {
 		InboxSnooze:      inboxSnoozeCommand{service: deps.Inbox},
 		EnqueueEvent:     eventEnqueueCommand{service: deps.Events},
 		RetryEvent:       eventRetryCommand{service: deps.Events},
+		PurgeRetention:   retentionPurgeCommand{service: deps.Retention},
 	}, nil
 }
 
@@ -291,6 +302,20 @@ func (c eventRetryCommand) Run(ctx context.Context, msg events.RetryRequest) (ev
 }
 
 func (c eventRetryCommand) Execute(ctx context.Context, msg events.RetryRequest) error {
+	_, err := c.Run(ctx, msg)
+	return err
+}
+
+type retentionPurgeCommand struct{ service retentionService }
+
+func (c retentionPurgeCommand) Run(ctx context.Context, msg retention.Request) (retention.Result, error) {
+	if err := msg.Validate(); err != nil {
+		return retention.Result{}, err
+	}
+	return c.service.Purge(ctx, msg)
+}
+
+func (c retentionPurgeCommand) Execute(ctx context.Context, msg retention.Request) error {
 	_, err := c.Run(ctx, msg)
 	return err
 }

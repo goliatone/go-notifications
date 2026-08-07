@@ -29,6 +29,7 @@ type Providers struct {
 	Preferences        store.NotificationPreferenceRepository
 	SubscriptionGroups store.SubscriptionGroupRepository
 	Inbox              store.InboxRepository
+	Retention          store.RetentionRepository
 	Transaction        store.TransactionManager
 	Metrics            MetricsCollector
 }
@@ -45,17 +46,23 @@ func WithMetricsCollector(collector MetricsCollector) Option {
 // NewMemoryProviders returns repositories backed by in-memory maps.
 func NewMemoryProviders(opts ...Option) Providers {
 	events := memory.NewEventRepository()
+	messages := memory.NewMessageRepository()
+	attempts := memory.NewDeliveryRepository()
+	publications := memory.NewPublicationRepository(events)
+	retryOperations := memory.NewRetryOperationRepository()
+	inbox := memory.NewInboxRepository()
 	providers := Providers{
 		Definitions:        memory.NewDefinitionRepository(),
 		Templates:          memory.NewTemplateRepository(),
 		Events:             events,
-		Messages:           memory.NewMessageRepository(),
-		DeliveryAttempts:   memory.NewDeliveryRepository(),
-		Publications:       memory.NewPublicationRepository(events),
-		RetryOperations:    memory.NewRetryOperationRepository(),
+		Messages:           messages,
+		DeliveryAttempts:   attempts,
+		Publications:       publications,
+		RetryOperations:    retryOperations,
 		Preferences:        memory.NewPreferenceRepository(),
 		SubscriptionGroups: memory.NewSubscriptionRepository(),
-		Inbox:              memory.NewInboxRepository(),
+		Inbox:              inbox,
+		Retention:          memory.NewRetentionRepository(events, messages, attempts, inbox, publications, retryOperations),
 		Transaction:        &store.NopTransactionManager{},
 	}
 	for _, opt := range opts {
@@ -99,6 +106,7 @@ func NewBunProviders(db *bun.DB, opts ...Option) Providers {
 		Preferences:        bunrepo.NewPreferenceRepository(db),
 		SubscriptionGroups: bunrepo.NewSubscriptionRepository(db),
 		Inbox:              bunrepo.NewInboxRepository(db),
+		Retention:          bunrepo.NewRetentionRepository(db),
 		Transaction:        txManager,
 	}
 

@@ -289,7 +289,7 @@ func TestMigrationDialectsHaveVersionParity(t *testing.T) {
 	if strings.Join(versions["postgres"], ",") != strings.Join(versions["sqlite"], ",") {
 		t.Fatalf("migration version mismatch: postgres=%v sqlite=%v", versions["postgres"], versions["sqlite"])
 	}
-	if strings.Join(versions["sqlite"], ",") != "001,002,003" {
+	if strings.Join(versions["sqlite"], ",") != "001,002,003,004" {
 		t.Fatalf("unexpected released migration versions: %v", versions["sqlite"])
 	}
 }

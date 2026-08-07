@@ -11,6 +11,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/interfaces/logger"
 	"github.com/goliatone/go-notifications/pkg/interfaces/store"
 	"github.com/goliatone/go-notifications/pkg/preferences"
+	"github.com/goliatone/go-notifications/pkg/retention"
 	"github.com/goliatone/go-notifications/pkg/templates"
 )
 
@@ -40,6 +41,7 @@ type Registry struct {
 	InboxSnooze      command.Commander[InboxSnooze]
 	EnqueueEvent     ResultCommander[events.IntakeRequest, events.DispatchReceipt]
 	RetryEvent       ResultCommander[events.RetryRequest, events.DispatchReceipt]
+	PurgeRetention   ResultCommander[retention.Request, retention.Result]
 }
 
 // Dependencies mirror the internal command dependencies but keep them public.
@@ -51,6 +53,7 @@ type Dependencies struct {
 	Preferences       *preferences.Service
 	Inbox             *inbox.Service
 	Events            *events.Service
+	Retention         *retention.Service
 	Logger            logger.Logger
 }
 
@@ -64,12 +67,21 @@ func New(deps Dependencies) (*Registry, error) {
 			return nil, err
 		}
 	}
+	retentionService := deps.Retention
+	if retentionService == nil {
+		var err error
+		retentionService, err = retention.New(nil)
+		if err != nil {
+			return nil, err
+		}
+	}
 	catalog, err := internalcommands.NewCatalog(internalcommands.Dependencies{
 		Definitions: definitionService,
 		Templates:   deps.Templates,
 		Preferences: deps.Preferences,
 		Inbox:       deps.Inbox,
 		Events:      deps.Events,
+		Retention:   retentionService,
 		Logger:      deps.Logger,
 	})
 	if err != nil {
@@ -85,6 +97,7 @@ func New(deps Dependencies) (*Registry, error) {
 		InboxSnooze:      catalog.InboxSnooze,
 		EnqueueEvent:     catalog.EnqueueEvent,
 		RetryEvent:       catalog.RetryEvent,
+		PurgeRetention:   catalog.PurgeRetention,
 	}, nil
 }
 
@@ -102,5 +115,6 @@ func (r *Registry) Commanders() []any {
 		r.InboxSnooze,
 		r.EnqueueEvent,
 		r.RetryEvent,
+		r.PurgeRetention,
 	}
 }

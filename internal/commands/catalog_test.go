@@ -11,6 +11,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/events"
 	"github.com/goliatone/go-notifications/pkg/preferences"
 	"github.com/goliatone/go-notifications/pkg/receipts"
+	"github.com/goliatone/go-notifications/pkg/retention"
 	"github.com/goliatone/go-notifications/pkg/templates"
 	"github.com/google/uuid"
 )
@@ -56,6 +57,10 @@ func TestCommandTypesAreStableUniqueAndValidated(t *testing.T) {
 			valid:   events.RetryRequest{EventID: id, IdempotencyKey: "retry-1"},
 			invalid: events.RetryRequest{}, wantID: "notifications.event.retry",
 		},
+		{
+			valid: validRetentionRequest(), invalid: retention.Request{},
+			wantID: "notifications.retention.purge",
+		},
 	}
 	seen := make(map[string]struct{}, len(messages))
 	for _, test := range messages {
@@ -91,12 +96,14 @@ func TestHandlersDelegateExactlyOnceAndResultHandlersReturnReceipts(t *testing.T
 			EventID: uuid.New(), RetryOperationID: uuid.New(), Status: receipts.StatusProcessed,
 		},
 	}
+	retentionSpy := &retentionServiceSpy{result: retention.Result{EventsDeleted: 2, HasMore: true}}
 	catalog, catalogErr := NewCatalog(Dependencies{
 		Definitions: definitionsSpy,
 		Templates:   templatesSpy,
 		Preferences: preferencesSpy,
 		Inbox:       inboxSpy,
 		Events:      eventsSpy,
+		Retention:   retentionSpy,
 	})
 	if catalogErr != nil {
 		t.Fatalf("new catalog: %v", catalogErr)
@@ -137,6 +144,10 @@ func TestHandlersDelegateExactlyOnceAndResultHandlersReturnReceipts(t *testing.T
 		retryReceipt.Status != eventsSpy.retryReceipt.Status {
 		t.Fatalf("retry result: receipt=%+v err=%v", retryReceipt, err)
 	}
+	purgeResult, err := catalog.PurgeRetention.Run(ctx, validRetentionRequest())
+	if err != nil || purgeResult.EventsDeleted != 2 || !purgeResult.HasMore {
+		t.Fatalf("retention result: result=%+v err=%v", purgeResult, err)
+	}
 	for operation, calls := range map[string]int{
 		"definition": definitionsSpy.calls,
 		"template":   templatesSpy.calls,
@@ -146,10 +157,20 @@ func TestHandlersDelegateExactlyOnceAndResultHandlersReturnReceipts(t *testing.T
 		"snooze":     inboxSpy.snoozeCalls,
 		"enqueue":    eventsSpy.enqueueCalls,
 		"retry":      eventsSpy.retryCalls,
+		"retention":  retentionSpy.calls,
 	} {
 		if calls != 1 {
 			t.Fatalf("%s delegated %d times", operation, calls)
 		}
+	}
+}
+
+func validRetentionRequest() retention.Request {
+	cutoff := time.Now().UTC().Add(-time.Hour)
+	return retention.Request{
+		EventsBefore: cutoff, MessagesBefore: cutoff, AttemptsBefore: cutoff,
+		InboxBefore: cutoff, PublicationsBefore: cutoff, RetryOperationsBefore: cutoff,
+		BatchSize: 10,
 	}
 }
 
@@ -217,4 +238,14 @@ func (s *eventServiceSpy) EnqueueWithReceipt(context.Context, events.IntakeReque
 func (s *eventServiceSpy) RetryWithReceipt(context.Context, events.RetryRequest) (events.DispatchReceipt, error) {
 	s.retryCalls++
 	return s.retryReceipt, nil
+}
+
+type retentionServiceSpy struct {
+	calls  int
+	result retention.Result
+}
+
+func (s *retentionServiceSpy) Purge(context.Context, retention.Request) (retention.Result, error) {
+	s.calls++
+	return s.result, nil
 }

@@ -41,8 +41,8 @@ func TestModuleConstruction(t *testing.T) {
 		t.Fatalf("expected inbox and events services")
 	}
 	commanders := module.Commands().Commanders()
-	if len(commanders) != 8 {
-		t.Fatalf("expected 8 command handlers, got %d", len(commanders))
+	if len(commanders) != 9 {
+		t.Fatalf("expected 9 command handlers, got %d", len(commanders))
 	}
 	seen := make(map[string]struct{}, len(commanders))
 	for _, commander := range commanders {
@@ -58,6 +58,20 @@ func TestModuleConstruction(t *testing.T) {
 			t.Fatalf("duplicate command registration %q", id)
 		}
 		seen[id] = struct{}{}
+	}
+}
+
+func TestModuleConstructionRemainsCompatibleWithoutRetentionProvider(t *testing.T) {
+	providers := storage.NewMemoryProviders()
+	providers.Retention = nil
+	module, err := NewModule(ModuleOptions{
+		Translator: moduleTranslator(t), Logger: &logger.Nop{}, Storage: providers,
+	})
+	if err != nil {
+		t.Fatalf("module with legacy provider set: %v", err)
+	}
+	if module.Retention() == nil || module.Commands().PurgeRetention == nil {
+		t.Fatalf("expected unavailable retention facade and command")
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"github.com/goliatone/go-notifications/pkg/persistencepolicy"
 	"github.com/goliatone/go-notifications/pkg/preferences"
 	"github.com/goliatone/go-notifications/pkg/privacy"
+	"github.com/goliatone/go-notifications/pkg/retention"
 	"github.com/goliatone/go-notifications/pkg/retry"
 	"github.com/goliatone/go-notifications/pkg/secrets"
 	"github.com/goliatone/go-notifications/pkg/storage"
@@ -61,6 +62,7 @@ type Container struct {
 	Preferences       *preferences.Service
 	Inbox             *inbox.Service
 	Events            *events.Service
+	Retention         *retention.Service
 	Dispatcher        *dispatcher.Service
 	Commands          *commands.Registry
 	Adapters          *adapters.Registry
@@ -115,6 +117,7 @@ func New(opts Options) (*Container, error) {
 		Preferences:       core.preferences,
 		Inbox:             core.inbox,
 		Events:            delivery.events,
+		Retention:         delivery.retention,
 		Dispatcher:        delivery.dispatcher,
 		Commands:          delivery.commands,
 		Adapters:          adapterRegistry,
@@ -178,6 +181,7 @@ func buildCoreServices(
 type deliveryServices struct {
 	dispatcher *dispatcher.Service
 	events     *events.Service
+	retention  *retention.Service
 	commands   *commands.Registry
 }
 
@@ -216,15 +220,20 @@ func buildDeliveryServices(
 	if err != nil {
 		return deliveryServices{}, err
 	}
+	retentionService, err := retention.New(providers.Retention)
+	if err != nil {
+		return deliveryServices{}, err
+	}
 	commandRegistry, err := commands.New(commands.Dependencies{
 		DefinitionService: core.definitions, Templates: core.templates,
-		Preferences: core.preferences, Inbox: core.inbox, Events: eventService, Logger: lgr,
+		Preferences: core.preferences, Inbox: core.inbox, Events: eventService,
+		Retention: retentionService, Logger: lgr,
 	})
 	if err != nil {
 		return deliveryServices{}, err
 	}
 	return deliveryServices{
-		dispatcher: dispatcherService, events: eventService, commands: commandRegistry,
+		dispatcher: dispatcherService, events: eventService, retention: retentionService, commands: commandRegistry,
 	}, nil
 }
 

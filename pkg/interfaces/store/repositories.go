@@ -27,6 +27,33 @@ type ListResult[T any] struct {
 	Total int
 }
 
+// RetentionCutoffs contains package-record lifecycle cutoffs. Services own
+// validation and policy; repositories only execute one bounded purge pass.
+type RetentionCutoffs struct {
+	EventsBefore          time.Time
+	MessagesBefore        time.Time
+	AttemptsBefore        time.Time
+	InboxBefore           time.Time
+	PublicationsBefore    time.Time
+	RetryOperationsBefore time.Time
+}
+
+// RetentionCounts reports only aggregate deletion metadata.
+type RetentionCounts struct {
+	Events          int
+	Messages        int
+	Attempts        int
+	Inbox           int
+	Publications    int
+	RetryOperations int
+}
+
+// RetentionRepository hard-deletes eligible package records in referentially
+// safe order inside one implementation-owned transaction boundary.
+type RetentionRepository interface {
+	PurgeTerminal(ctx context.Context, cutoffs RetentionCutoffs, batchSize int) (RetentionCounts, bool, error)
+}
+
 // Repository defines base CRUD helpers reused by entity-specific interfaces.
 type Repository[T any] interface {
 	Create(ctx context.Context, record *T) error

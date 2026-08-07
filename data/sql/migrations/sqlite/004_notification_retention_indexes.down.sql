@@ -1,0 +1,6 @@
+DROP INDEX IF EXISTS notification_retry_operations_retention_idx;
+DROP INDEX IF EXISTS notification_publications_retention_idx;
+DROP INDEX IF EXISTS notification_inbox_items_retention_idx;
+DROP INDEX IF EXISTS notification_delivery_attempts_retention_idx;
+DROP INDEX IF EXISTS notification_messages_retention_idx;
+DROP INDEX IF EXISTS notification_events_retention_idx;
