@@ -1,27 +1,40 @@
 # Changelog
 
-<!-- markdownlint-disable MD013 MD024 MD025 -->
-
-# [0.16.0](https://github.com/goliatone/go-notifications/compare/v0.15.0...v0.16.0) - (2026-08-07)
-
-This additive minor release keeps the `v0.15.0` durable-pipeline APIs source
-compatible and adds the contracts needed for direct CRM adoption. Existing
-hosts must retain their persisted migration source order.
-
-## <!-- 0 -->🚀 Features
-
-- Add side-effect-free durable receipt lookup ([f5bb301](https://github.com/goliatone/go-notifications/commit/f5bb301))
-- Add bounded terminal-record retention and typed purge command ([e6b3385](https://github.com/goliatone/go-notifications/commit/e6b3385))
-- Support host-selected ordered migration placement ([b67d978](https://github.com/goliatone/go-notifications/commit/b67d978))
-- Add scoped metadata-only delivery inspection ([cbc95d1](https://github.com/goliatone/go-notifications/commit/cbc95d1))
+# [0.16.1](https://github.com/goliatone/go-notifications/compare/v0.16.0...v0.16.1) - (2026-08-07)
 
 ## <!-- 1 -->🐛 Bug Fixes
 
-- Reject no-op graph repair and validate additive adoption transactionally ([3f7553e](https://github.com/goliatone/go-notifications/commit/3f7553e))
+- Harden retention and delivery inspection contracts ([f44361f](https://github.com/goliatone/go-notifications/commit/f44361fd7f1c8aaef0ff20ca94ee51b2b726bc5b))  - (goliatone)
 
-## <!-- 4 -->🧪 Testing
+## <!-- 13 -->📦 Bumps
 
-- Prove memory, SQLite, and PostgreSQL CRM adoption, privacy, retention, and additive graph upgrades ([58b27c9](https://github.com/goliatone/go-notifications/commit/58b27c9))
+- Bump version: v0.16.1 ([a7b9f84](https://github.com/goliatone/go-notifications/commit/a7b9f84231f0aa31d1e4127dd2f773760b5c5217))  - (goliatone)
+
+# [0.16.0](https://github.com/goliatone/go-notifications/compare/v0.15.0...v0.16.0) - (2026-08-07)
+
+## <!-- 0 -->🚀 Features
+
+- **deliveries:** Add scoped metadata inspection ([cbc95d1](https://github.com/goliatone/go-notifications/commit/cbc95d1724f6d6dd059e9e7271e3279a8c831b01))  - (goliatone)
+- **migrations:** Support host-selected source placement ([b67d978](https://github.com/goliatone/go-notifications/commit/b67d978881f7d758eee1e8e9482045169eaa2863))  - (goliatone)
+- **retention:** Add bounded terminal record purge ([e6b3385](https://github.com/goliatone/go-notifications/commit/e6b33852fdd83e3b612ee8dd4ec67c15b66aee1d))  - (goliatone)
+- **events:** Add side-effect-free receipt lookup ([f5bb301](https://github.com/goliatone/go-notifications/commit/f5bb30185187e8322ff9f9acdf57ea6341a0c955))  - (goliatone)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- **migrations:** Harden additive graph adoption ([3f7553e](https://github.com/goliatone/go-notifications/commit/3f7553e611112fbc16b6d3f665753547ac3510f0))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Publish v0.16 CRM adoption guidance ([0ecdfc5](https://github.com/goliatone/go-notifications/commit/0ecdfc5ac613eb4c98fda096a1baaa0c01880a92))  - (goliatone)
+- Update changelog for v0.15.0 ([10c910f](https://github.com/goliatone/go-notifications/commit/10c910fb6a450c262ddefb52131d3b4cb9cc244f))  - (goliatone)
+
+## <!-- 6 -->🧪 Testing
+
+- Prove CRM notification adoption contract ([58b27c9](https://github.com/goliatone/go-notifications/commit/58b27c9afef822611343664e1ad63c831fc11713))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update gitignore ([6f8dddc](https://github.com/goliatone/go-notifications/commit/6f8dddc3dab3fa7c2e76bf3d87f9a325392c3a3d))  - (goliatone)
 
 # [0.15.0](https://github.com/goliatone/go-notifications/compare/v0.14.1...v0.15.0) - (2026-07-31)
 
@@ -444,3 +457,5 @@ hosts must retain their persisted migration source order.
 - Update examples ([c3553b2](https://github.com/goliatone/go-notifications/commit/c3553b244dd41eb1513b9d3e65bd64e55fd66c7d))  - (goliatone)
 - Clean up ([0571c72](https://github.com/goliatone/go-notifications/commit/0571c72dcc0cee1b884f86f41aebeeffca16b0c3))  - (goliatone)
 - Initial commit ([9a8eb26](https://github.com/goliatone/go-notifications/commit/9a8eb26019ceb07b26fda728351d193e984cd27c))  - (goliatone)
+
+
