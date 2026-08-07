@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 
 	notifications "github.com/goliatone/go-notifications"
 	"github.com/goliatone/go-notifications/pkg/domain"
@@ -263,6 +264,97 @@ func TestOrderedMigrationSourceIdentityIsStable(t *testing.T) {
 	}
 	if source.IdentityMode != persistence.OrderedMigrationIdentitySourceStable {
 		t.Fatalf("unexpected identity mode: %s", source.IdentityMode)
+	}
+}
+
+func TestOrderedMigrationSourceSupportsHostSelectedPlacement(t *testing.T) {
+	source, err := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{
+		Order: 100, Dependencies: []string{"nice-guys-delivery-users"},
+	})
+	if err != nil {
+		t.Fatalf("configured source: %v", err)
+	}
+	if source.Name != notifications.MigrationSourceName || source.SourceKey != notifications.MigrationSourceKey ||
+		source.Order != 100 || strings.Join(source.DependsOn, ",") != "nice-guys-delivery-users" {
+		t.Fatalf("configured source changed stable identity: %+v", source)
+	}
+	for _, order := range []int{-1, persistence.MaxOrderedMigrationSourceOrder + 1} {
+		if _, err := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{Order: order}); err == nil {
+			t.Fatalf("invalid order %d was accepted", order)
+		}
+	}
+	users := persistence.NewStableOrderedMigrationSource(
+		"nice-guys-delivery-users", fstest.MapFS{"001_users.up.sql": {Data: []byte("SELECT 1;")}},
+		"nice-guys-delivery-users", 90,
+	)
+	inverted, err := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{
+		Order: 80, Dependencies: []string{"nice-guys-delivery-users"},
+	})
+	if err != nil {
+		t.Fatalf("build inverted source: %v", err)
+	}
+	manager := persistence.NewMigrations()
+	if err := manager.RegisterOrderedMigrationSources(users, inverted); !errors.Is(err, persistence.ErrOrderedSourceOrderInversion) {
+		t.Fatalf("expected framework order inversion, got %v", err)
+	}
+	unknown, err := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{
+		Order: 100, Dependencies: []string{"missing-source"},
+	})
+	if err != nil {
+		t.Fatalf("build unknown-dependency source: %v", err)
+	}
+	manager = persistence.NewMigrations()
+	if err := manager.RegisterOrderedMigrationSources(unknown); !errors.Is(err, persistence.ErrOrderedSourceUnknownDep) {
+		t.Fatalf("expected framework unknown dependency, got %v", err)
+	}
+}
+
+func TestSQLiteCRMOrderedMigrationCompositionIsRepeatableAndDetectsDrift(t *testing.T) {
+	db, sqldb := newSQLiteMigrationDB(t)
+	ctx := context.Background()
+	users := persistence.NewStableOrderedMigrationSource(
+		"nice-guys-delivery-users",
+		fstest.MapFS{"001_users.up.sql": {Data: []byte("CREATE TABLE crm_users (id TEXT PRIMARY KEY);")}},
+		"nice-guys-delivery-users", 90,
+	)
+	notificationSource, err := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{
+		Order: 100, Dependencies: []string{"nice-guys-delivery-users"},
+	})
+	if err != nil {
+		t.Fatalf("notifications source: %v", err)
+	}
+	evidence := persistence.NewStableOrderedMigrationSource(
+		"crm-notification-evidence",
+		fstest.MapFS{"001_evidence.up.sql": {Data: []byte("CREATE TABLE crm_notification_evidence (id TEXT PRIMARY KEY);")}},
+		"crm-notification-evidence", 110,
+		persistence.WithOrderedMigrationDependencies(notifications.MigrationSourceKey),
+	)
+	manager := persistence.NewMigrations()
+	if err := manager.RegisterOrderedMigrationSources(users, notificationSource, evidence); err != nil {
+		t.Fatalf("register CRM graph: %v", err)
+	}
+	if err := manager.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate CRM graph: %v", err)
+	}
+	if err := manager.Migrate(ctx, db); err != nil {
+		t.Fatalf("repeat CRM graph: %v", err)
+	}
+	for _, table := range []string{"crm_users", "notification_events", "crm_notification_evidence"} {
+		assertSQLiteTable(ctx, t, sqldb, table)
+	}
+
+	driftedNotifications, err := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{
+		Order: 101, Dependencies: []string{"nice-guys-delivery-users"},
+	})
+	if err != nil {
+		t.Fatalf("drifted source: %v", err)
+	}
+	drifted := persistence.NewMigrations()
+	if err := drifted.RegisterOrderedMigrationSources(users, driftedNotifications, evidence); err != nil {
+		t.Fatalf("register drifted graph: %v", err)
+	}
+	if err := drifted.Migrate(ctx, db); !errors.Is(err, persistence.ErrOrderedSourceDrift) {
+		t.Fatalf("expected graph drift, got %v", err)
 	}
 }
 
