@@ -23,6 +23,8 @@ storage, queue, and channel providers.
   without touching `internal` packages.
 - Embedded, ordered SQLite/PostgreSQL migrations plus durable publications,
   scoped idempotency, typed receipts, and explicit retry operations.
+- Side-effect-free receipt recovery, bounded terminal-record retention, and
+  scoped metadata-only delivery inspection.
 - Immediate-only transient rendering, per-definition persistence projections,
   recipient resolution, privacy-safe errors, and opt-in raw diagnostics.
 - Reminder cadence primitives (`pkg/reminders`) for deterministic scheduling,
@@ -89,15 +91,41 @@ For sensitive values, call `mod.Events().DispatchImmediate` with
 one-time URLs in persistent `Context`. Configure `RecipientResolver`,
 `Persistence`, `Privacy`, and `Diagnostic` through `notifier.ModuleOptions`.
 
-The upgrade is planned as `v0.15.0`. After the release tag is authorized and
-published, hosts should adopt it with:
+`v0.15.0` is the released durable-pipeline baseline. Its immutable README
+still contains planned-release wording; the tag itself is not moved or
+rewritten. The CRM adoption APIs are released in `v0.16.0`:
 
 ```bash
-go get github.com/goliatone/go-notifications@v0.15.0
+go get github.com/goliatone/go-notifications@v0.16.0
 ```
 
 Pin the released module version; do not use a local `replace` for production
 adoption.
+
+Existing `v0.15.0` hosts that already persisted the default package source at
+order `50` must retain that order and run the updated profile. A host adding
+notifications after an existing source at order `90` can select order `100`:
+
+```go
+err := notifications.RegisterMigrationsWithOptions(manager,
+    notifications.MigrationSourceOptions{
+        Order:        100,
+        Dependencies: []string{"nice-guys-delivery-users"},
+    },
+)
+```
+
+For an already-persisted Users-only graph, the first expanded plan reports
+ordered-source drift. After backup and explicit review that the graph is only
+being extended at the end, call `AdoptAdditiveOrderedMigrationGraph` once and
+then migrate. The helper rejects changed, reordered, or prefixed sources and
+never edits `bun_migrations`.
+
+Trusted host workflows can recover an idempotent receipt with
+`mod.LookupReceipt`, inspect safe delivery metadata through `mod.Deliveries()`,
+and run bounded terminal cleanup through `mod.Retention()` or the
+`notifications.retention.purge` command. Hosts still own authorization,
+cutoffs, confirmation, and scheduling.
 
 ## Documentation map
 
@@ -106,6 +134,8 @@ adoption.
   digest behavior, and retry.
 - `docs/GUIDE_INTEGRATION.md`: migrations, module policies, resolver,
   diagnostics, and commands.
+- `examples/adoption`: compiling CRM migration, receipt recovery, retention,
+  and safe-inspection examples.
 - `docs/GUIDE_REMINDERS.md`: reminder cadence primitives (`pkg/reminders`) and
   host sweep integration pattern.
 - `docs/NTF_TEMPLATES.md`: template authoring, schema validation, and go-cms imports.

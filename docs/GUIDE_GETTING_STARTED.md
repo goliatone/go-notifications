@@ -35,12 +35,15 @@ The module is designed to integrate with `go-admin` and `go-cms` but works indep
 Add `go-notifications` to your project:
 
 ```bash
-go get github.com/goliatone/go-notifications@v0.14.1
+go get github.com/goliatone/go-notifications@v0.16.0
 ```
 
-Use a published semantic version in host applications. The durable pipeline
-upgrade is planned for `v0.15.0`; do not use a local `replace` as a production
-adoption mechanism.
+Use a published semantic version in host applications. `v0.15.0` is the
+released durable-pipeline baseline; `v0.16.0` adds receipt recovery, bounded
+retention, host-selected migration placement, and privacy-safe inspection.
+The immutable `v0.15.0` README contains stale planned-release wording, but its
+artifact remains valid and has not been rewritten. Do not use a local
+`replace` as a production adoption mechanism.
 
 ---
 

@@ -246,18 +246,58 @@ func RunMigrations(ctx context.Context, db *bun.DB) error {
 Register the source before building Bun providers. `RegisterMigrations` does
 not connect, execute SQL, or change module construction. The stable source key
 is `go-notifications`, default order is `50`, and dialect validation targets
-are `sqlite` and `postgres`. Hosts with a shared graph can call
-`OrderedMigrationSource("go-users")` to declare package ordering.
+are `sqlite` and `postgres`. Existing `v0.15.0` hosts that persisted this
+source must keep order `50`; upgrading the module and running the same graph
+applies the additive migrations without changing source identity.
 
-Fresh databases apply `001`, `002`, then `003`. Existing installations adopt
-the same profile: the baseline records the pre-upgrade schema, `002` adds
+Fresh databases apply `001` through `005`. Existing installations adopt the
+same profile: the baseline records the pre-upgrade schema, `002` adds
 correlation, scoped idempotency, publications/digests, retry lineage,
 transient markers, and safe error fields, and `003` repairs legacy template
 variant uniqueness while adding durable channel, locale, template, and
-provider plans. Back up production data before migration. Integrity migration
-`003` is forward-only on both dialects because restoring `UNIQUE(code)` or
-removing delivery-plan fields could make valid persisted data
-unrepresentable.
+provider plans. Migrations `004` and `005` add indexes used by bounded
+retention and delivery inspection. Back up production data before migration.
+Integrity migration `003` is forward-only on both dialects because restoring
+`UNIQUE(code)` or removing delivery-plan fields could make valid persisted
+data unrepresentable.
+
+#### Composing after an existing host source
+
+A CRM graph with Users at order `90` can place notifications at `100` and host
+evidence at `110`:
+
+```go
+err := notifications.RegisterMigrationsWithOptions(manager,
+    notifications.MigrationSourceOptions{
+        Order:        100,
+        Dependencies: []string{"nice-guys-delivery-users"},
+    },
+)
+```
+
+On a fresh database, register all three sources and migrate normally. If the
+database already persisted a Users-only source-stable graph, the framework
+reports `persistence.ErrOrderedSourceDrift` when the graph is expanded. After
+backup and review, a host may explicitly adopt a suffix-only expansion:
+
+```go
+migrateErr := manager.Migrate(ctx, db)
+if errors.Is(migrateErr, persistence.ErrOrderedSourceDrift) {
+    if err := notifications.AdoptAdditiveOrderedMigrationGraph(
+        ctx, db, manager,
+    ); err != nil {
+        return err
+    }
+    migrateErr = manager.Migrate(ctx, db)
+}
+return migrateErr
+```
+
+Adoption verifies that every persisted source keeps the same name, key,
+order, dependencies, position, and identity mode, and that all new sources
+follow the old graph. It updates ordered-source identity metadata in one
+transaction and never rewrites `bun_migrations`. It is not a general drift
+repair API. Never use it to change an already-persisted package order.
 
 ### Available Repositories
 
@@ -273,9 +313,50 @@ type Providers struct {
     Preferences        store.NotificationPreferenceRepository
     SubscriptionGroups store.SubscriptionGroupRepository
     Inbox              store.InboxRepository
+    Retention          store.RetentionRepository
+    DeliveryQueries    store.DeliveryQueryRepository
     Transaction        store.TransactionManager
 }
 ```
+
+### Bounded retention and safe inspection
+
+Hosts own retention policy and scheduling. Supply all six cutoffs and a batch
+size from `1` to `1000`, then repeat while `HasMore` is true:
+
+```go
+result, err := mod.Commands().PurgeRetention.Run(ctx, retention.Request{
+    EventsBefore:          cutoff,
+    MessagesBefore:        cutoff,
+    AttemptsBefore:        cutoff,
+    InboxBefore:           cutoff,
+    PublicationsBefore:    cutoff,
+    RetryOperationsBefore: cutoff,
+    BatchSize:             500,
+})
+```
+
+The command and `mod.Retention().Purge` share one service. Only terminal,
+non-retryable records are eligible; active, scheduled, dispatching, claimed,
+and retryable work is preserved. Results contain aggregate counts and no
+deleted records. External host evidence has no package-owned deletion path.
+
+Delivery inspection requires an explicit `system` or `tenant:<id>` scope:
+
+```go
+page, err := mod.Deliveries().List(ctx, deliveries.ListQuery{
+    Scope:          "tenant:tenant-7",
+    DefinitionCode: "credential-issued",
+    Limit:          50,
+})
+```
+
+The fixed projection contains opaque IDs, definition/channel/provider,
+normalized status, attempt count, safe error code, correlation ID, and
+timestamps only. It cannot expose recipients, destinations, rendered content,
+template data, arbitrary metadata, URLs, provider responses, or raw errors.
+The service is read-only and authorization-neutral; hosts must authorize every
+transport before calling it.
 
 ---
 
@@ -415,6 +496,7 @@ func RegisterCommands(registry *command.Registry, mod *notifier.Module) error {
 | `InboxSnooze` | `commands.InboxSnooze` | Snooze items |
 | `EnqueueEvent` | `events.IntakeRequest` | Queue notification events |
 | `RetryEvent` | `events.RetryRequest` | Explicitly retry failed persisted outcomes |
+| `PurgeRetention` | `retention.Request` | Purge one bounded batch of terminal records |
 
 Every message implements `Type() string` and `Validate() error`. The stable
 IDs are:
@@ -429,8 +511,10 @@ IDs are:
 | `notifications.inbox.snooze` | `InboxSnooze` |
 | `notifications.event.enqueue` | `EnqueueEvent` |
 | `notifications.event.retry` | `RetryEvent` |
+| `notifications.retention.purge` | `PurgeRetention` |
 
-`EnqueueEvent.Run` and `RetryEvent.Run` return typed dispatch receipts.
+`EnqueueEvent.Run` and `RetryEvent.Run` return typed dispatch receipts;
+`PurgeRetention.Run` returns safe aggregate counts and batch state.
 `Execute` remains available for existing `go-command.Commander` registration
 loops. Immediate transient dispatch is intentionally absent from this
 serializable catalog; invoke the trusted event service directly.

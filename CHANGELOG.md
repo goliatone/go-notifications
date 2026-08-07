@@ -1,5 +1,28 @@
 # Changelog
 
+<!-- markdownlint-disable MD013 MD024 MD025 -->
+
+# [0.16.0](https://github.com/goliatone/go-notifications/compare/v0.15.0...v0.16.0) - (2026-08-07)
+
+This additive minor release keeps the `v0.15.0` durable-pipeline APIs source
+compatible and adds the contracts needed for direct CRM adoption. Existing
+hosts must retain their persisted migration source order.
+
+## <!-- 0 -->🚀 Features
+
+- Add side-effect-free durable receipt lookup ([f5bb301](https://github.com/goliatone/go-notifications/commit/f5bb301))
+- Add bounded terminal-record retention and typed purge command ([e6b3385](https://github.com/goliatone/go-notifications/commit/e6b3385))
+- Support host-selected ordered migration placement ([b67d978](https://github.com/goliatone/go-notifications/commit/b67d978))
+- Add scoped metadata-only delivery inspection ([cbc95d1](https://github.com/goliatone/go-notifications/commit/cbc95d1))
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Reject no-op graph repair and validate additive adoption transactionally ([3f7553e](https://github.com/goliatone/go-notifications/commit/3f7553e))
+
+## <!-- 4 -->🧪 Testing
+
+- Prove memory, SQLite, and PostgreSQL CRM adoption, privacy, retention, and additive graph upgrades ([58b27c9](https://github.com/goliatone/go-notifications/commit/58b27c9))
+
 # [0.15.0](https://github.com/goliatone/go-notifications/compare/v0.14.1...v0.15.0) - (2026-07-31)
 
 ## <!-- 0 -->🚀 Features
@@ -421,5 +444,3 @@
 - Update examples ([c3553b2](https://github.com/goliatone/go-notifications/commit/c3553b244dd41eb1513b9d3e65bd64e55fd66c7d))  - (goliatone)
 - Clean up ([0571c72](https://github.com/goliatone/go-notifications/commit/0571c72dcc0cee1b884f86f41aebeeffca16b0c3))  - (goliatone)
 - Initial commit ([9a8eb26](https://github.com/goliatone/go-notifications/commit/9a8eb26019ceb07b26fda728351d193e984cd27c))  - (goliatone)
-
-

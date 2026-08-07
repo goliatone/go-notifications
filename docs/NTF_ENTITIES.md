@@ -50,11 +50,12 @@ if err := manager.Migrate(ctx, db); err != nil {
 `GetMigrationsFS()` returns the embedded tree rooted at
 `data/sql/migrations`, with `sqlite/` and `postgres/` dialect directories.
 `OrderedMigrationSource()` exposes the source-stable identity
-`go-notifications`, default order `50`, package version namespace `001`,
-`002`, `003`, and mandatory validation targets `sqlite` and `postgres`. A host
-that needs graph dependencies can pass source keys, for example
-`OrderedMigrationSource("go-users")`, and register the returned source in its
-shared migration graph.
+`go-notifications`, default order `50`, package version namespace `001`
+through `005`, and mandatory validation targets `sqlite` and `postgres`.
+Existing hosts retain the persisted default. A host adding the package after
+another source can use `OrderedMigrationSourceWithOptions` or
+`RegisterMigrationsWithOptions` to choose a positive order and dependencies;
+for example, Users `90`, notifications `100`, then host evidence `110`.
 
 Registration does not execute migrations, connect to a database, or change
 module-construction behavior. Re-running the graph through
@@ -69,6 +70,12 @@ Removing its durable delivery-plan fields or restoring legacy
 unrepresentable. Earlier SQLite upgrade downs also retain added columns
 because portable column removal requires table reconstruction. Hosts should
 restore from backup when a complete schema rollback is required.
+
+Migrations `004` and `005` add query indexes only. They support the package's
+bounded terminal-record retention repository and its scoped metadata-only
+delivery query repository. Retention deletes package-owned rows in safe
+referential order; host-owned evidence without package foreign keys remains a
+host lifecycle concern.
 
 ## Repository Coverage
 

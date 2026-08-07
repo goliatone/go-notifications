@@ -158,6 +158,25 @@ enqueue, or dispatch again. Reusing the identity with materially different
 input returns `idempotency_conflict`. Retrying a failure requires a separate
 retry operation.
 
+### Recover a receipt without resubmitting
+
+Trusted workflows that did not retain the transient call result can recover
+the exact current durable receipt by the same scoped idempotency identity:
+
+```go
+receipt, err := mod.LookupReceipt(ctx, events.ReceiptLookup{
+    DefinitionCode:   "credential-issued",
+    IdempotencyScope: "tenant:tenant-7",
+    IdempotencyKey:   "credential-user-123",
+})
+```
+
+Lookup does not require or reconstruct transient data. It does not render,
+dispatch, publish, retry, enqueue, or mutate state, and it returns
+`Replay=true`. Missing or cross-scope identities use privacy-safe categorized
+errors. Receipt lookup is deliberately not part of the serializable enqueue
+command.
+
 ### Immediate transient render data
 
 Credential tokens and one-time URLs must use the immediate-only API:

@@ -30,8 +30,8 @@ type ListQuery struct {
 	Channel        string    `json:"channel,omitempty"`
 	Status         string    `json:"status,omitempty"`
 	ErrorCode      string    `json:"error_code,omitempty"`
-	CreatedAfter   time.Time `json:"created_after,omitempty"`
-	CreatedBefore  time.Time `json:"created_before,omitempty"`
+	CreatedAfter   time.Time `json:"created_after"`
+	CreatedBefore  time.Time `json:"created_before"`
 	Cursor         string    `json:"cursor,omitempty"`
 	Limit          int       `json:"limit,omitempty"`
 }
