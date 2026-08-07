@@ -72,6 +72,20 @@ func TestRetentionRepositoryPurgesBoundedTerminalGraphAndPreservesActiveWork(t *
 		MessageID:  activeMessageID, Status: domain.AttemptStatusFailed,
 	}
 
+	pendingEventID, pendingMessageID, pendingAttemptID := uuid.New(), uuid.New(), uuid.New()
+	events.base.records[pendingEventID] = domain.NotificationEvent{
+		RecordMeta: domain.RecordMeta{ID: pendingEventID, CreatedAt: old, UpdatedAt: old},
+		Status:     domain.EventStatusProcessed,
+	}
+	messages.base.records[pendingMessageID] = domain.NotificationMessage{
+		RecordMeta: domain.RecordMeta{ID: pendingMessageID, CreatedAt: old, UpdatedAt: old},
+		EventID:    pendingEventID, Status: domain.MessageStatusDelivered,
+	}
+	attempts.base.records[pendingAttemptID] = domain.DeliveryAttempt{
+		RecordMeta: domain.RecordMeta{ID: pendingAttemptID, CreatedAt: old, UpdatedAt: old},
+		MessageID:  pendingMessageID, Status: domain.AttemptStatusPending,
+	}
+
 	cutoffs := store.RetentionCutoffs{
 		EventsBefore: cutoff, MessagesBefore: cutoff, AttemptsBefore: cutoff,
 		InboxBefore: cutoff, PublicationsBefore: cutoff, RetryOperationsBefore: cutoff,
@@ -105,6 +119,15 @@ func TestRetentionRepositoryPurgesBoundedTerminalGraphAndPreservesActiveWork(t *
 	}
 	if _, ok := attempts.base.records[activeAttemptID]; !ok {
 		t.Fatalf("failed attempt for retryable work was deleted")
+	}
+	if _, ok := attempts.base.records[pendingAttemptID]; !ok {
+		t.Fatalf("pending attempt beneath terminal message was deleted")
+	}
+	if _, ok := messages.base.records[pendingMessageID]; !ok {
+		t.Fatalf("message referenced by pending attempt was deleted")
+	}
+	if _, ok := events.base.records[pendingEventID]; !ok {
+		t.Fatalf("event referenced by pending attempt graph was deleted")
 	}
 }
 

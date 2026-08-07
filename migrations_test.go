@@ -290,8 +290,13 @@ func TestOrderedMigrationSourceSupportsHostSelectedPlacement(t *testing.T) {
 		t.Fatalf("configured source changed stable identity: %+v", source)
 	}
 	for _, order := range []int{-1, persistence.MaxOrderedMigrationSourceOrder + 1} {
-		if _, orderErr := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{Order: order}); orderErr == nil {
-			t.Fatalf("invalid order %d was accepted", order)
+		_, orderErr := notifications.OrderedMigrationSourceWithOptions(notifications.MigrationSourceOptions{Order: order})
+		if !errors.Is(orderErr, persistence.ErrOrderedSourceInvalidConfig) {
+			t.Fatalf("invalid order %d error was not categorized: %v", order, orderErr)
+		}
+		var graphErr *persistence.OrderedSourceGraphError
+		if !errors.As(orderErr, &graphErr) || graphErr.SourceName != notifications.MigrationSourceName || graphErr.SourceKey != notifications.MigrationSourceKey {
+			t.Fatalf("invalid order %d graph error=%#v", order, graphErr)
 		}
 	}
 	users := persistence.NewStableOrderedMigrationSource(

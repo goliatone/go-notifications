@@ -56,7 +56,15 @@ func (r *DeliveryQueryRepository) records(query store.DeliveryQuery) []store.Del
 		if !event.DeletedAt.IsZero() || event.TenantID != query.TenantID {
 			continue
 		}
-		eventRecords := r.recordsForEvent(event, messagesByEvent[event.ID])
+		messages := messagesByEvent[event.ID]
+		if query.EventID != uuid.Nil && query.MessageID == uuid.Nil {
+			record := r.recordForEvent(event, messages)
+			if deliveryMatches(record, query) {
+				records = append(records, record)
+			}
+			continue
+		}
+		eventRecords := r.recordsForEvent(event, messages)
 		for _, record := range eventRecords {
 			if deliveryMatches(record, query) {
 				records = append(records, record)
@@ -70,6 +78,33 @@ func (r *DeliveryQueryRepository) records(query store.DeliveryQuery) []store.Del
 		return records[i].CreatedAt.After(records[j].CreatedAt)
 	})
 	return records
+}
+
+func (r *DeliveryQueryRepository) recordForEvent(event domain.NotificationEvent, messages []domain.NotificationMessage) store.DeliveryRecord {
+	record := store.DeliveryRecord{
+		EventID: event.ID, Definition: event.DefinitionCode, Status: event.Status,
+		CorrelationID: event.CorrelationID, CreatedAt: event.CreatedAt, UpdatedAt: event.UpdatedAt,
+	}
+	messageIDs := make(map[uuid.UUID]struct{}, len(messages))
+	for _, message := range messages {
+		messageIDs[message.ID] = struct{}{}
+		if record.UpdatedAt.Before(message.UpdatedAt) {
+			record.UpdatedAt = message.UpdatedAt
+		}
+	}
+	for _, attempt := range r.attempts.base.records {
+		if !attempt.DeletedAt.IsZero() {
+			continue
+		}
+		if _, ok := messageIDs[attempt.MessageID]; !ok {
+			continue
+		}
+		record.AttemptCount++
+		if record.UpdatedAt.Before(attempt.UpdatedAt) {
+			record.UpdatedAt = attempt.UpdatedAt
+		}
+	}
+	return record
 }
 
 func (r *DeliveryQueryRepository) recordsForEvent(event domain.NotificationEvent, messages []domain.NotificationMessage) []store.DeliveryRecord {
@@ -93,24 +128,39 @@ func (r *DeliveryQueryRepository) recordForMessage(event domain.NotificationEven
 		CreatedAt: message.CreatedAt, UpdatedAt: message.UpdatedAt,
 	}
 	latest := domain.DeliveryAttempt{}
+	providers := make(map[string]struct{})
 	for _, attempt := range r.attempts.base.records {
 		if !attempt.DeletedAt.IsZero() || attempt.MessageID != message.ID {
 			continue
 		}
 		record.AttemptCount++
+		providers[attempt.Adapter] = struct{}{}
+		if record.UpdatedAt.Before(attempt.UpdatedAt) {
+			record.UpdatedAt = attempt.UpdatedAt
+		}
 		if latest.ID == uuid.Nil || latest.CreatedAt.Before(attempt.CreatedAt) ||
 			(latest.CreatedAt.Equal(attempt.CreatedAt) && latest.ID.String() < attempt.ID.String()) {
 			latest = attempt
 		}
 	}
-	if latest.ID != uuid.Nil {
+	if latest.ID != uuid.Nil && len(providers) == 1 && latest.Adapter != "" && attemptAgreesWithMessageStatus(message.Status, latest.Status) {
 		record.Provider = latest.Adapter
 		record.ErrorCode = latest.ErrorCode
-		if record.UpdatedAt.Before(latest.UpdatedAt) {
-			record.UpdatedAt = latest.UpdatedAt
-		}
 	}
 	return record
+}
+
+func attemptAgreesWithMessageStatus(messageStatus, attemptStatus string) bool {
+	switch messageStatus {
+	case domain.MessageStatusDelivered:
+		return attemptStatus == domain.AttemptStatusSucceeded
+	case domain.MessageStatusFailed:
+		return attemptStatus == domain.AttemptStatusFailed
+	case domain.MessageStatusPending:
+		return attemptStatus == domain.AttemptStatusPending
+	default:
+		return false
+	}
 }
 
 func deliveryMatches(record store.DeliveryRecord, query store.DeliveryQuery) bool {

@@ -358,6 +358,15 @@ template data, arbitrary metadata, URLs, provider responses, or raw errors.
 The service is read-only and authorization-neutral; hosts must authorize every
 transport before calling it.
 
+`Get` by event ID returns an event-level summary, including the total retained
+attempt count and latest event/message/attempt lifecycle timestamp; it never
+chooses one child message from a fan-out. `Get` by message ID and `List` return
+message summaries. Because `View.Provider` and `View.ErrorCode` are singular,
+they are emitted only when all retained attempts use one provider and its
+latest attempt agrees with the aggregate message status. Multi-provider state
+keeps its aggregate status and attempt count but leaves those singular fields
+empty. `ErrorCode` filtering uses the same rule.
+
 ---
 
 ## Dependency Injection Setup

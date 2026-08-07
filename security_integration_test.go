@@ -249,6 +249,14 @@ func runSensitiveNotificationContract(t *testing.T, repositories storage.Provide
 	if err != nil || recovered.EventID != first.EventID || !recovered.Replay || adapter.count() != sendsBeforeLookup {
 		t.Fatalf("side-effect-free receipt recovery: receipt=%+v sends=%d err=%v", recovered, adapter.count(), err)
 	}
+	eventInspection, err := module.Deliveries().Get(ctx, deliveries.GetQuery{
+		Scope: "system", EventID: first.EventID,
+	})
+	if err != nil || eventInspection.EventID != first.EventID || eventInspection.MessageID != uuid.Nil ||
+		eventInspection.Channel != "" || eventInspection.Provider != "" || eventInspection.ErrorCode != "" ||
+		eventInspection.UpdatedAt.IsZero() {
+		t.Fatalf("safe event delivery summary: view=%+v err=%v", eventInspection, err)
+	}
 	inspection, err := module.Deliveries().List(ctx, deliveries.ListQuery{
 		Scope: "system", DefinitionCode: "sensitive", Limit: 100,
 	})
@@ -258,6 +266,7 @@ func runSensitiveNotificationContract(t *testing.T, repositories storage.Provide
 	if containsSecret(inspection) || strings.Contains(fmt.Sprint(inspection), "subject-sensitive") {
 		t.Fatalf("delivery inspection leaked sensitive state: %+v", inspection)
 	}
+	assertAmbiguousDeliveryProjection(t, ctx, repositories, module)
 	if !linkBuilder.contains(sensitiveValue) {
 		t.Fatalf("link builder did not receive transient render data")
 	}
@@ -403,6 +412,26 @@ func runSensitiveNotificationContract(t *testing.T, repositories storage.Provide
 	if createErr := repositories.Events.Create(ctx, active); createErr != nil {
 		t.Fatalf("create active retention control: %v", createErr)
 	}
+	pendingEvent := &domain.NotificationEvent{
+		DefinitionCode: "scheduled", Status: domain.EventStatusProcessed,
+		Recipients: domain.StringList{"pending-attempt-subject"},
+	}
+	if createErr := repositories.Events.Create(ctx, pendingEvent); createErr != nil {
+		t.Fatalf("create pending-attempt event: %v", createErr)
+	}
+	pendingMessage := &domain.NotificationMessage{
+		EventID: pendingEvent.ID, Channel: "email", Receiver: "pending-attempt-subject",
+		Status: domain.MessageStatusDelivered,
+	}
+	if createErr := repositories.Messages.Create(ctx, pendingMessage); createErr != nil {
+		t.Fatalf("create pending-attempt message: %v", createErr)
+	}
+	pendingAttempt := &domain.DeliveryAttempt{
+		MessageID: pendingMessage.ID, Adapter: "security", Status: domain.AttemptStatusPending,
+	}
+	if createErr := repositories.DeliveryAttempts.Create(ctx, pendingAttempt); createErr != nil {
+		t.Fatalf("create pending attempt: %v", createErr)
+	}
 	hostEvidence := map[uuid.UUID]string{first.EventID: "credential-delivery-recorded"}
 	cutoff := time.Now().UTC()
 	purgeRequest := retention.Request{
@@ -431,6 +460,15 @@ func runSensitiveNotificationContract(t *testing.T, repositories storage.Provide
 	if _, getErr := repositories.Events.GetByID(ctx, active.ID); getErr != nil {
 		t.Fatalf("retention deleted active work: %v", getErr)
 	}
+	if _, getErr := repositories.DeliveryAttempts.GetByID(ctx, pendingAttempt.ID); getErr != nil {
+		t.Fatalf("retention deleted pending attempt beneath terminal message: %v", getErr)
+	}
+	if _, getErr := repositories.Messages.GetByID(ctx, pendingMessage.ID); getErr != nil {
+		t.Fatalf("retention deleted message referenced by pending attempt: %v", getErr)
+	}
+	if _, getErr := repositories.Events.GetByID(ctx, pendingEvent.ID); getErr != nil {
+		t.Fatalf("retention deleted event referenced by pending attempt graph: %v", getErr)
+	}
 	if _, lookupErr := module.LookupReceipt(ctx, events.ReceiptLookup{
 		DefinitionCode: "sensitive", IdempotencyScope: "system", IdempotencyKey: "sensitive-once",
 	}); lookupErr == nil {
@@ -442,6 +480,59 @@ func runSensitiveNotificationContract(t *testing.T, repositories storage.Provide
 	directResult, err := module.Retention().Purge(ctx, purgeRequest)
 	if err != nil || directResult.HasMore {
 		t.Fatalf("direct retention did not share converged service behavior: result=%+v err=%v", directResult, err)
+	}
+}
+
+func assertAmbiguousDeliveryProjection( //nolint:gocyclo // Linear cross-provider projection fixture.
+	t *testing.T,
+	ctx context.Context,
+	repositories storage.Providers,
+	module *notifier.Module,
+) {
+	t.Helper()
+	event := &domain.NotificationEvent{
+		DefinitionCode: "projection.edge", Status: domain.EventStatusProcessed,
+		Recipients: domain.StringList{"projection-subject"},
+	}
+	if createErr := repositories.Events.Create(ctx, event); createErr != nil {
+		t.Fatalf("create projection event: %v", createErr)
+	}
+	message := &domain.NotificationMessage{
+		EventID: event.ID, Channel: "email", Receiver: "projection-subject", Status: domain.MessageStatusDelivered,
+	}
+	if createErr := repositories.Messages.Create(ctx, message); createErr != nil {
+		t.Fatalf("create projection message: %v", createErr)
+	}
+	for _, attempt := range []*domain.DeliveryAttempt{
+		{MessageID: message.ID, Adapter: "provider-a", Status: domain.AttemptStatusSucceeded},
+		{MessageID: message.ID, Adapter: "provider-b", Status: domain.AttemptStatusFailed, ErrorCode: "secondary_failure"},
+	} {
+		if createErr := repositories.DeliveryAttempts.Create(ctx, attempt); createErr != nil {
+			t.Fatalf("create projection attempt: %v", createErr)
+		}
+	}
+	if updateErr := repositories.Messages.Update(ctx, message); updateErr != nil {
+		t.Fatalf("update projection message: %v", updateErr)
+	}
+	persisted, err := repositories.Messages.GetByID(ctx, message.ID)
+	if err != nil {
+		t.Fatalf("reload projection message: %v", err)
+	}
+	messageView, err := module.Deliveries().Get(ctx, deliveries.GetQuery{Scope: "system", MessageID: message.ID})
+	if err != nil || messageView.Status != domain.MessageStatusDelivered || messageView.AttemptCount != 2 ||
+		messageView.Provider != "" || messageView.ErrorCode != "" || !messageView.UpdatedAt.Equal(persisted.UpdatedAt) {
+		t.Fatalf("ambiguous message projection: view=%+v persisted=%+v err=%v", messageView, persisted, err)
+	}
+	eventView, err := module.Deliveries().Get(ctx, deliveries.GetQuery{Scope: "system", EventID: event.ID})
+	if err != nil || eventView.MessageID != uuid.Nil || eventView.AttemptCount != 2 ||
+		eventView.Provider != "" || eventView.ErrorCode != "" || !eventView.UpdatedAt.Equal(persisted.UpdatedAt) {
+		t.Fatalf("event projection: view=%+v persisted=%+v err=%v", eventView, persisted, err)
+	}
+	filtered, err := module.Deliveries().List(ctx, deliveries.ListQuery{
+		Scope: "system", DefinitionCode: "projection.edge", ErrorCode: "secondary_failure", Limit: 100,
+	})
+	if err != nil || len(filtered.Items) != 0 {
+		t.Fatalf("ambiguous error filter: page=%+v err=%v", filtered, err)
 	}
 }
 

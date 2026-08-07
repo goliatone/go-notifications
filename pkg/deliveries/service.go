@@ -19,8 +19,11 @@ const (
 )
 
 type GetQuery struct {
-	Scope     string    `json:"scope"`
-	EventID   uuid.UUID `json:"event_id,omitempty"`
+	Scope string `json:"scope"`
+	// EventID returns an event-level summary. It never selects one child
+	// message from a multi-message fan-out.
+	EventID uuid.UUID `json:"event_id,omitempty"`
+	// MessageID returns the exact message-level summary.
 	MessageID uuid.UUID `json:"message_id,omitempty"`
 }
 
@@ -39,10 +42,13 @@ type ListQuery struct {
 // View is a fixed metadata-only projection. It has no recipient, content,
 // template data, URL, arbitrary metadata, provider response, or raw error.
 type View struct {
-	EventID       uuid.UUID `json:"event_id"`
-	MessageID     uuid.UUID `json:"message_id,omitempty"`
-	Definition    string    `json:"definition"`
-	Channel       string    `json:"channel,omitempty"`
+	EventID    uuid.UUID `json:"event_id"`
+	MessageID  uuid.UUID `json:"message_id,omitempty"`
+	Definition string    `json:"definition"`
+	Channel    string    `json:"channel,omitempty"`
+	// Provider and ErrorCode are present only for an unambiguous
+	// single-provider message outcome. Event and multi-provider summaries leave
+	// both empty while retaining aggregate status and attempt count.
 	Provider      string    `json:"provider,omitempty"`
 	Status        string    `json:"status"`
 	AttemptCount  int       `json:"attempt_count,omitempty"`

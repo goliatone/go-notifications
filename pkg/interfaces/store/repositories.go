@@ -72,7 +72,8 @@ type DeliveryQuery struct {
 }
 
 // DeliveryRecord is intentionally a safe projection rather than a domain
-// event, message, or attempt entity.
+// event, message, or attempt entity. Provider and ErrorCode are populated only
+// for an unambiguous single-provider message outcome.
 type DeliveryRecord struct {
 	EventID       uuid.UUID
 	MessageID     uuid.UUID

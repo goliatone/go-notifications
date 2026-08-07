@@ -40,10 +40,15 @@ func OrderedMigrationSourceWithOptions(config MigrationSourceOptions) (persisten
 		order = MigrationSourceOrder
 	}
 	if order < 1 || order > persistence.MaxOrderedMigrationSourceOrder {
-		return persistence.OrderedMigrationSource{}, fmt.Errorf(
-			"notifications: migration source order must be between 1 and %d",
-			persistence.MaxOrderedMigrationSourceOrder,
-		)
+		return persistence.OrderedMigrationSource{}, &persistence.OrderedSourceGraphError{
+			Kind:       persistence.ErrOrderedSourceInvalidConfig,
+			SourceName: MigrationSourceName,
+			SourceKey:  MigrationSourceKey,
+			Message: fmt.Sprintf(
+				"notifications: migration source order must be between 1 and %d",
+				persistence.MaxOrderedMigrationSourceOrder,
+			),
+		}
 	}
 	root, err := GetMigrationsFS()
 	if err != nil {

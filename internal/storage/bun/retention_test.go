@@ -94,6 +94,26 @@ func TestBunRetentionRepositoryPurgesTerminalGraphTransactionally(t *testing.T) 
 		}
 	}
 
+	pendingEventID, pendingMessageID, pendingAttemptID := uuid.New(), uuid.New(), uuid.New()
+	for _, record := range []any{
+		&domain.NotificationEvent{
+			RecordMeta:     domain.RecordMeta{ID: pendingEventID, CreatedAt: old, UpdatedAt: old},
+			DefinitionCode: "welcome", Status: domain.EventStatusProcessed,
+		},
+		&domain.NotificationMessage{
+			RecordMeta: domain.RecordMeta{ID: pendingMessageID, CreatedAt: old, UpdatedAt: old},
+			EventID:    pendingEventID, Channel: "email", Receiver: "opaque", Status: domain.MessageStatusDelivered,
+		},
+		&domain.DeliveryAttempt{
+			RecordMeta: domain.RecordMeta{ID: pendingAttemptID, CreatedAt: old, UpdatedAt: old},
+			MessageID:  pendingMessageID, Adapter: "fake", Status: domain.AttemptStatusPending,
+		},
+	} {
+		if _, err := db.NewInsert().Model(record).Exec(ctx); err != nil {
+			t.Fatalf("insert pending %T: %v", record, err)
+		}
+	}
+
 	repo := NewRetentionRepository(db)
 	cutoffs := store.RetentionCutoffs{
 		EventsBefore: cutoff, MessagesBefore: cutoff, AttemptsBefore: cutoff,
@@ -123,12 +143,16 @@ func TestBunRetentionRepositoryPurgesTerminalGraphTransactionally(t *testing.T) 
 		t.Fatalf("terminal graph did not converge: totals=%+v want=%+v hasMore=%v", totals, want, hasMore)
 	}
 	for table, wantCount := range map[string]int{
-		"notification_events": 1, "notification_messages": 1, "notification_delivery_attempts": 1,
+		"notification_events": 2, "notification_messages": 2, "notification_delivery_attempts": 2,
 		"notification_inbox_items": 0, "notification_publications": 0, "notification_retry_operations": 0,
 	} {
 		var count int
 		if err := db.NewRaw("SELECT COUNT(*) FROM "+table).Scan(ctx, &count); err != nil || count != wantCount {
 			t.Fatalf("%s count=%d want=%d err=%v", table, count, wantCount, err)
 		}
+	}
+	var pendingCount int
+	if err := db.NewRaw("SELECT COUNT(*) FROM notification_delivery_attempts WHERE id = ?", pendingAttemptID).Scan(ctx, &pendingCount); err != nil || pendingCount != 1 {
+		t.Fatalf("pending attempt count=%d err=%v", pendingCount, err)
 	}
 }

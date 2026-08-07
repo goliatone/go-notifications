@@ -112,6 +112,75 @@ func TestDeliveryInspectionValidatesIdentityCursorAndPageBounds(t *testing.T) {
 	}
 }
 
+func TestMemoryDeliveryInspectionReturnsEventSummaryAndUnambiguousProviderMetadata(t *testing.T) { //nolint:gocyclo // Linear multi-provider summary fixture.
+	ctx := context.Background()
+	providers := storage.NewMemoryProviders()
+	service, err := New(providers.DeliveryQueries)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	event := &domain.NotificationEvent{
+		DefinitionCode: "broadcast.notice", TenantID: "tenant-a", CorrelationID: "corr-broadcast",
+		Status: domain.EventStatusPartial,
+	}
+	if createErr := providers.Events.Create(ctx, event); createErr != nil {
+		t.Fatalf("create event: %v", createErr)
+	}
+	broadcast := &domain.NotificationMessage{
+		EventID: event.ID, Channel: "email", Receiver: "subject-1", Status: domain.MessageStatusDelivered,
+	}
+	failed := &domain.NotificationMessage{
+		EventID: event.ID, Channel: "sms", Receiver: "subject-1", Status: domain.MessageStatusFailed,
+	}
+	for _, message := range []*domain.NotificationMessage{broadcast, failed} {
+		if createErr := providers.Messages.Create(ctx, message); createErr != nil {
+			t.Fatalf("create message: %v", createErr)
+		}
+	}
+	for _, attempt := range []*domain.DeliveryAttempt{
+		{MessageID: broadcast.ID, Adapter: "provider-a", Status: domain.AttemptStatusSucceeded},
+		{MessageID: broadcast.ID, Adapter: "provider-b", Status: domain.AttemptStatusFailed, ErrorCode: "secondary_failure"},
+		{MessageID: failed.ID, Adapter: "provider-c", Status: domain.AttemptStatusFailed, ErrorCode: "provider_rejected"},
+	} {
+		if createErr := providers.DeliveryAttempts.Create(ctx, attempt); createErr != nil {
+			t.Fatalf("create attempt: %v", createErr)
+		}
+	}
+	if updateErr := providers.Messages.Update(ctx, broadcast); updateErr != nil {
+		t.Fatalf("update broadcast message: %v", updateErr)
+	}
+
+	messageView, err := service.Get(ctx, GetQuery{Scope: "tenant:tenant-a", MessageID: broadcast.ID})
+	if err != nil {
+		t.Fatalf("get broadcast message: %v", err)
+	}
+	if messageView.Status != domain.MessageStatusDelivered || messageView.AttemptCount != 2 ||
+		messageView.Provider != "" || messageView.ErrorCode != "" || !messageView.UpdatedAt.Equal(broadcast.UpdatedAt) {
+		t.Fatalf("ambiguous provider summary=%+v", messageView)
+	}
+
+	eventView, err := service.Get(ctx, GetQuery{Scope: "tenant:tenant-a", EventID: event.ID})
+	if err != nil {
+		t.Fatalf("get event summary: %v", err)
+	}
+	if eventView.EventID != event.ID || eventView.MessageID != uuid.Nil || eventView.Channel != "" ||
+		eventView.Provider != "" || eventView.ErrorCode != "" || eventView.AttemptCount != 3 ||
+		eventView.Status != domain.EventStatusPartial || !eventView.UpdatedAt.Equal(broadcast.UpdatedAt) {
+		t.Fatalf("event summary=%+v", eventView)
+	}
+
+	filtered, err := service.List(ctx, ListQuery{
+		Scope: "tenant:tenant-a", ErrorCode: "secondary_failure", Limit: 100,
+	})
+	if err != nil || len(filtered.Items) != 0 {
+		t.Fatalf("ambiguous error filter=%+v err=%v", filtered, err)
+	}
+	single, err := service.Get(ctx, GetQuery{Scope: "tenant:tenant-a", MessageID: failed.ID})
+	if err != nil || single.Provider != "provider-c" || single.ErrorCode != "provider_rejected" {
+		t.Fatalf("single-provider summary=%+v err=%v", single, err)
+	}
+}
+
 type deliveryRepoStub struct{}
 
 func (*deliveryRepoStub) GetDelivery(context.Context, store.DeliveryQuery) (store.DeliveryRecord, error) {

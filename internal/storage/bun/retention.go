@@ -73,9 +73,13 @@ func retentionDeletes(c store.RetentionCutoffs) []retentionDelete {
 			query: `DELETE FROM notification_delivery_attempts WHERE id IN (
 SELECT a.id FROM notification_delivery_attempts a
 JOIN notification_messages m ON m.id = a.message_id
-WHERE a.updated_at < ? AND m.status IN (?, ?)
-ORDER BY a.updated_at ASC, a.id ASC LIMIT ?)`,
-			args:   []any{c.AttemptsBefore, domain.MessageStatusDelivered, domain.MessageStatusSkipped},
+	WHERE a.updated_at < ? AND a.status IN (?, ?) AND m.status IN (?, ?)
+	ORDER BY a.updated_at ASC, a.id ASC LIMIT ?)`,
+			args: []any{
+				c.AttemptsBefore,
+				domain.AttemptStatusSucceeded, domain.AttemptStatusFailed,
+				domain.MessageStatusDelivered, domain.MessageStatusSkipped,
+			},
 			assign: func(v *store.RetentionCounts, n int) { v.Attempts = n },
 		},
 		{

@@ -136,11 +136,15 @@ func terminalMessage(status string) bool {
 	return status == domain.MessageStatusDelivered || status == domain.MessageStatusSkipped
 }
 
+func terminalAttempt(status string) bool {
+	return status == domain.AttemptStatusSucceeded || status == domain.AttemptStatusFailed
+}
+
 func (r *RetentionRepository) attemptIDs(cutoff time.Time, limit int) []uuid.UUID {
 	items := make([]retentionCandidate, 0)
 	for id, attempt := range r.attempts.base.records {
 		message, ok := r.messages.base.records[attempt.MessageID]
-		if ok && terminalMessage(message.Status) && beforeCutoff(attempt.RecordMeta, cutoff) {
+		if ok && terminalAttempt(attempt.Status) && terminalMessage(message.Status) && beforeCutoff(attempt.RecordMeta, cutoff) {
 			items = append(items, retentionCandidate{id: id, at: attempt.UpdatedAt})
 		}
 	}
