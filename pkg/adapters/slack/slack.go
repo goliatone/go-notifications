@@ -1,9 +1,7 @@
 package slack
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,6 +18,7 @@ type Adapter struct {
 	caps   adapters.Capability
 	cfg    Config
 	client *http.Client
+	sender Sender
 }
 
 // Config holds Slack API settings.
@@ -90,82 +89,8 @@ func (a *Adapter) Name() string { return a.name }
 func (a *Adapter) Capabilities() adapters.Capability { return a.caps }
 
 func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
-	token := strings.TrimSpace(firstNonEmpty(
-		stringValue(msg.Metadata, "token"),
-		secretString(msg.Metadata, "token"),
-		secretString(msg.Metadata, "default"),
-		a.cfg.Token,
-	))
-	if token == "" && !a.cfg.DryRun {
-		return fmt.Errorf("slack: token required")
-	}
-	channel := firstNonEmpty(stringValue(msg.Metadata, "channel"), a.cfg.Channel)
-	if channel == "" {
-		return fmt.Errorf("slack: channel required")
-	}
-
-	text := firstNonEmpty(stringValue(msg.Metadata, "body"), msg.Body)
-	htmlBody := firstNonEmpty(stringValue(msg.Metadata, "html_body"))
-	if htmlBody != "" {
-		// Slack uses mrkdwn; strip tags to keep content readable
-		text = stripHTML(htmlBody)
-	}
-	if text == "" {
-		return fmt.Errorf("slack: message body required")
-	}
-
-	payload := map[string]any{
-		"channel": channel,
-		"text":    text,
-		"mrkdwn":  true,
-	}
-	if thread := stringValue(msg.Metadata, "thread_ts"); thread != "" {
-		payload["thread_ts"] = thread
-	}
-	if attachments := slackAttachments(msg.Attachments); len(attachments) > 0 {
-		payload["attachments"] = attachments
-	}
-
-	if a.cfg.DryRun || token == "" {
-		a.base.LogSuccess(a.name, msg)
-		a.base.Logger().Info("[slack:during-dry-run] send skipped",
-			"channel", channel,
-			"text", text,
-		)
-		return nil
-	}
-
-	bodyBytes, err := adapters.EncodeJSONPayload("slack", payload)
-	if err != nil {
-		return err
-	}
-	endpoint := strings.TrimRight(a.cfg.BaseURL, "/") + "/chat.postMessage"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return fmt.Errorf("slack: build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	data, err := adapters.ExecuteRequest(a.client, "slack", req)
-	if err != nil {
-		return err
-	}
-
-	// Slack returns ok=false on logical errors
-	var apiResp struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(data, &apiResp); err != nil {
-		return fmt.Errorf("slack: parse response: %w", err)
-	}
-	if !apiResp.OK {
-		return fmt.Errorf("slack: api error: %s", apiResp.Error)
-	}
-
-	a.base.LogSuccess(a.name, msg)
-	return nil
+	_, err := a.SendWithResult(ctx, msg)
+	return err
 }
 
 func slackAttachments(attachments []adapters.Attachment) []map[string]any {
