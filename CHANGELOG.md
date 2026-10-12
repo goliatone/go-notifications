@@ -1,5 +1,23 @@
 # Changelog
 
+# [0.16.2](https://github.com/goliatone/go-notifications/compare/v0.16.1...v0.16.2) - (2026-10-12)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.16.2 ([b95ddb6](https://github.com/goliatone/go-notifications/commit/b95ddb610abcf28676b57193a5e39c224a9ad655))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Slack adapter ([8f25389](https://github.com/goliatone/go-notifications/commit/8f253897cbb5a8df1449d4381f976ab236338956))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.16.1 ([1077888](https://github.com/goliatone/go-notifications/commit/107788807f72a82aef8fa4895e062b7c9f8ad014))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([52ec557](https://github.com/goliatone/go-notifications/commit/52ec557598b16b3d8ea5523e21e509aad7c8df87))  - (goliatone)
+
 # [0.16.1](https://github.com/goliatone/go-notifications/compare/v0.16.0...v0.16.1) - (2026-08-07)
 
 ## <!-- 1 -->🐛 Bug Fixes
