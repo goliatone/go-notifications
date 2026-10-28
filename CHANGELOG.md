@@ -1,5 +1,20 @@
 # Changelog
 
+# [0.16.3](https://github.com/goliatone/go-notifications/compare/v0.16.2...v0.16.3) - (2026-10-28)
+
+## <!-- 13 -->📦 Bumps
+
+- Bump version: v0.16.3 ([cf42b7b](https://github.com/goliatone/go-notifications/commit/cf42b7b429bfa666367d4504b26383fcd2d49b21))  - (goliatone)
+
+## <!-- 3 -->📚 Documentation
+
+- Update changelog for v0.16.2 ([92a91dc](https://github.com/goliatone/go-notifications/commit/92a91dc9e5201692d5d7dfac6e46639202e4f848))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update deps ([c08305e](https://github.com/goliatone/go-notifications/commit/c08305e059900b3d60a622c87b14497493968b03))  - (goliatone)
+- Update docs ([88dd9e6](https://github.com/goliatone/go-notifications/commit/88dd9e647e23cd52cd6606845bf84418379c5240))  - (goliatone)
+
 # [0.16.2](https://github.com/goliatone/go-notifications/compare/v0.16.1...v0.16.2) - (2026-10-12)
 
 ## <!-- 13 -->📦 Bumps
