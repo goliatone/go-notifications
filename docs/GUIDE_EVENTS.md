@@ -598,13 +598,15 @@ func GetEventStatus(ctx context.Context, repo store.NotificationEventRepository,
 
 ## Delivery Attempts and Retries
 
-The dispatcher automatically retries failed deliveries with exponential backoff:
+The dispatcher retries within one delivery operation, up to `MaxAttempts` total
+attempts (including the first). Explicit durable retry operations and queue
+redelivery are separate boundaries:
 
 ```go
 import "github.com/goliatone/go-notifications/pkg/config"
 
 dispatcherConfig := config.DispatcherConfig{
-    MaxRetries: 3,         // Retry up to 3 times
+    MaxAttempts: 3,         // Three total attempts, including the first
     MaxWorkers: 4,         // Parallel delivery workers
 }
 ```
@@ -614,7 +616,10 @@ dispatcherConfig := config.DispatcherConfig{
 1. First attempt: immediate
 2. Second attempt: 100ms delay
 3. Third attempt: 200ms delay
-4. After max retries: message marked as `failed`
+4. After attempts are exhausted: message marked as `failed`
+
+Default backoff uses 100ms exponential growth capped at 5s; hosts may supply
+`ModuleOptions.Backoff`. Coordinate queue retries with this inner attempt budget.
 
 ### Delivery Attempt Records
 
@@ -727,75 +732,35 @@ mod, _ := notifier.NewModule(notifier.ModuleOptions{
 
 ---
 
-## Complete Example
+## Complete setup and receipt intake
+
+Use the [console bootstrap](GUIDE_GETTING_STARTED.md#minimal-setup) for a complete
+module/definition/template setup. Once the host has seeded `welcome`, receipt
+intake can be exposed through a thin authorized adapter:
 
 ```go
-package main
-
 import (
     "context"
-    "log"
-    "time"
-
-    i18n "github.com/goliatone/go-i18n"
-    "github.com/goliatone/go-notifications/pkg/adapters"
-    "github.com/goliatone/go-notifications/pkg/adapters/console"
-    "github.com/goliatone/go-notifications/pkg/domain"
+    "github.com/goliatone/go-notifications/pkg/events"
     "github.com/goliatone/go-notifications/pkg/notifier"
 )
 
-func main() {
-    ctx := context.Background()
-
-    // Setup module
-    translator, _ := i18n.New()
-    consoleAdapter, _ := console.New(nil)
-
-    mod, err := notifier.NewModule(notifier.ModuleOptions{
-        Translator: translator,
-        Adapters:   []adapters.Messenger{consoleAdapter},
+func enqueueWelcome(ctx context.Context, mod *notifier.Module, subjectID, tenantID, scope, key string) (events.DispatchReceipt, error) {
+    return mod.Events().EnqueueWithReceipt(ctx, events.IntakeRequest{
+        DefinitionCode:   "welcome",
+        Recipients:       []string{subjectID},
+        TenantID:         tenantID,
+        IdempotencyScope: scope,
+        IdempotencyKey:   key,
+        Context:          map[string]any{"Name": "Alice"},
     })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Create definition
-    defRepo := mod.Repositories().Definitions
-    defRepo.Create(ctx, &domain.NotificationDefinition{
-        Code:     "welcome",
-        Name:     "Welcome Email",
-        Channels: domain.StringList{"console"},
-    })
-
-    // Create template
-    tplRepo := mod.Repositories().Templates
-    tplRepo.Create(ctx, &domain.NotificationTemplate{
-        Code:    "welcome",
-        Channel: "console",
-        Subject: "Welcome, {{ name }}!",
-        Body:    "Thanks for joining us. Your account is ready.",
-    })
-
-    // Send notification
-    manager := mod.Manager()
-
-    err = manager.Send(ctx, notifier.Event{
-        DefinitionCode: "welcome",
-        Recipients:     []string{"alice@example.com"},
-        Context: map[string]any{
-            "name": "Alice",
-        },
-    })
-    if err != nil {
-        log.Printf("Failed to send: %v", err)
-        return
-    }
-
-    log.Println("Notification sent successfully!")
 }
 ```
 
----
+Supply trusted subject/tenant/idempotency scope after authorization. Persistent
+context contains replay-safe content; use `DispatchImmediate.Transient` for
+one-time secrets. Receipt lookup/recovery/explicit retry are separate operations
+as described above.
 
 ## Troubleshooting
 

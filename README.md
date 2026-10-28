@@ -29,8 +29,31 @@ storage, queue, and channel providers.
   recipient resolution, privacy-safe errors, and opt-in raw diagnostics.
 - Reminder cadence primitives (`pkg/reminders`) for deterministic scheduling,
   cooldown windows, and no-spam evaluation in host-managed sweep jobs.
-- Optional adapters (`adapters/gocms`, future `adapters/goadmin`) that translate
-  external schemas into notification templates without direct dependencies.
+- Integration adapters for CMS template projection (`adapters/gocms`) and
+  secure-link builder/store bridges (`adapters/securelink`).
+
+Use Go 1.26.0 or newer, as declared by `go.mod`. All public packages and
+integration adapters share the root module; `examples/web` is a separate module.
+There is no automatic application route registration.
+
+## Package map
+
+| Surface | Responsibility | Guide |
+| --- | --- | --- |
+| `pkg/notifier`, `pkg/config`, `pkg/domain`, `pkg/definitions`, `pkg/templates`, `pkg/commands` | Composition, configuration, domain records and mutation/services | [Integration](docs/GUIDE_INTEGRATION.md) |
+| `pkg/events`, `pkg/receipts`, `pkg/deliveries`, `pkg/retention` | Durable intake, receipts/recovery/retry, safe inspection and bounded purge | [Events](docs/GUIDE_EVENTS.md) |
+| `pkg/adapters/*`, `pkg/interfaces/*`, `pkg/storage` | Channel/recipient/attachment ports and Bun/memory storage composition | [Adapters](docs/GUIDE_ADAPTERS.md) |
+| `pkg/persistencepolicy`, `pkg/privacy` | Stored-content projection and public-safe errors/metadata; privileged diagnostic seam | [Integration policies](docs/GUIDE_INTEGRATION.md#moduleoptions) |
+| `pkg/preferences`, `pkg/options`, `pkg/inbox`, `pkg/reminders` | Scoped preference evaluation, inbox state and host-driven reminder decisions | [Preferences](docs/GUIDE_PREFERENCES.md), [reminders](docs/GUIDE_REMINDERS.md) |
+| `pkg/secrets`, `pkg/links`, `pkg/auth`, `pkg/onready` | Adapter credentials, transient/action links and host bootstrap helpers | [Secrets](docs/GUIDE_SECRETS.md), [OnReady](docs/onready.md) |
+| `pkg/activity`, `pkg/activity/usersink`, `pkg/retry` | Observation hooks, audit bridge and attempt backoff | [Events](docs/GUIDE_EVENTS.md#activity-hooks) |
+| Root package, `migrations` | Embedded SQL files, shared migration profile and adoption helpers | [Migration ownership](#durable-pipeline-adoption) |
+| `adapters/gocms`, `adapters/securelink` | CMS template projection and secure-link builder/store bridges | [Adapter contracts](docs/NTF_ADAPTERS.md) |
+
+Hosts authenticate/authorize service calls, provide trusted scope, mount transport
+routes, run the shared migration graph, and operate durable queue/recovery jobs.
+`RecipientResolver` resolves opaque subjects only at delivery; persistence/privacy
+policies remain explicit. Console demos are not a destination-retention policy.
 
 ## Using the module
 

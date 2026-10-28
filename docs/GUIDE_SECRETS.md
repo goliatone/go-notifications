@@ -577,86 +577,38 @@ for _, scope := range []secrets.Scope{
 
 ---
 
-## Complete Example
+## Module wiring
+
+Inject an already configured translator and resolver. The adapter constructor
+accepts a logger and functional options and returns one adapter value:
 
 ```go
-package main
-
 import (
-    "context"
-    "log"
-    "os"
-    "time"
-
     i18n "github.com/goliatone/go-i18n"
     "github.com/goliatone/go-notifications/pkg/adapters"
     "github.com/goliatone/go-notifications/pkg/adapters/sendgrid"
+    "github.com/goliatone/go-notifications/pkg/interfaces/logger"
     "github.com/goliatone/go-notifications/pkg/notifier"
     "github.com/goliatone/go-notifications/pkg/secrets"
 )
 
-func main() {
-    ctx := context.Background()
-
-    // Create static provider with secrets from environment
-    systemProvider := secrets.NewStaticProvider(map[secrets.Reference]secrets.SecretValue{
-        {
-            Scope:     secrets.ScopeSystem,
-            SubjectID: "default",
-            Channel:   "email",
-            Provider:  "sendgrid",
-            Key:       "default",
-        }: {
-            Data: []byte(os.Getenv("SENDGRID_API_KEY")),
-        },
-        {
-            Scope:     secrets.ScopeSystem,
-            SubjectID: "default",
-            Channel:   "sms",
-            Provider:  "twilio",
-            Key:       "default",
-        }: {
-            Data: []byte(os.Getenv("TWILIO_AUTH_TOKEN")),
-        },
-    })
-
-    // Create resolver with caching
-    resolver := secrets.NewCachingResolver(
-        secrets.SimpleResolver{Provider: systemProvider},
-        5*time.Minute,
-    )
-
-    // Setup translator
-    translator, _ := i18n.New()
-
-    // Setup adapters
-    sg, _ := sendgrid.New(sendgrid.Options{
-        From: "notifications@example.com",
-        // API key will be resolved from secrets
-    })
-
-    // Initialize module with secrets resolver
-    mod, err := notifier.NewModule(notifier.ModuleOptions{
+func newSecretEnabledModule(translator i18n.Translator, resolver secrets.Resolver) (*notifier.Module, error) {
+    lgr := logger.Default()
+    return notifier.NewModule(notifier.ModuleOptions{
         Translator: translator,
-        Adapters:   []adapters.Messenger{sg},
+        Logger:     lgr,
+        Adapters: []adapters.Messenger{
+            sendgrid.New(lgr, sendgrid.WithFrom("notifications@example.com")),
+        },
         Secrets:    resolver,
     })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Send notification - secrets resolved automatically
-    err = mod.Manager().Send(ctx, notifier.Event{
-        DefinitionCode: "welcome",
-        Recipients:     []string{"user@example.com"},
-    })
-    if err != nil {
-        log.Printf("Send failed: %v", err)
-    }
 }
 ```
 
----
+Seed definitions/templates through their services before sending. This uses
+in-memory storage and immediate delivery defaults; production storage, queue,
+recipient resolution and retention policies are separate host dependencies.
+See the [integration guide](GUIDE_INTEGRATION.md).
 
 ## Troubleshooting
 

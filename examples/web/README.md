@@ -132,7 +132,7 @@ config.Config{
 
 ## Technology Stack
 
-- **Backend**: Go 1.24
+- **Backend**: Go 1.26.0+ (see `go.mod`)
 - **HTTP Router**: `github.com/goliatone/go-router` (Fiber adapter)
 - **Template Engine**: `github.com/goliatone/go-template` via go-router view helpers
 - **WebSocket**: go-router unified WebSocket context + in-process hub
@@ -169,6 +169,6 @@ For production use:
 
 ## Learn More
 
-- [Main Documentation](../../docs/NTF_TDD.md)
-- [Example TDD](../../docs/EXAMPLE_TDD.md)
+- [Main Documentation](../../docs/GUIDE_INTEGRATION.md)
+- [Getting started](../../docs/GUIDE_GETTING_STARTED.md)
 - [CLAUDE.md](../../CLAUDE.md)

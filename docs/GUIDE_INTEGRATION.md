@@ -22,11 +22,18 @@ This guide covers integrating `go-notifications` with host applications, includi
 
 ## Module Initialization
 
-The `Module` is the main entry point that assembles all services:
+The `Module` is the main entry point that assembles all services. Start `cfg`
+from `config.Defaults()`, then configure an explicit subject/tenant
+`cfg.Dispatcher.EnvFallbackAllowlist` for global adapter credentials. Otherwise
+provide scoped credentials through `ModuleOptions.Secrets`; an API key on an
+adapter alone does not bypass dispatcher credential policy:
 
 ```go
 import (
     "context"
+    "github.com/goliatone/go-notifications/pkg/interfaces/logger"
+    "github.com/uptrace/bun"
+    "os"
 
     i18n "github.com/goliatone/go-i18n"
     "github.com/goliatone/go-notifications/pkg/adapters"
@@ -37,29 +44,26 @@ import (
     "github.com/goliatone/go-notifications/pkg/storage"
 )
 
-func InitNotifications(ctx context.Context, db *bun.DB) (*notifier.Module, error) {
+func InitNotifications(ctx context.Context, cfg config.Config, db *bun.DB, myLogger logger.Logger) (*notifier.Module, error) {
     // Create translator for template localization
-    translator, err := i18n.New(i18n.Config{
-        DefaultLocale: "en",
-        LocalesPath:   "./locales",
-    })
+    translator, err := i18n.NewSimpleTranslator(
+        i18n.NewStaticStore(i18n.Translations{}),
+        i18n.WithTranslatorDefaultLocale("en"),
+    )
     if err != nil {
         return nil, err
     }
 
     // Configure adapters
     consoleAdapter := console.New(myLogger)
-    sendgridAdapter, err := sendgrid.New(sendgrid.Options{
-        APIKey: os.Getenv("SENDGRID_API_KEY"),
-        From:   "noreply@example.com",
-    })
-    if err != nil {
-        return nil, err
-    }
+    sendgridAdapter := sendgrid.New(myLogger,
+        sendgrid.WithAPIKey(os.Getenv("SENDGRID_API_KEY")),
+        sendgrid.WithFrom("noreply@example.com"),
+    )
 
     // Initialize module
     mod, err := notifier.NewModule(notifier.ModuleOptions{
-        Config:     config.Defaults(),
+        Config:     cfg,
         Storage:    storage.NewBunProviders(db),
         Logger:     myLogger,
         Translator: translator,
@@ -134,7 +138,7 @@ cfg, err := config.Load(map[string]any{
         "default_locale": os.Getenv("NOTIFICATIONS_LOCALE"),
     },
     "dispatcher": map[string]any{
-        "max_retries": 5,
+        "max_attempts": 5,
         "max_workers": 8,
     },
     "templates": map[string]any{
@@ -163,7 +167,7 @@ config.Defaults() == Config{
     Localization: LocalizationConfig{DefaultLocale: "en"},
     Dispatcher: DispatcherConfig{
         Enabled:    true,
-        MaxRetries: 3,
+        MaxAttempts: 3,
         MaxWorkers: 4,
     },
     Inbox:     InboxConfig{Enabled: true},
@@ -376,32 +380,22 @@ empty. `ErrorCode` filtering uses the same rule.
 Implement the `Logger` interface to integrate with your logging system:
 
 ```go
-import "github.com/goliatone/go-notifications/pkg/interfaces/logger"
-
-type MyLogger struct {
-    // Your logger (zap, logrus, etc.)
-}
-
-func (l *MyLogger) With(fields ...logger.Field) logger.Logger {
-    // Return logger with fields attached
-}
-
-func (l *MyLogger) Debug(msg string, fields ...logger.Field) {
-    // Log at debug level
-}
-
-func (l *MyLogger) Info(msg string, fields ...logger.Field) {
-    // Log at info level
-}
-
-func (l *MyLogger) Warn(msg string, fields ...logger.Field) {
-    // Log at warn level
-}
-
-func (l *MyLogger) Error(msg string, fields ...logger.Field) {
-    // Log at error level
+type Logger interface {
+    Trace(msg string, args ...any)
+    Debug(msg string, args ...any)
+    Info(msg string, args ...any)
+    Warn(msg string, args ...any)
+    Error(msg string, args ...any)
+    Fatal(msg string, args ...any)
+    WithContext(context.Context) Logger
 }
 ```
+
+Use `logger.Default()` or `&logger.Nop{}` for the built-in implementations.
+Structured fields are variadic `any`; the optional `FieldsLogger` extension
+provides `WithFields(map[string]any) Logger`. A host adapter must implement the
+actual interface, including `WithContext`; there is no `logger.Field` type.
+
 
 ### Cache Interface
 
@@ -652,9 +646,8 @@ func ImportBlockAsTemplate(
     spec := gocms.TemplateSpec{
         Code:           "welcome-email",
         Channel:        "email",
-        SubjectKey:     "email_subject",
-        BodyKey:        "email_body",
-        DescriptionKey: "description",
+        Fields:      gocms.FieldMapping{Subject: "email_subject", Body: "email_body"},
+        Description: "Welcome email",
     }
 
     inputs, err := gocms.TemplatesFromBlockSnapshot(spec, blockSnapshot)
@@ -788,7 +781,10 @@ func TestNotificationDelivery(t *testing.T) {
     providers := storage.NewMemoryProviders()
 
     // Create mock translator
-    translator, _ := i18n.New()
+    translator, _ := i18n.NewSimpleTranslator(
+        i18n.NewStaticStore(i18n.Translations{}),
+        i18n.WithTranslatorDefaultLocale("en"),
+    )
 
     // Create test adapter that captures sends
     var sentMessages []adapters.Message
@@ -895,122 +891,43 @@ func TestWithDatabase(t *testing.T) {
 
 ---
 
-## Complete Integration Example
+## Production module composition
+
+Run the host migration graph first, then inject a configured database, translator,
+logger, host-selected `cfg` and adapter credentials. `cfg` must authorize global
+credential fallback for the intended subject/tenant, or the host must provide a
+scoped `Secrets` resolver instead. Supply a durable queue for scheduled/digest
+work, and a recipient resolver plus explicit persistence/privacy policy when
+handling sensitive data. This constructor supports immediate delivery; its
+infrastructure and definition/template seeding are host-owned:
 
 ```go
-package main
-
 import (
-    "context"
-    "database/sql"
-    "log"
-    "net/http"
-    "os"
-
     i18n "github.com/goliatone/go-i18n"
-    "github.com/goliatone/go-notifications/pkg/activity"
     "github.com/goliatone/go-notifications/pkg/adapters"
     "github.com/goliatone/go-notifications/pkg/adapters/sendgrid"
     "github.com/goliatone/go-notifications/pkg/config"
+    "github.com/goliatone/go-notifications/pkg/interfaces/logger"
     "github.com/goliatone/go-notifications/pkg/notifier"
     "github.com/goliatone/go-notifications/pkg/storage"
     "github.com/uptrace/bun"
-    "github.com/uptrace/bun/dialect/pgdialect"
-    "github.com/uptrace/bun/driver/pgdriver"
 )
 
-func main() {
-    ctx := context.Background()
-
-    // Database
-    sqldb := sql.OpenDB(pgdriver.NewConnector(
-        pgdriver.WithDSN(os.Getenv("DATABASE_URL")),
-    ))
-    db := bun.NewDB(sqldb, pgdialect.New())
-    defer db.Close()
-
-    // Translator
-    translator, err := i18n.New(i18n.Config{
-        DefaultLocale: "en",
-        LocalesPath:   "./locales",
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Adapters
-    sg, err := sendgrid.New(sendgrid.Options{
-        APIKey: os.Getenv("SENDGRID_API_KEY"),
-        From:   "notifications@example.com",
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Activity hooks
-    hooks := activity.Hooks{
-        &LoggingHook{},
-    }
-
-    // Configuration
-    cfg, err := config.Load(map[string]any{
-        "dispatcher": map[string]any{
-            "max_workers": 8,
-            "max_retries": 5,
-        },
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Initialize module
-    mod, err := notifier.NewModule(notifier.ModuleOptions{
+func newProductionModule(cfg config.Config, db *bun.DB, translator i18n.Translator, lgr logger.Logger, apiKey string) (*notifier.Module, error) {
+    return notifier.NewModule(notifier.ModuleOptions{
         Config:     cfg,
         Storage:    storage.NewBunProviders(db),
         Translator: translator,
-        Adapters:   []adapters.Messenger{sg},
-        Activity:   hooks,
+        Logger:     lgr,
+        Adapters: []adapters.Messenger{
+            sendgrid.New(lgr, sendgrid.WithAPIKey(apiKey), sendgrid.WithFrom("notifications@example.com")),
+        },
     })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Access services
-    manager := mod.Manager()
-    templates := mod.Templates()
-    preferences := mod.Preferences()
-    inbox := mod.Inbox()
-    commands := mod.Commands()
-
-    // Example: Send notification
-    err = manager.Send(ctx, notifier.Event{
-        DefinitionCode: "welcome",
-        Recipients:     []string{"user@example.com"},
-        Context:        map[string]any{"name": "Alice"},
-    })
-    if err != nil {
-        log.Printf("Failed to send: %v", err)
-    }
-
-    // Start HTTP server with notification endpoints
-    http.HandleFunc("/api/notifications/send", SendHandler(manager))
-    log.Fatal(http.ListenAndServe(":8080", nil))
-}
-
-type LoggingHook struct{}
-
-func (h *LoggingHook) Notify(ctx context.Context, evt activity.Event) {
-    log.Printf("[%s] %s %s/%s", evt.Verb, evt.DefinitionCode, evt.ObjectType, evt.ObjectID)
-}
-
-func SendHandler(manager *notifier.Manager) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Handle notification send requests
-    }
 }
 ```
 
----
+For a complete self-contained console example, see
+[Getting Started](GUIDE_GETTING_STARTED.md#minimal-setup).
 
 ## Next Steps
 

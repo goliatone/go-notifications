@@ -50,12 +50,16 @@ artifact remains valid and has not been rewritten. Do not use a local
 ## Minimal Setup
 
 The fastest way to get started is using the **console adapter** with **in-memory storage**. This setup requires no external services and logs notifications to stdout.
+Use Go 1.26.0+. The example stores an opaque recipient ID and resolves its
+disposable demonstration address at the adapter boundary. Production hosts own
+recipient authorization and persistence/retention policy.
 
 ```go
 package main
 
 import (
     "context"
+    "fmt"
     "log"
 
     i18n "github.com/goliatone/go-i18n"
@@ -84,13 +88,18 @@ func main() {
     // 4. Create the console adapter (logs via the logger)
     consoleAdapter := console.New(lgr)
 
-    // 5. Initialize the notification module
+    // 5. Permit this demo subject to use adapter defaults (console has no credentials).
+    cfg := config.Defaults()
+    cfg.Dispatcher.EnvFallbackAllowlist = []string{"user-123"}
+
+    // Initialize the notification module
     mod, err := notifier.NewModule(notifier.ModuleOptions{
-        Config:     config.Defaults(),
+        Config:            cfg,
         Storage:    providers,
         Logger:     lgr,
         Translator: translator,
         Adapters:   []adapters.Messenger{consoleAdapter},
+        RecipientResolver: exampleRecipientResolver{},
     })
     if err != nil {
         log.Fatalf("failed to create module: %v", err)
@@ -123,7 +132,7 @@ func main() {
     // 8. Send a notification
     err = mod.Manager().Send(ctx, notifier.Event{
         DefinitionCode: "welcome",
-        Recipients:     []string{"user@example.com"},
+        Recipients:     []string{"user-123"},
         Context: map[string]any{
             "Name": "Alice",
         },
@@ -134,6 +143,15 @@ func main() {
     }
 
     log.Println("Notification sent successfully!")
+}
+
+type exampleRecipientResolver struct{}
+
+func (exampleRecipientResolver) Resolve(ctx context.Context, req adapters.RecipientRequest) (adapters.ResolvedRecipient, error) {
+    if req.SubjectID != "user-123" {
+        return adapters.ResolvedRecipient{}, fmt.Errorf("unknown recipient")
+    }
+    return adapters.ResolvedRecipient{Destination: "user@example.com", Locale: "en"}, nil
 }
 
 func newSimpleTranslator() i18n.Translator {
@@ -148,7 +166,9 @@ func newSimpleTranslator() i18n.Translator {
 }
 ```
 
-When you run this, you'll see the notification logged to the console:
+The dispatcher requires scoped credentials or an explicit fallback allowlist even
+for the credential-free console adapter. This demo allows only `user-123`; hosts
+choose their own credential policy. When run, it logs the notification to console:
 
 ```
 [INFO] [console][email][plain] subject=Welcome Alice! to=user@example.com body=Hello Alice, welcome to our platform!
@@ -293,7 +313,7 @@ cfg := config.Config{
     },
     Dispatcher: config.DispatcherConfig{
         Enabled:    true,
-        MaxRetries: 3,   // Retry failed deliveries up to 3 times
+        MaxAttempts: 3,   // At most 3 delivery attempts, including the initial send
         MaxWorkers: 4,   // Concurrent delivery workers
     },
     Inbox: config.InboxConfig{
@@ -316,7 +336,7 @@ mod, err := notifier.NewModule(notifier.ModuleOptions{
 |---------|-------|---------|-------------|
 | `Localization` | `DefaultLocale` | `"en"` | Fallback locale for templates |
 | `Dispatcher` | `Enabled` | `true` | Enable/disable delivery |
-| `Dispatcher` | `MaxRetries` | `3` | Max retry attempts on failure |
+| `Dispatcher` | `MaxAttempts` | `3` | Total delivery attempts, including the first |
 | `Dispatcher` | `MaxWorkers` | `4` | Concurrent delivery workers |
 | `Inbox` | `Enabled` | `true` | Enable in-app inbox |
 | `Templates` | `CacheTTL` | `1m` | Template cache duration |
@@ -345,7 +365,7 @@ Now that you've sent your first notification, explore these guides:
 
 ### Reference Documentation
 
-- **[NTF_TDD.md](NTF_TDD.md)** - Technical design document
+- **[Integration guide](GUIDE_INTEGRATION.md)** - Module composition and host contracts
 - **[NTF_ENTITIES.md](NTF_ENTITIES.md)** - Entity schemas and relationships
 - **[NTF_ADAPTERS.md](NTF_ADAPTERS.md)** - Adapter implementation details
 

@@ -189,13 +189,10 @@ err := prefService.Delete(ctx, "user", "user-123", "marketing-emails", "email")
 ### List Preferences
 
 ```go
+// Generic listing is for an authorized administrative caller.
 result, err := prefService.List(ctx, store.ListOptions{
     Limit:  20,
     Offset: 0,
-    Filters: map[string]any{
-        "subject_type": "user",
-        "subject_id":   "user-123",
-    },
 })
 
 for _, pref := range result.Items {
@@ -474,44 +471,15 @@ fmt.Printf("enabled = %v\n", value)
 fmt.Printf("Source scope: %s\n", trace.Layers[0].Scope.Name)
 ```
 
-### Example: Preference Settings Page
+### Subject-specific settings reads
 
-```go
-// GET /api/users/:id/preferences
-func getPreferences(userID string) ([]PreferenceView, error) {
-    result, _ := prefService.List(ctx, store.ListOptions{
-        Filters: map[string]any{
-            "subject_type": "user",
-            "subject_id":   userID,
-        },
-    })
+`List` uses generic pagination and does not accept a `Filters` map. It is not a
+user-isolation boundary. For a known definition/channel, call
+`prefService.Get(ctx, "user", trustedUserID, definitionCode, channel)` after
+host authorization. Build user settings pages from the host's approved catalog
+of definition/channel keys, or provide a repository adapter with scoped listing.
+Do not send an unfiltered global preference listing to a user.
 
-    views := make([]PreferenceView, len(result.Items))
-    for i, pref := range result.Items {
-        views[i] = PreferenceView{
-            DefinitionCode: pref.DefinitionCode,
-            Channel:        pref.Channel,
-            Enabled:        pref.Enabled,
-            QuietHours:     pref.QuietHours,
-        }
-    }
-    return views, nil
-}
-
-// PUT /api/users/:id/preferences/:definition/:channel
-func updatePreference(userID, definition, channel string, enabled bool) error {
-    _, err := prefService.Upsert(ctx, preferences.PreferenceInput{
-        SubjectType:    "user",
-        SubjectID:      userID,
-        DefinitionCode: definition,
-        Channel:        channel,
-        Enabled:        &enabled,
-    })
-    return err
-}
-```
-
----
 
 ## Inheritance and Override Patterns
 

@@ -691,6 +691,7 @@ package myservice
 
 import (
     "context"
+    "fmt"
     "github.com/goliatone/go-notifications/pkg/adapters"
     "github.com/goliatone/go-notifications/pkg/interfaces/logger"
 )
@@ -743,6 +744,7 @@ func (a *Adapter) Send(ctx context.Context, msg adapters.Message) error {
 
     // 2. Build request payload
     body := msg.Body
+    _ = body // pass this to the host HTTP client implementation
     if htmlBody := msg.Metadata["html_body"]; htmlBody != nil {
         // Handle HTML content
     }
@@ -802,13 +804,13 @@ The dispatcher handles retries with exponential backoff by default and allows cu
 ```go
 cfg := config.DispatcherConfig{
     Enabled:    true,
-    MaxRetries: 3,    // Retry up to 3 times
+    MaxAttempts: 3,    // Three total attempts, including the first
     MaxWorkers: 4,    // 4 concurrent workers
 }
 ```
 
 **Retry behavior**:
-- Failed deliveries are retried up to `MaxRetries` times
+- Delivery is attempted at most `MaxAttempts` times, including the initial send
 - Each attempt is recorded in `DeliveryAttempt` table
 - Default backoff is exponential (configurable)
 - Final failure marks the message as failed

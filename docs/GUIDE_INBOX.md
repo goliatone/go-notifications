@@ -140,7 +140,7 @@ Or use `DeliverFromMessage` to convert a rendered message:
 
 ```go
 msg := &domain.NotificationMessage{
-    ID:       messageUUID,
+    RecordMeta: domain.RecordMeta{ID: messageUUID},
     Subject:  "Order Shipped",
     Body:     "Your order has shipped!",
     Receiver: "user-123",

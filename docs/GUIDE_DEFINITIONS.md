@@ -520,129 +520,42 @@ func UpdateWithGuards(ctx context.Context, repo store.NotificationDefinitionRepo
 
 ---
 
-## Complete Example
+## Definition and template seeding
+
+After constructing a module as shown in [Getting Started](GUIDE_GETTING_STARTED.md#minimal-setup),
+use the public mutation services for seeding. `AllowUpdate` is an explicit
+upsert choice; hosts authorize definition changes separately:
 
 ```go
-package main
-
 import (
     "context"
-    "log"
-
-    i18n "github.com/goliatone/go-i18n"
-    "github.com/goliatone/go-notifications/pkg/adapters"
-    "github.com/goliatone/go-notifications/pkg/adapters/console"
+    "github.com/goliatone/go-notifications/pkg/definitions"
     "github.com/goliatone/go-notifications/pkg/domain"
     "github.com/goliatone/go-notifications/pkg/notifier"
+    "github.com/goliatone/go-notifications/pkg/templates"
 )
 
-func main() {
-    ctx := context.Background()
-
-    // Initialize module
-    translator, _ := i18n.New()
-    consoleAdapter, _ := console.New(nil)
-
-    mod, err := notifier.NewModule(notifier.ModuleOptions{
-        Translator: translator,
-        Adapters:   []adapters.Messenger{consoleAdapter},
+func seedWelcome(ctx context.Context, mod *notifier.Module) error {
+    if _, err := mod.Definitions().Upsert(ctx, definitions.UpsertInput{
+        Code: "welcome", Name: "Welcome", Category: "onboarding",
+        Channels:    []string{"email:console"},
+        TemplateIDs: []string{"email:welcome-email"},
+        AllowUpdate: true,
+    }); err != nil {
+        return err
+    }
+    _, err := mod.Templates().Create(ctx, templates.TemplateInput{
+        Code: "welcome-email", Channel: "email", Locale: "en",
+        Subject: "Welcome {{ Name }}!", Body: "Hello {{ Name }}",
+        Format: "text/plain", Schema: domain.TemplateSchema{Required: []string{"Name"}},
     })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    defRepo := mod.Repositories().Definitions
-    tplRepo := mod.Repositories().Templates
-
-    // Create definitions
-    definitions := []*domain.NotificationDefinition{
-        {
-            Code:        "welcome",
-            Name:        "Welcome",
-            Description: "Sent to new users",
-            Severity:    "info",
-            Category:    "onboarding",
-            Channels:    domain.StringList{"console"},
-            TemplateKeys: domain.StringList{"console:welcome"},
-        },
-        {
-            Code:        "password-reset",
-            Name:        "Password Reset",
-            Description: "Sent when user requests password reset",
-            Severity:    "warning",
-            Category:    "auth",
-            Channels:    domain.StringList{"console"},
-            TemplateKeys: domain.StringList{"console:password-reset"},
-            Policy: domain.JSONMap{
-                "throttle": map[string]any{
-                    "max":    3,
-                    "window": "1h",
-                },
-            },
-        },
-        {
-            Code:        "order-shipped",
-            Name:        "Order Shipped",
-            Description: "Sent when order ships",
-            Severity:    "info",
-            Category:    "orders",
-            Channels:    domain.StringList{"console"},
-            TemplateKeys: domain.StringList{"console:order-shipped"},
-            Metadata: domain.JSONMap{
-                "icon":     "package",
-                "priority": "high",
-            },
-        },
-    }
-
-    for _, def := range definitions {
-        if err := defRepo.Create(ctx, def); err != nil {
-            log.Printf("Failed to create definition %s: %v", def.Code, err)
-            continue
-        }
-        log.Printf("Created definition: %s", def.Code)
-    }
-
-    // Create matching templates
-    templates := []*domain.NotificationTemplate{
-        {
-            Code:    "welcome",
-            Channel: "console",
-            Subject: "Welcome, {{ name }}!",
-            Body:    "Thanks for joining. Your account is ready.",
-        },
-        {
-            Code:    "password-reset",
-            Channel: "console",
-            Subject: "Password Reset Request",
-            Body:    "Reset your password here (expires at {{ expires_at }}, about {{ remaining_minutes }} minutes from now): {{ action_url }}",
-        },
-        {
-            Code:    "order-shipped",
-            Channel: "console",
-            Subject: "Order {{ order_id }} Shipped!",
-            Body:    "Track your package: {{ tracking_url }}",
-        },
-    }
-
-    for _, tpl := range templates {
-        if err := tplRepo.Create(ctx, tpl); err != nil {
-            log.Printf("Failed to create template %s: %v", tpl.Code, err)
-            continue
-        }
-        log.Printf("Created template: %s", tpl.Code)
-    }
-
-    // List all definitions
-    result, _ := defRepo.List(ctx, store.ListOptions{Limit: 100})
-    log.Printf("Total definitions: %d", result.Total)
-    for _, def := range result.Items {
-        log.Printf("  - %s (%s): %v", def.Code, def.Category, def.Channels)
-    }
+    return err
 }
 ```
 
----
+The template service owns template CRUD semantics; use its explicit update path
+when a host re-seeds an existing template. Do not assume definition upsert also
+updates templates.
 
 ## Best Practices
 
