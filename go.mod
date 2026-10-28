@@ -6,15 +6,15 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.5
 	github.com/aws/aws-sdk-go-v2/service/ses v1.34.17
-	github.com/goliatone/go-command v0.24.2
+	github.com/goliatone/go-command v0.24.3
 	github.com/goliatone/go-i18n v0.5.0
 	github.com/goliatone/go-masker v0.2.0
 	github.com/goliatone/go-options v0.7.2
 	github.com/goliatone/go-persistence-bun v0.17.1
-	github.com/goliatone/go-repository-bun v0.16.1
+	github.com/goliatone/go-repository-bun v0.16.2
 	github.com/goliatone/go-template v0.3.1
 	github.com/goliatone/go-urlkit v0.7.0
-	github.com/goliatone/go-users v0.26.2
+	github.com/goliatone/go-users v0.27.4
 	github.com/google/uuid v1.6.0
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056
 	github.com/lib/pq v1.10.9
@@ -22,7 +22,7 @@ require (
 	github.com/uptrace/bun/dialect/pgdialect v1.2.18
 	github.com/uptrace/bun/dialect/sqlitedialect v1.2.18
 	github.com/uptrace/bun/driver/sqliteshim v1.2.18
-	golang.org/x/crypto v0.56.0
+	golang.org/x/crypto v0.58.0
 )
 
 require (
@@ -49,7 +49,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/expr-lang/expr v1.17.7 // indirect
 	github.com/fatih/color v1.18.0 // indirect
-	github.com/flosch/pongo2/v6 v6.0.0 // indirect
+	github.com/flosch/pongo2/v6 v6.1.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0 // indirect
@@ -62,8 +62,8 @@ require (
 	github.com/google/pprof v0.0.0-20251208000136-3d256cb9ff16 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/lithammer/shortuuid v3.0.0+incompatible // indirect
-	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-colorable v0.1.16 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/mattn/go-sqlite3 v1.14.34 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -83,11 +83,11 @@ require (
 	go.opentelemetry.io/otel v1.42.0 // indirect
 	go.opentelemetry.io/otel/metric v1.42.0 // indirect
 	go.opentelemetry.io/otel/trace v1.42.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
-	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20251213004720-97cd9d5aeac2 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251213004720-97cd9d5aeac2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
