@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	i18n "github.com/goliatone/go-i18n"
 	"github.com/goliatone/go-notifications/examples/web/config"
@@ -66,7 +67,6 @@ func NewApp(ctx context.Context, cfg config.Config) (*App, error) {
 	var wsHub *WebSocketHub
 	if cfg.Features.EnableWebSocket {
 		wsHub = NewWebSocketHub(lgr)
-		go wsHub.Run()
 	}
 
 	module, err := notifier.NewModule(notifier.ModuleOptions{
@@ -158,8 +158,10 @@ func (a *App) DeleteSession(sessionID string) {
 }
 
 func (a *App) Close() error {
-	if a.WSHub != nil {
-		a.WSHub.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.WSHub.Shutdown(ctx); err != nil {
+		return err
 	}
 	if a.DB != nil {
 		return a.DB.Close()

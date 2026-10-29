@@ -61,7 +61,7 @@ require (
 	github.com/goodsign/monday v1.0.2 // indirect
 	github.com/google/cel-go v0.30.0 // indirect
 	github.com/google/pprof v0.0.0-20251208000136-3d256cb9ff16 // indirect
-	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4 // indirect
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect

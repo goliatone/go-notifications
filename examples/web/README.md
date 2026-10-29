@@ -79,6 +79,11 @@ examples/web/
 ### WebSocket
 - `GET /ws?user_id=<id>` - Real-time notification stream
 
+The router owns keepalive pings. SIGINT/SIGTERM stops new WebSocket admission,
+interrupts active readers and joins connection writers before HTTP shutdown,
+using a shared five-second deadline. Slow or failed clients are disconnected;
+broadcasts after hub shutdown return an error.
+
 ## Demo Scenarios
 
 ### 1. Welcome Flow (Multi-Channel)

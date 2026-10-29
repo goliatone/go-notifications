@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -13,22 +14,27 @@ import (
 	"github.com/goliatone/go-router"
 )
 
+var errWebSocketHubClosed = errors.New("websocket hub is closed")
+
 type WebSocketHub struct {
-	clients    map[string]*WebSocketClient
-	mu         sync.RWMutex
-	register   chan *WebSocketClient
-	unregister chan *WebSocketClient
-	broadcast  chan BroadcastMessage
-	logger     logger.Logger
-	done       chan struct{}
+	clients     map[string]*WebSocketClient
+	mu          sync.RWMutex
+	logger      logger.Logger
+	stopping    bool
+	connections sync.WaitGroup
+	closeOnce   sync.Once
+	closed      chan struct{}
 }
 
 type WebSocketClient struct {
-	ID     string
-	UserID string
-	Conn   router.WebSocketContext
-	Send   chan []byte
-	hub    *WebSocketHub
+	ID            string
+	UserID        string
+	Conn          router.WebSocketContext
+	Send          chan []byte
+	hub           *WebSocketHub
+	done          chan struct{}
+	stopOnce      sync.Once
+	interruptRead func() error
 }
 
 type BroadcastMessage struct {
@@ -45,72 +51,50 @@ func NewWebSocketHub(lgr logger.Logger) *WebSocketHub {
 	if lgr == nil {
 		lgr = &logger.Nop{}
 	}
-	hub := &WebSocketHub{
-		clients:    make(map[string]*WebSocketClient),
-		register:   make(chan *WebSocketClient),
-		unregister: make(chan *WebSocketClient),
-		broadcast:  make(chan BroadcastMessage, 256),
-		logger:     lgr,
-		done:       make(chan struct{}),
-	}
-	wsLog("hub initialized")
-	return hub
-}
-
-func (h *WebSocketHub) Run() {
-	for {
-		select {
-		case client := <-h.register:
-			h.mu.Lock()
-			h.clients[client.ID] = client
-			total := len(h.clients)
-			h.mu.Unlock()
-			wsLog("client registered id=%s user=%s total=%d", client.ID, client.UserID, total)
-
-		case client := <-h.unregister:
-			h.mu.Lock()
-			if _, ok := h.clients[client.ID]; ok {
-				delete(h.clients, client.ID)
-				close(client.Send)
-				wsLog("client unregistered id=%s user=%s", client.ID, client.UserID)
-			}
-			h.mu.Unlock()
-
-		case message := <-h.broadcast:
-			recipients := 0
-			encoded, err := h.marshalMessage(message)
-			if err != nil {
-				wsLog("marshal broadcast event=%s err=%v", message.Event, err)
-				continue
-			}
-			h.mu.Lock()
-			for _, client := range h.clients {
-				if message.UserID == "" || client.UserID == message.UserID {
-					select {
-					case client.Send <- encoded:
-						recipients++
-					default:
-						wsLog("dropping client id=%s user=%s: send buffer full", client.ID, client.UserID)
-						close(client.Send)
-						delete(h.clients, client.ID)
-					}
-				}
-			}
-			h.mu.Unlock()
-			wsLog("broadcast event=%s user=%s recipients=%d", message.Event, message.UserID, recipients)
-
-		case <-h.done:
-			wsLog("hub shutting down")
-			return
-		}
+	return &WebSocketHub{
+		clients: make(map[string]*WebSocketClient),
+		logger:  lgr,
+		closed:  make(chan struct{}),
 	}
 }
 
 func (h *WebSocketHub) Close() {
-	close(h.done)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := h.Shutdown(ctx); err != nil {
+		wsLog("hub shutdown: %v", err)
+	}
+}
+
+func (h *WebSocketHub) Shutdown(ctx context.Context) error {
+	if h == nil {
+		return nil
+	}
+	h.closeOnce.Do(func() {
+		h.mu.Lock()
+		h.stopping = true
+		clients := make([]*WebSocketClient, 0, len(h.clients))
+		for _, client := range h.clients {
+			clients = append(clients, client)
+		}
+		h.mu.Unlock()
+		for _, client := range clients {
+			client.stop()
+		}
+		go func() { h.connections.Wait(); close(h.closed) }()
+	})
+	select {
+	case <-h.closed:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (h *WebSocketHub) Broadcast(ctx context.Context, event broadcaster.Event) error {
+	if h == nil {
+		return nil
+	}
 	userID := ""
 	if payload, ok := event.Payload.(map[string]any); ok {
 		if uid, ok := payload["user_id"].(string); ok {
@@ -128,15 +112,39 @@ func (h *WebSocketHub) Broadcast(ctx context.Context, event broadcaster.Event) e
 		Payload: payload,
 	}
 
-	select {
-	case h.broadcast <- msg:
-		wsLog("queue broadcast topic=%s user=%s", msg.Event, msg.UserID)
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(5 * time.Second):
-		return context.DeadlineExceeded
+	encoded, err := h.marshalMessage(msg)
+	if err != nil {
+		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	h.mu.RLock()
+	if h.stopping {
+		h.mu.RUnlock()
+		return errWebSocketHubClosed
+	}
+	var slow []*WebSocketClient
+	for _, client := range h.clients {
+		if msg.UserID != "" && client.UserID != msg.UserID {
+			continue
+		}
+		select {
+		case <-client.done:
+			continue
+		default:
+		}
+		select {
+		case client.Send <- encoded:
+		default:
+			slow = append(slow, client)
+		}
+	}
+	h.mu.RUnlock()
+	for _, client := range slow {
+		client.stop()
+	}
+	return nil
 }
 
 func (h *WebSocketHub) marshalMessage(msg BroadcastMessage) ([]byte, error) {
@@ -150,12 +158,40 @@ func (h *WebSocketHub) marshalMessage(msg BroadcastMessage) ([]byte, error) {
 	return data, nil
 }
 
-func (h *WebSocketHub) RegisterClient(client *WebSocketClient) {
-	h.register <- client
+func (h *WebSocketHub) RegisterClient(client *WebSocketClient) error {
+	if h == nil {
+		return errWebSocketHubClosed
+	}
+	interrupter, ok := client.Conn.(router.WebSocketReadInterrupter)
+	if !ok {
+		return errors.New("websocket adapter requires concurrency-safe read interruption")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.stopping {
+		return errWebSocketHubClosed
+	}
+	if _, exists := h.clients[client.ID]; exists {
+		return errors.New("websocket client already registered")
+	}
+	client.hub = h
+	client.done = make(chan struct{})
+	client.interruptRead = interrupter.InterruptRead
+	if client.Send == nil {
+		client.Send = make(chan []byte, 256)
+	}
+	h.clients[client.ID] = client
+	h.connections.Add(1)
+	return nil
 }
 
 func (h *WebSocketHub) UnregisterClient(client *WebSocketClient) {
-	h.unregister <- client
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.clients[client.ID] == client {
+		delete(h.clients, client.ID)
+		h.connections.Done()
+	}
 }
 
 func (a *App) HandleWebSocket(ws router.WebSocketContext) error {
@@ -174,61 +210,66 @@ func (a *App) HandleWebSocket(ws router.WebSocketContext) error {
 		hub:    a.WSHub,
 	}
 
-	a.WSHub.RegisterClient(client)
+	if err := a.WSHub.RegisterClient(client); err != nil {
+		wsLog("registration rejected conn=%s: %v", client.ID, err)
+		return ws.CloseWithStatus(router.CloseServiceRestart, "hub unavailable")
+	}
 	wsLog("client registered with hub conn=%s user=%s", client.ID, client.UserID)
 	client.HandleConnection()
 	wsLog("connection closed conn=%s user=%s", client.ID, client.UserID)
 	return nil
 }
 
-func (c *WebSocketClient) HandleConnection() {
-	defer func() {
-		c.hub.UnregisterClient(c)
-		if err := c.Conn.Close(); err != nil {
-			wsLog("close client conn=%s user=%s err=%v", c.ID, c.UserID, err)
+func (c *WebSocketClient) stop() {
+	c.stopOnce.Do(func() {
+		close(c.done)
+		if err := c.interruptRead(); err != nil {
+			wsLog("interrupt reader conn=%s: %v", c.ID, err)
 		}
-		wsLog("client cleanup conn=%s user=%s", c.ID, c.UserID)
-	}()
+	})
+}
 
-	go c.writePump()
+func (c *WebSocketClient) HandleConnection() {
+	writerDone := make(chan struct{})
+	go func() { defer close(writerDone); c.writePump() }()
+	defer func() {
+		c.stop()
+		<-writerDone
+		c.hub.UnregisterClient(c)
+	}()
 	c.readPump()
 }
 
 func (c *WebSocketClient) readPump() {
 	for {
+		select {
+		case <-c.done:
+			return
+		default:
+		}
 		if _, _, err := c.Conn.ReadMessage(); err != nil {
-			wsLog("read error conn=%s user=%s err=%v", c.ID, c.UserID, err)
-			break
+			return
 		}
 	}
 }
 
 func (c *WebSocketClient) writePump() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer func() {
-		ticker.Stop()
-		if err := c.Conn.Close(); err != nil {
-			wsLog("close writer conn=%s user=%s err=%v", c.ID, c.UserID, err)
-		}
-	}()
-
+	defer c.stop()
 	for {
 		select {
+		case <-c.done:
+			return
+		default:
+		}
+		select {
+		case <-c.done:
+			return
 		case message, ok := <-c.Send:
 			if !ok {
-				wsLog("send channel closed conn=%s user=%s", c.ID, c.UserID)
-				if err := c.Conn.CloseWithStatus(1000, "hub closed channel"); err != nil {
-					wsLog("close status conn=%s user=%s err=%v", c.ID, c.UserID, err)
-				}
 				return
 			}
 			if err := c.Conn.WriteMessage(router.TextMessage, message); err != nil {
 				wsLog("write error conn=%s user=%s err=%v", c.ID, c.UserID, err)
-				return
-			}
-		case <-ticker.C:
-			if err := c.Conn.WritePing(nil); err != nil {
-				wsLog("ping error conn=%s user=%s err=%v", c.ID, c.UserID, err)
 				return
 			}
 		}
