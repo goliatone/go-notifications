@@ -37,7 +37,8 @@ func TestBunDeliveryQueryRepositoryScopesAndProjectsSafeMetadata(t *testing.T) {
 			t.Fatalf("create %T: %v", model, createErr)
 		}
 	}
-	created := time.Now().UTC().Add(-time.Hour)
+	// Bun serializes timestamps at microsecond precision on every platform.
+	created := time.Date(2026, time.October, 28, 5, 0, 0, 123456000, time.UTC)
 	event := &domain.NotificationEvent{
 		RecordMeta:     domain.RecordMeta{ID: uuid.New(), CreatedAt: created, UpdatedAt: created},
 		DefinitionCode: "credential.ready", TenantID: "tenant-a", CorrelationID: "corr-safe",

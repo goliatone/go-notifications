@@ -14,7 +14,7 @@ require (
 	github.com/goliatone/go-repository-bun v0.16.2
 	github.com/goliatone/go-template v0.3.1
 	github.com/goliatone/go-urlkit v0.7.0
-	github.com/goliatone/go-users v0.27.4
+	github.com/goliatone/go-users v0.27.5
 	github.com/google/uuid v1.6.0
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056
 	github.com/lib/pq v1.10.9
@@ -85,7 +85,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.42.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20251213004720-97cd9d5aeac2 // indirect

@@ -14,7 +14,9 @@ func TestStructuredReplyAndLegacySender(t *testing.T) {
 	count := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count++
-		fmt.Fprint(w, `{"ok":true,"channel":"C","ts":"2.000001","message":{"thread_ts":"1.000001"}}`)
+		if _, err := fmt.Fprint(w, `{"ok":true,"channel":"C","ts":"2.000001","message":{"thread_ts":"1.000001"}}`); err != nil {
+			t.Error(err)
+		}
 	}))
 	defer server.Close()
 	adapter := New(&logger.Nop{}, WithConfig(Config{Token: "fixture", Channel: "C", BaseURL: server.URL}), WithClient(server.Client()))

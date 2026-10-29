@@ -61,8 +61,7 @@ func (DefaultPolicy) SafeError(err error) SafeError {
 	if err == nil {
 		return SafeError{}
 	}
-	var safeValue SafeError
-	if errors.As(err, &safeValue) {
+	if safeValue, ok := errors.AsType[SafeError](err); ok {
 		return safeValue
 	}
 	var safePointer *SafeError

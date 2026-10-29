@@ -355,12 +355,13 @@ func (s *Service) handleUnclaimedRetry(
 	if stored.Status == domain.RetryStatusCompleted {
 		return s.retryReceipt(ctx, current, stored, replay)
 	}
-	return receipts.DispatchReceipt{
-			EventID: event.ID, RetryOperationID: stored.ID, Status: receipts.StatusFailed,
-		}, privacy.SafeError{
-			Category: "conflict", Code: "retry_not_eligible",
-			Message: "notification is not eligible for retry",
-		}
+	receipt := receipts.DispatchReceipt{
+		EventID: event.ID, RetryOperationID: stored.ID, Status: receipts.StatusFailed,
+	}
+	return receipt, privacy.SafeError{
+		Category: "conflict", Code: "retry_not_eligible",
+		Message: "notification is not eligible for retry",
+	}
 }
 
 func (s *Service) handleActiveRetryClaim(

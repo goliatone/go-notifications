@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/goliatone/go-notifications/pkg/adapters"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/goliatone/go-notifications/pkg/adapters"
 )
 
 type DeliveryResult struct {
@@ -63,7 +64,7 @@ func (a *Adapter) SendWithResult(ctx context.Context, msg adapters.Message) (Del
 		return result, err
 	}
 	if result.State == "sent" {
-		if (result.ChannelID != input.ChannelID && !strings.HasPrefix(input.ChannelID, "#")) || result.ChannelID == "" || result.MessageID == "" || result.ThreadID == "" || input.ThreadID != "" && result.ThreadID != input.ThreadID {
+		if !result.matches(input) {
 			return DeliveryResult{State: "unknown", Reason: "receipt_mismatch"}, errors.New("slack: receipt_mismatch")
 		}
 		a.base.LogSuccess(a.name, msg)
@@ -113,25 +114,37 @@ func (a *Adapter) sendHTTP(ctx context.Context, input SendRequest) (DeliveryResu
 	if err != nil || response == nil || response.Body == nil {
 		return DeliveryResult{State: "unknown", Reason: "outcome_unknown"}, nil
 	}
-	defer response.Body.Close()
-	if response.StatusCode == 429 {
-		seconds, err := strconv.ParseInt(response.Header.Get("Retry-After"), 10, 64)
-		if err != nil || seconds <= 0 || seconds > 86400 {
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			// Cleanup failure must not turn a confirmed send into a retry.
+			a.base.Logger().Warn("slack: response cleanup failed")
+		}
+	}()
+	return decodeHTTPResult(response, input), nil
+}
+
+func decodeHTTPResult(response *http.Response, input SendRequest) DeliveryResult {
+	if response.StatusCode == http.StatusTooManyRequests {
+		seconds, parseErr := strconv.ParseInt(response.Header.Get("Retry-After"), 10, 64)
+		if parseErr != nil || seconds <= 0 || seconds > 86400 {
 			seconds = 60
 		}
 		at := time.Now().UTC().Add(time.Duration(seconds) * time.Second)
-		return DeliveryResult{State: "rate_limited", Reason: "rate_limited", RetryAt: &at}, nil
+		return DeliveryResult{State: "rate_limited", Reason: "rate_limited", RetryAt: &at}
 	}
 	if response.StatusCode >= 500 || response.StatusCode >= 300 && response.StatusCode < 400 {
-		return DeliveryResult{State: "unknown", Reason: "outcome_unknown"}, nil
+		return DeliveryResult{State: "unknown", Reason: "outcome_unknown"}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		result.Reason = "provider_rejected"
-		return result, nil
+		return DeliveryResult{State: "unsent", Reason: "provider_rejected"}
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	return decodeReceipt(response.Body, input)
+}
+
+func decodeReceipt(body io.Reader, input SendRequest) DeliveryResult {
+	data, err := io.ReadAll(io.LimitReader(body, (1<<20)+1))
 	if err != nil || len(data) > 1<<20 {
-		return DeliveryResult{State: "unknown", Reason: "outcome_unknown"}, nil
+		return DeliveryResult{State: "unknown", Reason: "outcome_unknown"}
 	}
 	var value struct {
 		OK                 bool
@@ -141,19 +154,24 @@ func (a *Adapter) sendHTTP(ctx context.Context, input SendRequest) (DeliveryResu
 		}
 	}
 	if json.Unmarshal(data, &value) != nil {
-		return DeliveryResult{State: "unknown", Reason: "outcome_unknown"}, nil
+		return DeliveryResult{State: "unknown", Reason: "outcome_unknown"}
 	}
 	if !value.OK {
 		if value.Error == "ratelimited" || value.Error == "rate_limited" {
 			at := time.Now().UTC().Add(time.Minute)
-			return DeliveryResult{State: "rate_limited", Reason: "rate_limited", RetryAt: &at}, nil
+			return DeliveryResult{State: "rate_limited", Reason: "rate_limited", RetryAt: &at}
 		}
-		result.Reason = "provider_rejected"
-		return result, nil
+		return DeliveryResult{State: "unsent", Reason: "provider_rejected"}
 	}
 	thread := value.Message.Thread
 	if input.ThreadID == "" {
 		thread = value.TS
 	}
-	return DeliveryResult{State: "sent", ChannelID: value.Channel, MessageID: value.TS, ThreadID: thread}, nil
+	return DeliveryResult{State: "sent", ChannelID: value.Channel, MessageID: value.TS, ThreadID: thread}
+}
+
+func (r DeliveryResult) matches(input SendRequest) bool {
+	return (r.ChannelID == input.ChannelID || strings.HasPrefix(input.ChannelID, "#")) &&
+		r.ChannelID != "" && r.MessageID != "" && r.ThreadID != "" &&
+		(input.ThreadID == "" || r.ThreadID == input.ThreadID)
 }
