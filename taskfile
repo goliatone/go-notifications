@@ -413,6 +413,36 @@ function go:lint:report {
         "${golangci_lint_bin}" run --issues-exit-code=0 "$@" ./...
 }
 
+function _go:security:openpgp {
+    local go_bin=$1
+    local packages
+    local package
+    local found=0
+
+    if ! packages=$("${go_bin}" list -mod=readonly -deps -test -f '{{.ImportPath}}' ./...); then
+        echo "Unable to inspect Go dependencies in $(pwd)" >&2
+        return 1
+    fi
+
+    while IFS= read -r package; do
+        case "${package}" in
+            golang.org/x/crypto/openpgp|golang.org/x/crypto/openpgp/*)
+                printf 'Disallowed OpenPGP dependency in %s: %s (GO-2026-5932)\n' "$(pwd)" "${package}" >&2
+                found=1
+                ;;
+        esac
+    done <<< "${packages}"
+    return "${found}"
+}
+
+function go:security:openpgp {
+    local go_bin
+
+    go_bin=$(_go:bin) || return 1
+    _go:quality:prepare_env || return 1
+    _go:run_in_modules _go:security:openpgp "${go_bin}"
+}
+
 function go:security:govulncheck {
     local govulncheck_bin
 
@@ -438,6 +468,7 @@ function go:security:gosec {
 }
 
 function go:security:all {
+    go:security:openpgp || return 1
     go:security:govulncheck "$@" || return 1
     go:security:gosec "$@" || return 1
 }

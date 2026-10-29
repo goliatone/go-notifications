@@ -226,7 +226,8 @@ the nested `examples/web` module:
 ./taskfile go:quality:all  # format, tests, race, full lint, and security
 ./taskfile go:lint         # full GolangCI lint
 ./taskfile go:lint:report  # report findings without failing
-./taskfile go:security:all # govulncheck and gosec
+./taskfile go:security:openpgp # reject affected OpenPGP imports, including tests
+./taskfile go:security:all # OpenPGP guard, govulncheck, and gosec
 ./taskfile go:cover        # coverage report for every module
 ./taskfile ci              # full quality, docs, samples, and OnReady checks
 ```
@@ -235,3 +236,8 @@ GolangCI is pinned in `.golangci-lint-version`; the taskfile verifies installed
 tool versions and installs the pinned releases when necessary. Repository-local
 Go caches live under `.tmp/`. CI invokes the same `./taskfile ci` entry point
 through `.github/workflows/ci.yml`, so local and CI policy stay aligned.
+
+The OpenPGP guard checks both modules' transitive dependencies, including tests,
+and fails on dependency-loading errors or imports of `golang.org/x/crypto/openpgp`
+and its subpackages ([GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932)).
+It runs in `go:security:all` and `ci`; the existing vulnerability scans remain enabled.
