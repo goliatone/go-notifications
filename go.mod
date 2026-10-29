@@ -14,7 +14,7 @@ require (
 	github.com/goliatone/go-repository-bun v0.16.2
 	github.com/goliatone/go-template v0.3.1
 	github.com/goliatone/go-urlkit v0.7.0
-	github.com/goliatone/go-users v0.27.5
+	github.com/goliatone/go-users v0.27.6
 	github.com/google/uuid v1.6.0
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056
 	github.com/lib/pq v1.10.9

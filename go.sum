@@ -95,8 +95,8 @@ github.com/goliatone/go-template v0.3.1 h1:x714biuWqtCyrtTmIrt2YjXWPYBOIS/Y2DPdW
 github.com/goliatone/go-template v0.3.1/go.mod h1:2mFRGMnfvAn3r4ClMmlu4wBVkSKXgtXhVdmmmhhgSr4=
 github.com/goliatone/go-urlkit v0.7.0 h1:wc2JR4xLnft7Vne4LbNw/oLQdFHQkuIgoEU0Hi7NczI=
 github.com/goliatone/go-urlkit v0.7.0/go.mod h1:QVCju3Z9io9mX+t2D7RCp+ja9PYrLNJoucWc124siFQ=
-github.com/goliatone/go-users v0.27.5 h1:HkDJ9HfdhdlQEr52+t07CjW5Nylir+s2+FPPMUSzvNY=
-github.com/goliatone/go-users v0.27.5/go.mod h1:ipS9qqsggk8XL7gQS8n3BdmVuEQvGtWnv8ETvukxNsY=
+github.com/goliatone/go-users v0.27.6 h1:YvwOM4Sh+yFV1VPnsgFvxLQoWuYwjgJqd887qqcMZVE=
+github.com/goliatone/go-users v0.27.6/go.mod h1:ipS9qqsggk8XL7gQS8n3BdmVuEQvGtWnv8ETvukxNsY=
 github.com/goliatone/hashid v0.2.3 h1:Mu67feoP4iyAIajLx8JfqtIrbRURHnFO+hGJ3kZa+fc=
 github.com/goliatone/hashid v0.2.3/go.mod h1:jgEJQBDWz7OSe4uWCcsu5rkb4HtKTNvgF4Wl3NPfC6E=
 github.com/google/cel-go v0.30.0 h1:ll54AkzKunWkBn9wSoiUXbFZXYZTkdJGNXTBXUoolGo=

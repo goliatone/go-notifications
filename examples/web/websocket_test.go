@@ -150,9 +150,7 @@ func TestWebSocketHubConcurrentAdmissionAndShutdown(t *testing.T) {
 	errs := make(chan error, 18)
 	var workers sync.WaitGroup
 	for i := range 16 {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			<-start
 			client := &WebSocketClient{ID: fmt.Sprint(i), Conn: newLifecycleSocket()}
 			if err := hub.RegisterClient(client); err != nil {
@@ -162,19 +160,17 @@ func TestWebSocketHubConcurrentAdmissionAndShutdown(t *testing.T) {
 				return
 			}
 			client.HandleConnection()
-		}()
+		})
 	}
 	for range 2 {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			<-start
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			if err := hub.Shutdown(ctx); err != nil {
 				errs <- err
 			}
-		}()
+		})
 	}
 	close(start)
 	done := make(chan struct{})
@@ -204,7 +200,8 @@ func TestWebSocketFiberBroadcastAndShutdown(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Features.EnableWebSocket = true
 	registerWebSocketRoute(cfg, app, server.Router())
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	listenConfig := net.ListenConfig{}
+	listener, err := listenConfig.Listen(t.Context(), "tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,37 +210,11 @@ func TestWebSocketFiberBroadcastAndShutdown(t *testing.T) {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if err := shutdownServer(ctx, app, server); err != nil {
-			t.Error(err)
+		if shutdownErr := shutdownServer(ctx, app, server); shutdownErr != nil {
+			t.Error(shutdownErr)
 		}
 	})
-	conn, _, err := websocket.DefaultDialer.Dial("ws://"+listener.Addr().String()+"/ws?user_id=alice", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	pong := make(chan struct{}, 1)
-	conn.SetPongHandler(func(string) error {
-		select {
-		case pong <- struct{}{}:
-		default:
-		}
-		return nil
-	})
-	messages := make(chan []byte, 1)
-	clientDone := make(chan struct{})
-	go func() {
-		defer close(clientDone)
-		for {
-			_, data, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-			messages <- data
-		}
-	}()
-	defer func() { _ = conn.Close(); waitLifecycle(t, clientDone) }()
+	conn, pong, messages, clientDone := startLifecycleWebSocketClient(t, "ws://"+listener.Addr().String()+"/ws?user_id=alice")
 	if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
@@ -280,6 +251,52 @@ func TestWebSocketFiberBroadcastAndShutdown(t *testing.T) {
 	if len(hub.clients) != 0 {
 		t.Fatal("clients remained registered")
 	}
+}
+
+func startLifecycleWebSocketClient(t *testing.T, url string) (*websocket.Conn, <-chan struct{}, <-chan []byte, <-chan struct{}) {
+	t.Helper()
+	conn, response, err := websocket.DefaultDialer.DialContext(t.Context(), url, nil)
+	if response != nil {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			t.Errorf("close WebSocket handshake response: %v", closeErr)
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clientDone chan struct{}
+	t.Cleanup(func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			t.Errorf("close WebSocket client: %v", closeErr)
+		}
+		if clientDone != nil {
+			waitLifecycle(t, clientDone)
+		}
+	})
+	if deadlineErr := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); deadlineErr != nil {
+		t.Fatal(deadlineErr)
+	}
+	pong := make(chan struct{}, 1)
+	conn.SetPongHandler(func(string) error {
+		select {
+		case pong <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+	messages := make(chan []byte, 1)
+	clientDone = make(chan struct{})
+	go func() {
+		defer close(clientDone)
+		for {
+			_, data, readErr := conn.ReadMessage()
+			if readErr != nil {
+				return
+			}
+			messages <- data
+		}
+	}()
+	return conn, pong, messages, clientDone
 }
 
 func waitLifecycle(t *testing.T, done <-chan struct{}) {
