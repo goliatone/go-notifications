@@ -1,24 +1,43 @@
 {
+  "version": 1,
   "files": {
     "ctx_hook_dispatch.sh": {
-      "sha256": "967bf927895ed1e5d47e7c78d6fe28f917da0b810dbe8cc5ab1937c4fc458da5"
+      "asset": "codex/hooks/ctx_hook_dispatch.sh",
+      "target": "repo:.codex/hooks/ctx_hook_dispatch.sh",
+      "bundle": "f15bfe03961e0a0afdc540e4fe3d2a3287fd15252e3839bfa35451b6da08d75b",
+      "sha256": "fef9c4e0f31fd04148bc946bee31dceefd71ec6f3b18e8cd0131d4ac8f269cc2"
     },
     "ctx_hook_utils.py": {
-      "sha256": "bf216943523fd6416f8343c49a19a7c13991f3444352788076c4eb4c119c95e3"
+      "asset": "codex/hooks/ctx_hook_utils.py",
+      "target": "repo:.codex/hooks/ctx_hook_utils.py",
+      "bundle": "f15bfe03961e0a0afdc540e4fe3d2a3287fd15252e3839bfa35451b6da08d75b",
+      "sha256": "4269a1ffc0e9baf3c9a8516e1cd983881d8803bda78c450768d2757ad49d1620"
     },
     "ctx_hooks_test.py": {
       "sha256": "2bdfd306eb39db2a53ad26120efdd7a75fd6fd0443c3f0ab6a6a1fff6aed1b92"
     },
     "ctx_post_tool_use.py": {
+      "asset": "codex/hooks/ctx_post_tool_use.py",
+      "target": "repo:.codex/hooks/ctx_post_tool_use.py",
+      "bundle": "f15bfe03961e0a0afdc540e4fe3d2a3287fd15252e3839bfa35451b6da08d75b",
       "sha256": "6dd75c282c957fee46deea3b81153f5b563af5bc9f975405da99b9c7be5a5502"
     },
     "ctx_session_start.py": {
-      "sha256": "54b9e73c23b037f3502db685caeb8470e3643a158712fee4bfe271286d4e373a"
+      "asset": "codex/hooks/ctx_session_start.py",
+      "target": "repo:.codex/hooks/ctx_session_start.py",
+      "bundle": "f15bfe03961e0a0afdc540e4fe3d2a3287fd15252e3839bfa35451b6da08d75b",
+      "sha256": "976c15952fa9e2dc0289ec17e1f039697f6865b14068d4e9487d90d7da7e4ee6"
     },
     "ctx_stop.py": {
+      "asset": "codex/hooks/ctx_stop.py",
+      "target": "repo:.codex/hooks/ctx_stop.py",
+      "bundle": "f15bfe03961e0a0afdc540e4fe3d2a3287fd15252e3839bfa35451b6da08d75b",
       "sha256": "6407973dc5778390557622700110a9ce9dc9434180809aa36ca668ed85f3b3fc"
     },
     "ctx_user_prompt_submit.py": {
+      "asset": "codex/hooks/ctx_user_prompt_submit.py",
+      "target": "repo:.codex/hooks/ctx_user_prompt_submit.py",
+      "bundle": "f15bfe03961e0a0afdc540e4fe3d2a3287fd15252e3839bfa35451b6da08d75b",
       "sha256": "5b9d8633699932748b892b0b682198e094b75dac9ab62a1845de7d386e4f72b9"
     }
   }

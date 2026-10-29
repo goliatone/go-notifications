@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import errno
 import gzip
 import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -91,7 +94,7 @@ def env_int(name: str, default: int) -> int:
         parsed = int(value)
     except ValueError:
         return default
-    return max(parsed, 0)
+    return parsed if parsed >= 0 else default
 
 
 def _resolve_start_path(cwd: str | None) -> Path:
@@ -104,6 +107,12 @@ def _resolve_start_path(cwd: str | None) -> Path:
 
 def find_repo_root(cwd: str | None) -> Path:
     start = _resolve_start_path(cwd)
+    for candidate in (start, *start.parents):
+        if (candidate / ".ctx").is_dir():
+            return candidate
+        if (candidate / ".git").exists() and candidate.name != ".ctx":
+            return candidate
+
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -117,7 +126,7 @@ def find_repo_root(cwd: str | None) -> Path:
     except Exception:
         pass
     for candidate in (start, *start.parents):
-        if (candidate / ".ctx").is_dir() or (candidate / ".git").exists() or (candidate / ".claude").is_dir():
+        if (candidate / ".git").exists() or (candidate / ".claude").is_dir():
             return candidate
     return start
 
@@ -220,19 +229,29 @@ def doc_hashes(repo_root: Path, feature: str | None) -> dict[str, str | None]:
 
 def rotate_history_if_needed(repo_root: Path) -> None:
     max_bytes = env_int("CTX_HISTORY_MAX_BYTES", 5 * 1024 * 1024)
+    if max_bytes <= 0:
+        return
+
     target = history_file(repo_root)
     try:
-        if max_bytes <= 0 or target.stat().st_size < max_bytes:
-            return
+        size = target.stat().st_size
     except OSError:
         return
+    if size <= 0 or size < max_bytes:
+        return
+
     archive_dir = history_archive_dir(repo_root)
     archive_dir.mkdir(parents=True, exist_ok=True)
-    archive = archive_dir / f"events-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    fd, name = tempfile.mkstemp(prefix=f"events-{stamp}-", suffix=".jsonl", dir=archive_dir)
+    os.close(fd)
+    archive = Path(name)
+
     try:
         target.replace(archive)
         target.touch()
-        with archive.open("rb") as source, gzip.open(str(archive) + ".gz", "wb") as destination:
+        compressed = archive.with_suffix(archive.suffix + ".gz")
+        with archive.open("rb") as source, gzip.open(compressed, "xb") as destination:
             shutil.copyfileobj(source, destination)
         archive.unlink()
     except OSError:
@@ -240,15 +259,9 @@ def rotate_history_if_needed(repo_root: Path) -> None:
 
 
 def event_dedupe_key(event: dict[str, Any]) -> str | None:
-    fields_by_type = {
-        "claude_session_start": ("type", "session_id", "transcript_path", "cwd"),
-        "claude_user_prompt_submit": ("type", "session_id", "prompt_sha256"),
-        "claude_post_tool_use": ("type", "session_id", "tool_name", "tool_input_sha256"),
-        "claude_stop": ("type", "session_id", "assistant_message_sha256"),
-    }
-    fields = fields_by_type.get(str(event.get("type")))
-    if fields is None:
+    if event.get("type") != "claude_post_tool_use":
         return None
+    fields = ("type", "session_id", "tool_use_id")
     values = [event.get(field) for field in fields]
     if any(value in (None, "") for value in values):
         return None
@@ -282,25 +295,39 @@ def recent_event_dedupe_keys(target: Path, byte_limit: int = 65536) -> set[str]:
 
 @contextmanager
 def history_file_lock(target: Path):
-    lock_dir = target.with_name(f"{target.name}.lock")
-    acquired = False
-    for _ in range(200):
-        try:
-            lock_dir.mkdir()
-            acquired = True
-            break
-        except FileExistsError:
-            time.sleep(0.025)
-        except Exception:
-            break
-    try:
-        yield
-    finally:
-        if acquired:
+    lock_path = target.with_name(f"{target.name}.lock")
+    if lock_path.is_dir():
+        raise RuntimeError(f"legacy history lock directory: {lock_path}; stop old writers and remove it only after confirming it is abandoned")
+    with lock_path.open("a+b") as lock_file:
+        deadline = time.monotonic() + 0.25
+        if os.name == "nt":
+            import msvcrt
+            def acquire():
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            def release():
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            def acquire():
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            def release():
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        while True:
             try:
-                lock_dir.rmdir()
-            except Exception:
-                pass
+                acquire()
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EINTR):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"history lock unavailable: {lock_path}; telemetry skipped") from exc
+                time.sleep(0.025)
+        try:
+            yield
+        finally:
+            release()
 
 
 def write_history_state(repo_root: Path, event: dict[str, Any]) -> None:
@@ -314,6 +341,7 @@ def write_history_state(repo_root: Path, event: dict[str, Any]) -> None:
         "latest_event_type": event.get("type"),
         "latest_at": event.get("timestamp") or utc_timestamp(),
         "latest_review_entry": None,
+        "latest_handoff_entry": None,
         "updated_at": utc_timestamp(),
     }
     target = history_state_file(repo_root)
@@ -391,3 +419,43 @@ def latest_assistant_text(path: str | None) -> str:
     except Exception:
         return ""
     return last
+
+
+def skill_update_notice_lines(repo_root: Path) -> list[str]:
+    if os.getenv("CTX_SKILL_NOTICES") == "0":
+        return []
+    try:
+        explicit = os.getenv("CTX_CLI_BIN")
+        local = repo_root / "ctx"
+        binary = explicit or (str(local) if local.is_file() and os.access(local, os.X_OK) else shutil.which("ctx"))
+        if not binary:
+            return []
+        with subprocess.Popen(
+            [binary, "setup", "skills", "status", "--notice", "--json"],
+            cwd=repo_root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, start_new_session=os.name == "posix",
+        ) as process:
+            try:
+                stdout, _ = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    process.kill()
+                process.communicate()
+                return []
+            if process.returncode:
+                return []
+        payload = json.loads(stdout)
+        if not payload.get("ok"):
+            return []
+        notices = payload.get("data", {}).get("notices", [])
+        lines = [notice["message"] for notice in notices if isinstance(notice, dict) and isinstance(notice.get("message"), str)]
+        if lines:
+            lines.insert(0, "Surface this skill notice to the user; leave updating to their explicit choice:")
+        return lines
+    except Exception:
+        return []

@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
+
 from ctx_hook_utils import (
     append_event,
     claude_source_metadata,
     doc_hashes,
     find_repo_root,
+    has_ctx_repo,
+    skill_update_notice_lines,
     load_hook_input,
     resolve_active_feature,
     run_hook,
@@ -19,12 +23,14 @@ def main() -> int:
     payload = load_hook_input()
     repo_root = find_repo_root(payload.get("cwd"))
     feature, source = resolve_active_feature(repo_root, payload)
+    start_source = payload.get("source") if isinstance(payload.get("source"), str) else None
     event = {
         "timestamp": utc_timestamp(),
         "type": "claude_session_start",
         **claude_source_metadata(),
         "session_id": session_id(payload),
         "hook_event_name": payload.get("hook_event_name") or "SessionStart",
+        "start_source": start_source,
         "transcript_path": transcript_path(payload),
         "cwd": payload.get("cwd"),
         "feature": feature,
@@ -32,6 +38,10 @@ def main() -> int:
         **doc_hashes(repo_root, feature),
     }
     append_event(repo_root, event)
+    if has_ctx_repo(repo_root):
+        lines = skill_update_notice_lines(repo_root)
+        if lines:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "\n".join(lines)}}))
     return 0
 
 

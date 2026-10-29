@@ -10,11 +10,13 @@ from ctx_hook_utils import (
     find_repo_root,
     has_ctx_repo,
     latest_review_heading,
+    latest_handoff_heading,
     load_hook_input,
     resolve_active_feature,
     run_hook,
     shadow_guidance_lines,
     specs_dir,
+    skill_update_notice_lines,
     task_summary,
     utc_timestamp,
 )
@@ -47,15 +49,22 @@ def main() -> int:
         event["feature_warning"] = resolution.warning
     append_event(repo_root, event)
 
-    if not feature:
+    notices = skill_update_notice_lines(repo_root)
+    if not feature and not notices:
         return 0
 
-    feature_path = specs_dir(repo_root) / feature
-    lines = [f"Latest .ctx feature: {feature}"]
+    feature_path = specs_dir(repo_root) / (feature or "")
+    lines = [f"Latest .ctx feature: {feature}"] if feature else []
+    lines.extend(notices)
 
     review = latest_review_heading(feature_path)
     if review:
         lines.append(f"Latest review entry: {review}")
+
+    handoff = latest_handoff_heading(feature_path)
+    if handoff:
+        lines.append(f"Latest handoff entry: {handoff}")
+        lines.append(f"Continuation source: .ctx/specs/{feature}/HANDOFFS.md (read the newest entry before work)")
 
     tasks = task_summary(feature_path)
     if tasks:

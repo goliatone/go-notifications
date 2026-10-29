@@ -11,6 +11,7 @@ fi
 
 script_path="$script_dir/$script_name"
 if [ ! -f "$script_path" ]; then
+    echo "ctx hook: missing script $script_name; reconcile hooks with ctx setup hooks" >&2
     exit 0
 fi
 
@@ -19,4 +20,14 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 0
 fi
 
-exec python3 "$script_path"
+case "$script_name" in
+    ctx_session_start.py|ctx_user_prompt_submit.py|ctx_post_tool_use.py|ctx_stop.py)
+        python3 "$script_path"
+        status=$?
+        if [ "$status" -ne 0 ]; then
+            echo "ctx hook: $script_name exited with code $status; telemetry skipped; reconcile hooks with ctx setup hooks" >&2
+        fi
+        exit 0
+        ;;
+    *) exec python3 "$script_path" ;;
+esac

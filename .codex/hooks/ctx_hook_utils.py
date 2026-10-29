@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import errno
 import gzip
 import hashlib
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -92,14 +95,11 @@ def text_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def compact_preview(value: str, limit: int = 240) -> str:
-    compact = " ".join(value.split())
-    if len(compact) <= limit:
-        return compact
-    return compact[: limit - 3] + "..."
+def compact_preview(value: str, limit: int = 240) -> str | None:
+    return text_preview(" ".join(value.split()), limit)
 
 
-def command_preview(command: str, limit: int = 240) -> str:
+def command_preview(command: str, limit: int = 240) -> str | None:
     return compact_preview(command, limit=limit)
 
 
@@ -150,6 +150,12 @@ def _resolve_start_path(cwd: str | None) -> Path:
 
 def find_repo_root(cwd: str | None) -> Path:
     start = _resolve_start_path(cwd)
+    for candidate in (start, *start.parents):
+        if (candidate / ".ctx").is_dir():
+            return candidate
+        if (candidate / ".git").exists() and candidate.name != ".ctx":
+            return candidate
+
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -165,8 +171,6 @@ def find_repo_root(cwd: str | None) -> Path:
         pass
 
     for candidate in (start, *start.parents):
-        if (candidate / ".ctx").is_dir():
-            return candidate
         if (candidate / ".git").exists():
             return candidate
         if (candidate / ".codex").is_dir():
@@ -234,7 +238,7 @@ def env_int(name: str, default: int) -> int:
         parsed = int(value)
     except ValueError:
         return default
-    return max(parsed, 0)
+    return parsed if parsed >= 0 else default
 
 
 def prune_history_archives(repo_root: Path) -> None:
@@ -276,15 +280,15 @@ def rotate_history_if_needed(repo_root: Path) -> None:
     archive_dir = history_archive_dir(repo_root)
     archive_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    archive = archive_dir / f"events-{stamp}.jsonl"
-    if archive.exists() or archive.with_suffix(archive.suffix + ".gz").exists():
-        archive = archive_dir / f"events-{stamp}-{os.getpid()}.jsonl"
+    fd, name = tempfile.mkstemp(prefix=f"events-{stamp}-", suffix=".jsonl", dir=archive_dir)
+    os.close(fd)
+    archive = Path(name)
 
     try:
         target.replace(archive)
         target.touch()
         compressed = archive.with_suffix(archive.suffix + ".gz")
-        with archive.open("rb") as source, gzip.open(compressed, "wb") as destination:
+        with archive.open("rb") as source, gzip.open(compressed, "xb") as destination:
             shutil.copyfileobj(source, destination)
         archive.unlink()
     except OSError:
@@ -299,6 +303,17 @@ def latest_review_heading(feature_path: Path) -> str | None:
         return None
 
     for line in read_lines(reviews_file):
+        if line.startswith("## "):
+            return line[3:].strip()
+    return None
+
+
+def latest_handoff_heading(feature_path: Path) -> str | None:
+    handoffs_file = feature_path / "HANDOFFS.md"
+    if not handoffs_file.is_file():
+        return None
+
+    for line in read_lines(handoffs_file):
         if line.startswith("## "):
             return line[3:].strip()
     return None
@@ -349,6 +364,7 @@ def write_history_state(repo_root: Path, event: dict[str, Any]) -> None:
         "latest_event_type": event.get("type") if isinstance(event.get("type"), str) else None,
         "latest_at": latest_at,
         "latest_review_entry": None,
+        "latest_handoff_entry": None,
         "updated_at": utc_timestamp(),
     }
 
@@ -356,6 +372,9 @@ def write_history_state(repo_root: Path, event: dict[str, Any]) -> None:
         review = latest_review_heading(feature_dir(repo_root, feature))
         if review:
             state["latest_review_entry"] = review
+        handoff = latest_handoff_heading(feature_dir(repo_root, feature))
+        if handoff:
+            state["latest_handoff_entry"] = handoff
 
     target = history_state_file(repo_root)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -430,28 +449,39 @@ def is_recent_duplicate_event(target: Path, event: dict[str, Any]) -> bool:
 
 @contextmanager
 def history_file_lock(target: Path):
-    lock_dir = target.with_name(f"{target.name}.lock")
-    acquired = False
-    for _ in range(200):
-        try:
-            lock_dir.mkdir()
-            acquired = True
-            break
-        except FileExistsError:
-            time.sleep(0.025)
-        except Exception as exc:
-            warn(f"failed to acquire history lock: {exc}")
-            break
-    if not acquired:
-        warn(f"history lock unavailable; appending without lock: {lock_dir}")
-    try:
-        yield
-    finally:
-        if acquired:
+    lock_path = target.with_name(f"{target.name}.lock")
+    if lock_path.is_dir():
+        raise RuntimeError(f"legacy history lock directory: {lock_path}; stop old writers and remove it only after confirming it is abandoned")
+    with lock_path.open("a+b") as lock_file:
+        deadline = time.monotonic() + 0.25
+        if os.name == "nt":
+            import msvcrt
+            def acquire():
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            def release():
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            def acquire():
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            def release():
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        while True:
             try:
-                lock_dir.rmdir()
-            except Exception as exc:
-                warn(f"failed to release history lock: {exc}")
+                acquire()
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EINTR):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"history lock unavailable: {lock_path}; telemetry skipped") from exc
+                time.sleep(0.025)
+        try:
+            yield
+        finally:
+            release()
 
 
 def append_event(repo_root: Path, event: dict[str, Any]) -> None:
@@ -503,6 +533,43 @@ def manifest_order(spec: dict[str, Any]) -> tuple[int, str]:
     return normalized_order, feature_id
 
 
+SPEC_PATH_RE = re.compile(r"(?:^|[\s\"'(`])(?P<path>(?:[^\s\"')`]*?/)?\.ctx/specs/(?P<feature>[^/\s\"')`]+))(?:/|$)")
+
+
+def strings_from_payload(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        out: list[str] = []
+        for key in sorted(value):
+            out.extend(strings_from_payload(value[key]))
+        return out
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value:
+            out.extend(strings_from_payload(item))
+        return out
+    return []
+
+
+def touched_feature_from_payload(repo_root: Path, payload: dict[str, Any]) -> str | None:
+    root = repo_root.resolve()
+    cwd = Path(non_empty_string(payload.get("cwd")) or root)
+    for value in strings_from_payload(payload):
+        normalized = value.replace("\\", "/")
+        for match in SPEC_PATH_RE.finditer(normalized):
+            feature = match.group("feature")
+            if feature in (".", "..") or not feature_exists(root, feature):
+                continue
+            path = Path(match.group("path"))
+            if not path.is_absolute():
+                path = (root if path.parts[0] == ".ctx" else cwd) / path
+            expected = feature_dir(root, feature).resolve()
+            if expected.parent == specs_dir(root).resolve() and path.resolve() == expected:
+                return feature
+    return None
+
+
 def latest_feature_from_state(repo_root: Path) -> str | None:
     target = history_state_file(repo_root)
     if not target.is_file():
@@ -510,6 +577,8 @@ def latest_feature_from_state(repo_root: Path) -> str | None:
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
     except Exception:
+        return None
+    if not isinstance(payload, dict):
         return None
     feature = non_empty_string(payload.get("latest_feature"))
     if feature_exists(repo_root, feature):
@@ -546,6 +615,8 @@ def latest_feature_from_history(repo_root: Path) -> str | None:
             payload = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(payload, dict):
+            continue
         feature = non_empty_string(payload.get("feature"))
         if feature_exists(repo_root, feature):
             return feature
@@ -580,6 +651,10 @@ def resolve_active_feature(repo_root: Path, payload: dict[str, Any] | None = Non
     if feature_exists(repo_root, env_feature):
         return FeatureResolution(feature=env_feature, source="env_feature")
 
+    touched_feature = touched_feature_from_payload(repo_root, payload)
+    if touched_feature:
+        return FeatureResolution(feature=touched_feature, source="touched_spec_path")
+
     specs = manifest_specs(repo_root)
     active_specs = sorted(
         [
@@ -600,13 +675,13 @@ def resolve_active_feature(repo_root: Path, payload: dict[str, Any] | None = Non
         active_ids = ",".join(non_empty_string(spec.get("id")) or "" for spec in active_specs)
         active_warning = f"multiple_active_features:{active_ids}"
 
-    history_feature = latest_feature_from_history(repo_root)
     if len(active_specs) == 1:
         return FeatureResolution(
             feature=non_empty_string(active_specs[0].get("id")),
             source="manifest_active",
         )
 
+    history_feature = latest_feature_from_history(repo_root)
     if (
         history_feature
         and task_has_in_progress(repo_root, history_feature)
@@ -671,6 +746,7 @@ def doc_hashes(repo_root: Path, feature: str | None) -> dict[str, str | None]:
             "design_hash": None,
             "tasks_hash": None,
             "reviews_hash": None,
+            "handoffs_hash": None,
         }
 
     current_feature_dir = feature_dir(repo_root, feature or "")
@@ -679,6 +755,7 @@ def doc_hashes(repo_root: Path, feature: str | None) -> dict[str, str | None]:
         "design_hash": file_sha256(current_feature_dir / "DESIGN.md"),
         "tasks_hash": file_sha256(current_feature_dir / "TASKS.md"),
         "reviews_hash": file_sha256(current_feature_dir / "REVIEWS.md"),
+        "handoffs_hash": file_sha256(current_feature_dir / "HANDOFFS.md"),
     }
 
 
@@ -734,7 +811,7 @@ def shadow_guidance_lines(repo_root: Path) -> list[str]:
     ctx_cli = ctx_cli_binary_name()
     if command_exists(ctx_cli):
         lines.append(
-            f"- Use `{ctx_cli} shadow check`, `refresh`, `watch`, or `print-config` when shadow CLI workflows are needed"
+            f"- Use `{ctx_cli} shadow check`, `{ctx_cli} shadow refresh`, `{ctx_cli} shadow watch`, or `{ctx_cli} shadow config` when shadow CLI workflows are needed"
         )
 
     return lines
@@ -748,3 +825,43 @@ def run_hook(main: Any) -> int:
     except Exception as exc:
         warn(f"hook failed: {exc}")
         return 0
+
+
+def skill_update_notice_lines(repo_root: Path) -> list[str]:
+    if os.getenv("CTX_SKILL_NOTICES") == "0":
+        return []
+    try:
+        explicit = os.getenv("CTX_CLI_BIN")
+        local = repo_root / "ctx"
+        binary = explicit or (str(local) if local.is_file() and os.access(local, os.X_OK) else shutil.which("ctx"))
+        if not binary:
+            return []
+        with subprocess.Popen(
+            [binary, "setup", "skills", "status", "--notice", "--json"],
+            cwd=repo_root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, start_new_session=os.name == "posix",
+        ) as process:
+            try:
+                stdout, _ = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    process.kill()
+                process.communicate()
+                return []
+            if process.returncode:
+                return []
+        payload = json.loads(stdout)
+        if not payload.get("ok"):
+            return []
+        notices = payload.get("data", {}).get("notices", [])
+        lines = [notice["message"] for notice in notices if isinstance(notice, dict) and isinstance(notice.get("message"), str)]
+        if lines:
+            lines.insert(0, "Surface this skill notice to the user; leave updating to their explicit choice:")
+        return lines
+    except Exception:
+        return []
